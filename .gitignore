@@ -9,18 +9,25 @@
 # -----------------------------------------------------------------------------
 # DATA & OUTPUTS
 # -----------------------------------------------------------------------------
-# Training outputs - these can be large and are regenerated
-autotrain/
-autotrain/**
 # Local ML runtime — keep docs & scripts tracked; only ignore runtime artifacts
 .local/ml/data/**
 .local/ml/runs/**
+~/.local/autotrain/**
 /data/
 /eval/
 out_lora_*/
 out_lora*/
 *.jsonl
 !data/.gitkeep
+
+# autotrain/ package is TRACKED (source code)
+# Runtime artifacts inside autotrain/ are IGNORED
+autotrain/data/
+autotrain/eval/
+autotrain/logs/
+autotrain/out_lora_*/
+autotrain/*.json
+!autotrain/config.yaml
 
 # Checkpoints
 checkpoint-*/

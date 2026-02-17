@@ -35,9 +35,9 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 # DEFAULT ENVIRONMENT VARIABLES - Can be overridden by env vars or args
 # -----------------------------------------------------------------------------
-# NOTE: Default output directory changed to ~/.local/autotrain to avoid
+# NOTE: Default output directory changed to ~/.local/heidi-engine to avoid
 # polluting the repository root. Set OUT_DIR explicitly if needed.
-export AUTOTRAIN_DIR="${AUTOTRAIN_DIR:-$HOME/.local/autotrain}"
+export AUTOTRAIN_DIR="${AUTOTRAIN_DIR:-$HOME/.local/heidi-engine}"
 
 export ROUNDS="${ROUNDS:-3}"                          # Number of training rounds
 export SAMPLES_PER_ROUND="${SAMPLES_PER_ROUND:-50}"    # Samples to generate per round
