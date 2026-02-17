@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "heidi-autotrain"
+version = "0.1.0"
+description = "AutoTraining pipeline with real-time dashboard"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "rich",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["autotrain*"]

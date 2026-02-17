@@ -1,0 +1,37 @@
+name: CI - ML smoke
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Create venv & install minimal CI deps
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install -U pip
+          pip install -r .local/ml/requirements-ci.txt
+      - name: Prepare data
+        run: |
+          source .venv/bin/activate
+          .local/ml/scripts/prepare_data.sh .local/ml/data/raw_sample.jsonl
+      - name: Split holdout
+        run: |
+          source .venv/bin/activate
+          python .local/ml/scripts/split_holdout.py --input .local/ml/data/clean/clean.jsonl --holdout 0.1 --out-train .local/ml/data/train/train.jsonl --out-eval .local/ml/data/eval/val.jsonl --seed 42
+      - name: CPU smoke train
+        run: |
+          source .venv/bin/activate
+          .local/ml/scripts/train_adapter.sh --smoke-cpu --train-steps 2 --train .local/ml/data/train/train.jsonl --eval .local/ml/data/eval/val.jsonl
+      - name: Run redaction check
+        run: |
+          source .venv/bin/activate
+          python .local/ml/scripts/redaction_check.py --file .local/ml/data/train/train.jsonl --file .local/ml/data/eval/val.jsonl
