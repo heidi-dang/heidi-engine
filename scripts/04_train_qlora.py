@@ -82,7 +82,7 @@ Examples:
   # Custom settings for different VRAM
   python 04_train_qlora.py --data data/clean.jsonl --output out_lora/ \\
       --seq-len 1024 --batch-size 2 --lora-r 32
-  
+
   # Resume from checkpoint
   python 04_train_qlora.py --data data/clean.jsonl --output out_lora/ \\
       --resume-from-checkpoint out_lora/checkpoint-100
@@ -409,7 +409,7 @@ def setup_trainer(
         pip install trl
     """
     try:
-        from transformers import DataCollatorForLanguageModeling, TrainingArguments
+        from transformers import TrainingArguments
         from trl import SFTTrainer
     except ImportError:
         logger.error("TRL not installed. Install with: pip install trl")

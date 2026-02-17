@@ -3,6 +3,7 @@ Unit tests for secret redaction in telemetry module.
 Tests that SECRET_PATTERNS correctly redact sensitive data.
 """
 import pytest
+
 from heidi_engine.telemetry import redact_secrets, sanitize_for_log
 
 
@@ -144,10 +145,10 @@ class TestHTTPSecurity:
 
     def test_default_host_is_localhost(self):
         """Test that HTTP server defaults to localhost only."""
-        import argparse
-        from heidi_engine.http import main
         import sys
-        
+
+        from heidi_engine.http import main
+
         original_argv = sys.argv
         try:
             sys.argv = ["test", "--help"]

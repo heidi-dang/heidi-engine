@@ -12,8 +12,8 @@ Writes:
 import argparse
 import json
 import random
-import sys
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -36,7 +36,7 @@ def main():
         sys.exit(2)
 
     with inp.open() as f:
-        samples = [json.loads(l) for l in f if l.strip()]
+        samples = [json.loads(line) for line in f if line.strip()]
 
     if len(samples) == 0:
         print("No samples in input file.", file=sys.stderr)

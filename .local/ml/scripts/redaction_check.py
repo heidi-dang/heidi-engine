@@ -3,9 +3,9 @@
 Simple redaction/secret scanner for JSONL datasets.
 Exits non-zero if any potential secret is found.
 """
-import re
-import json
 import argparse
+import json
+import re
 import sys
 from pathlib import Path
 

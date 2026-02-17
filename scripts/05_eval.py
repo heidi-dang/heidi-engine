@@ -163,8 +163,6 @@ def setup_model_with_adapter(adapter_path: str, base_model: str, trust_remote_co
 
     # Load base model (use 8-bit for faster inference if available)
     try:
-        import bitsandbytes as bnb
-
         model = AutoModelForCausalLM.from_pretrained(
             base_model,
             load_in_8bit=True,

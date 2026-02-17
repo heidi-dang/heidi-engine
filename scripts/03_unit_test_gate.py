@@ -221,16 +221,16 @@ original_stderr = sys.stderr
 try:
     sys.stdout = stdout_capture
     sys.stderr = stderr_capture
-    
+
     # Execute the user's code
 {code}
-    
+
     sys.stdout = original_stdout
     sys.stderr = original_stderr
-    
+
     print("__EXECUTION_SUCCESS__")
     print(stdout_capture.getvalue())
-    
+
 except Exception as e:
     sys.stdout = original_stdout
     sys.stderr = original_stderr

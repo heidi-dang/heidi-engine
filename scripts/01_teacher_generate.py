@@ -308,7 +308,7 @@ This provides a clean implementation with appropriate documentation.""",
 class Handler:
     def __init__(self):
         self.state = {}
-    
+
     def execute(self, input_data):
         # Process the input
         return {"result": "success", "data": input_data}
