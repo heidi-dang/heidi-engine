@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-autotrain/dashboard.py - Real-Time Terminal Dashboard (TUI) for AutoTraining
+heidi_engine/dashboard.py - Real-Time Terminal Dashboard (TUI) for AutoTraining
 ================================================================================
 
 PURPOSE:
@@ -25,7 +25,7 @@ TUNABLE PARAMETERS:
     - REFRESH_RATE: Dashboard refresh rate in Hz (default: 2, max: 10)
     - GPU_POLL_INTERVAL: How often to poll GPU in seconds (default: 5)
     - MAX_EVENTS: Number of recent events to display (default: 20)
-    - AUTOTRAIN_DIR: Base directory for autotrain outputs
+    - AUTOTRAIN_DIR: Base directory for heidi_engine outputs
 
 EXTENDING THIS MODULE:
     - Add new panels in create_layout()
@@ -88,9 +88,9 @@ GPU_POLL_INTERVAL = int(os.environ.get("GPU_POLL_INTERVAL", "5"))
 # TUNABLE: Adjust based on screen size
 MAX_EVENTS = int(os.environ.get("DASHBOARD_MAX_EVENTS", "20"))
 
-# Base directory for autotrain outputs
-# TUNABLE: Change if autotrain is in different location
-AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", "./autotrain")
+# Base directory for heidi_engine outputs
+# TUNABLE: Change if heidi_engine is in different location
+AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi-engine"))
 
 # Console width (auto-detected if not set)
 CONSOLE_WIDTH = int(os.environ.get("CONSOLE_WIDTH", "0"))
@@ -1053,7 +1053,7 @@ def main():
         - N/A
     
     COMMANDS:
-        python -m autotrain.dashboard [--run RUN_ID]
+        python -m heidi_engine.dashboard [--run RUN_ID]
         
         If no run specified, shows interactive selection
     """

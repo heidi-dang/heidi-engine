@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-autotrain/telemetry.py - Event Bus and State Management for AutoTraining Pipeline
+heidi_engine/telemetry.py - Event Bus and State Management for AutoTraining Pipeline
 ================================================================================
 
 PURPOSE:
@@ -77,10 +77,10 @@ import io
 # CONFIGURATION - Adjust these for your needs
 # =============================================================================
 
-# Base directory for all autotrain outputs
+# Base directory for all heidi_engine outputs
 # TUNABLE: Change to custom path if needed
-# NOTE: Default changed to .local/autotrain to avoid polluting repo root
-AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/autotrain"))
+# NOTE: Default changed to .local/heidi_engine to avoid polluting repo root
+AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi_engine"))
 
 # Unique run identifier - set by loop.sh or menu.py
 # TUNABLE: Auto-generated if not provided
@@ -1371,7 +1371,7 @@ def start_http_server(port: int = 7779) -> None:
 
 def list_runs() -> List[Dict[str, Any]]:
     """
-    List all runs in the autotrain directory.
+    List all runs in the heidi_engine directory.
     
     HOW IT WORKS:
         - Scans runs/ subdirectories
@@ -1441,10 +1441,10 @@ def main():
         - Add new subcommands as needed
     
     COMMANDS:
-        python -m autotrain.telemetry init [--run-id ID] [--config JSON]
-        python -m autotrain.telemetry status [--run-id ID]
-        python -m autotrain.telemetry list
-        python -m autotrain.telemetry emit <type> <message>
+        python -m heidi_engine.telemetry init [--run-id ID] [--config JSON]
+        python -m heidi_engine.telemetry status [--run-id ID]
+        python -m heidi_engine.telemetry list
+        python -m heidi_engine.telemetry emit <type> <message>
     """
     import argparse
     

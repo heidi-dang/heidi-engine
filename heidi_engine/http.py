@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-autotrain/http.py - HTTP Status Server Entry Point
+heidi_engine/http.py - HTTP Status Server Entry Point
 ================================================================================
 
 Simple entry point to start the HTTP status server.
 
 Usage:
-    python -m autotrain.http              # Default port 7779
-    python -m autotrain.http --port 8080  # Custom port
-    python -m autotrain.http --help        # Help
+    python -m heidi_engine.http              # Default port 7779
+    python -m heidi_engine.http --port 8080  # Custom port
+    python -m heidi_engine.http --help        # Help
 
 Security:
     - Binds to 127.0.0.1 only
@@ -31,7 +31,7 @@ def main():
     # Add parent to path
     sys.path.insert(0, str(__file__).parent)
     
-    from autotrain.telemetry import start_http_server, get_latest_run
+    from heidi_engine.telemetry import start_http_server, get_latest_run
     
     print(f"Starting HTTP status server on {args.host}:{args.port}")
     print(f"Endpoints:")

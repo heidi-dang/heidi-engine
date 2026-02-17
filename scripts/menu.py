@@ -21,8 +21,8 @@ HOW IT WORKS:
     5. Dashboard shows real-time progress
 
 TUNABLE PARAMETERS:
-    - AUTOTRAIN_DIR: Base directory for autotrain outputs
-    - CONFIG_FILE: Path to configuration file (default: autotrain/config.yaml)
+    - AUTOTRAIN_DIR: Base directory for heidi_engine outputs
+    - CONFIG_FILE: Path to configuration file (default: heidi_engine/config.yaml)
     - MENU_TIMEOUT: Input timeout in seconds
 
 CONFIGURABLE OPTIONS:
@@ -79,9 +79,9 @@ except ImportError:
 # CONFIGURATION - Adjust these for your needs
 # =============================================================================
 
-# Base directory for autotrain outputs
-# TUNABLE: Change if autotrain is in different location
-AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", "./autotrain")
+# Base directory for heidi_engine outputs
+# TUNABLE: Change if heidi_engine is in different location
+AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", "./heidi_engine")
 
 # Configuration file path
 # TUNABLE: Change to use different config file
@@ -424,7 +424,7 @@ def stop_pipeline() -> bool:
             if run["status"] == "running":
                 # Import here to avoid circular imports
                 sys.path.insert(0, str(Path(__file__).parent.parent))
-                from autotrain.telemetry import request_stop
+                from heidi_engine.telemetry import request_stop
                 request_stop(run["run_id"])
                 print(f"[INFO] Stop requested for run: {run['run_id']}")
                 return True
@@ -466,7 +466,7 @@ def pause_pipeline() -> bool:
     
     # Import here to avoid circular imports
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from autotrain.telemetry import request_pause, get_state
+    from heidi_engine.telemetry import request_pause, get_state
     
     # Find the run
     runs = list_runs()
@@ -496,7 +496,7 @@ def resume_pipeline() -> bool:
     """
     # Import here to avoid circular imports
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from autotrain.telemetry import clear_pause
+    from heidi_engine.telemetry import clear_pause
     
     runs = list_runs()
     for run in runs:
@@ -525,7 +525,7 @@ def start_dashboard(run_id: Optional[str] = None) -> None:
     """
     # Import here to avoid circular imports
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from autotrain.dashboard import select_run, run_dashboard
+    from heidi_engine.dashboard import select_run, run_dashboard
     
     if not run_id:
         run_id = select_run()
@@ -555,7 +555,7 @@ def start_http_server() -> None:
         - Change port via HTTP_STATUS_PORT env var
     """
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from autotrain.telemetry import start_http_server, get_latest_run
+    from heidi_engine.telemetry import start_http_server, get_latest_run
     
     run_id = get_latest_run()
     if run_id:

@@ -14,10 +14,10 @@ pip install rich pyyaml
 ./scripts/loop.sh --rounds 1 --samples 10 &
 
 # In another terminal, start the dashboard
-python -m autotrain.dashboard
+python -m heidi_engine.dashboard
 
 # Or specify a run ID
-python -m autotrain.dashboard --run <run_id>
+python -m heidi_engine.dashboard --run <run_id>
 ```
 
 ### Running the Menu Controller
@@ -142,7 +142,7 @@ curl http://127.0.0.1:7779
 ## File Locations
 
 ```
-autotrain/
+heidi_engine/
 ├── runs/<run_id>/
 │   ├── state.json        # Current run state
 │   ├── events.jsonl      # Event stream
@@ -171,7 +171,7 @@ autotrain/
 
 ### Pipeline doesn't stop gracefully
 - Check state.json for stop_requested flag
-- Kill manually if needed: `kill -9 $(cat autotrain/pipeline.pid)`
+- Kill manually if needed: `kill -9 $(cat heidi_engine/pipeline.pid)`
 
 ## Event Schema (v1.0 - Frozen)
 
