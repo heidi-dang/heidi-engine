@@ -18,30 +18,32 @@ Security:
 ================================================================================
 """
 
-import sys
 import argparse
 
 
 def main():
     parser = argparse.ArgumentParser(description="AutoTrain HTTP Status Server")
-    parser.add_argument("--port", "-p", type=int, default=7779, help="Port to listen on (default: 7779)")
+    parser.add_argument(
+        "--port", "-p", type=int, default=7779, help="Port to listen on (default: 7779)"
+    )
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
     args = parser.parse_args()
-    
-    from heidi_engine.telemetry import start_http_server, get_latest_run
-    
+
+    from heidi_engine.telemetry import start_http_server
+
     print(f"Starting HTTP status server on {args.host}:{args.port}")
-    print(f"Endpoints:")
+    print("Endpoints:")
     print(f"  - Status: http://{args.host}:{args.port}/status")
     print(f"  - Health:  http://{args.host}:{args.port}/health")
     print("")
     print("Press Ctrl+C to stop")
-    
+
     start_http_server(args.port)
-    
+
     # Keep running
     try:
         import time
+
         while True:
             time.sleep(60)
     except KeyboardInterrupt:

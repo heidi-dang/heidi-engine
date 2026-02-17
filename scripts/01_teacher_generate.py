@@ -30,14 +30,13 @@ SAFETY:
 ================================================================================
 """
 
-import os
-import sys
-import json
-import random
 import argparse
-import subprocess
+import json
+import os
+import random
+import sys
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
@@ -49,42 +48,42 @@ PROMPT_TEMPLATES = [
     {
         "task_type": "code_completion",
         "instruction": "Complete the following Python function:",
-        "template": "Complete this function:\n\n```python\n{code}\n```\n\nProvide the complete implementation."
+        "template": "Complete this function:\n\n```python\n{code}\n```\n\nProvide the complete implementation.",
     },
     {
         "task_type": "bug_fixing",
         "instruction": "Fix the bugs in this Python code:",
-        "template": "Find and fix all bugs in this code:\n\n```python\n{code}\n```\n\nExplain what was wrong and provide the corrected code."
+        "template": "Find and fix all bugs in this code:\n\n```python\n{code}\n```\n\nExplain what was wrong and provide the corrected code.",
     },
     {
         "task_type": "code_explanation",
         "instruction": "Explain what this code does:",
-        "template": "Explain this code in detail:\n\n```python\n{code}\n```\n\nProvide a line-by-line explanation."
+        "template": "Explain this code in detail:\n\n```python\n{code}\n```\n\nProvide a line-by-line explanation.",
     },
     {
         "task_type": "refactoring",
         "instruction": "Refactor this code for better quality:",
-        "template": "Refactor this code to be more efficient and readable:\n\n```python\n{code}\n```\n\nProvide the refactored version with explanations."
+        "template": "Refactor this code to be more efficient and readable:\n\n```python\n{code}\n```\n\nProvide the refactored version with explanations.",
     },
     {
         "task_type": "unit_test_generation",
         "instruction": "Write unit tests for this code:",
-        "template": "Write comprehensive unit tests using pytest for:\n\n```python\n{code}\n```"
+        "template": "Write comprehensive unit tests using pytest for:\n\n```python\n{code}\n```",
     },
     {
         "task_type": "code_review",
         "instruction": "Review this code and suggest improvements:",
-        "template": "Perform a code review:\n\n```python\n{code}\n```\n\nIdentify issues and suggest improvements."
+        "template": "Perform a code review:\n\n```python\n{code}\n```\n\nIdentify issues and suggest improvements.",
     },
     {
         "task_type": "documentation",
         "instruction": "Add documentation to this code:",
-        "template": "Add docstrings and comments to:\n\n```python\n{code}\n```\n\nInclude type hints where appropriate."
+        "template": "Add docstrings and comments to:\n\n```python\n{code}\n```\n\nInclude type hints where appropriate.",
     },
     {
         "task_type": "algorithm_implementation",
         "instruction": "Implement this algorithm:",
-        "template": "Implement the {algorithm} algorithm in Python:\n\n{description}"
+        "template": "Implement the {algorithm} algorithm in Python:\n\n{description}",
     },
 ]
 
@@ -96,31 +95,22 @@ PROMPT_TEMPLATES = [
 SYNTHETIC_CODE_SAMPLES = [
     # Simple function completion
     "def calculate_sum(numbers):\n    '''Calculate sum of a list'''\n    # TODO: implement",
-    
     # Function with bugs
     "def find_max(lst):\n    for i in lst:\n        if i > max:\n            max = i\n    return max",
-    
     # Class definition
     "class DataProcessor:\n    def __init__(self):\n        self.data = []\n    \n    def add(self, item):\n        # Add item to data",
-    
     # Recursive function
     "def fibonacci(n):\n    if n <= 1:\n        return n\n    else:\n        # return fibonacci",
-    
     # List comprehension
     "def filter_even(numbers):\n    # Return only even numbers",
-    
     # Error handling
     "def parse_number(s):\n    # Convert string to number\n    # Handle errors",
-    
     # File handling
     "def read_file(filename):\n    # Read and return file contents",
-    
     # API handler
     "def handle_request(request):\n    # Process API request\n    return {'status': 'ok'}",
-    
     # Data validation
     "def validate_email(email):\n    # Check if email is valid\n    return False",
-    
     # Sorting
     "def sort_by_key(items, key):\n    # Sort items by key function",
 ]
@@ -140,7 +130,7 @@ ALGORITHMS = [
 def parse_args() -> argparse.Namespace:
     """
     Parse command-line arguments.
-    
+
     TUNABLE:
         --samples: Number of samples to generate (default: 50)
         --output: Output JSONL file path
@@ -161,56 +151,49 @@ Examples:
 
   # Generate with custom seed for reproducibility
   python 01_teacher_generate.py --seed 12345 --output data.jsonl
-        """
+        """,
     )
     parser.add_argument(
-        "--samples", "-n",
+        "--samples",
+        "-n",
         type=int,
         default=int(os.environ.get("SAMPLES_PER_ROUND", 50)),
-        help="Number of samples to generate (default: 50)"
+        help="Number of samples to generate (default: 50)",
     )
-    parser.add_argument(
-        "--output", "-o",
-        type=str,
-        required=True,
-        help="Output JSONL file path"
-    )
+    parser.add_argument("--output", "-o", type=str, required=True, help="Output JSONL file path")
     parser.add_argument(
         "--teacher",
         type=str,
         default=os.environ.get("TEACHER_MODEL", "gpt-4o-mini"),
-        help="Teacher model name (default: gpt-4o-mini)"
+        help="Teacher model name (default: gpt-4o-mini)",
     )
     parser.add_argument(
         "--seed",
         type=int,
         default=int(os.environ.get("SEED", 42)),
-        help="Random seed (default: 42)"
+        help="Random seed (default: 42)",
     )
     parser.add_argument(
         "--api-key",
         type=str,
         default=os.environ.get("OPENAI_API_KEY", ""),
-        help="API key for teacher model (can use OPENAI_API_KEY env var)"
+        help="API key for teacher model (can use OPENAI_API_KEY env var)",
     )
     parser.add_argument(
-        "--round",
-        type=int,
-        default=1,
-        help="Current round number (for ID generation)"
+        "--round", type=int, default=1, help="Current round number (for ID generation)"
     )
-    
+
     return parser.parse_args()
 
 
 def generate_prompt(template: Dict[str, str], code_sample: str = "") -> str:
     """
     Generate a prompt from a template.
-    
+
     HOW IT WORKS:
         - Fills in template with code sample or algorithm description
         - Returns formatted prompt for teacher model
-    
+
     TUNABLE:
         - Add more template types for different tasks
         - Adjust template format for your needs
@@ -225,23 +208,20 @@ def generate_prompt(template: Dict[str, str], code_sample: str = "") -> str:
 
 
 def call_teacher_model(
-    prompt: str,
-    model: str,
-    api_key: str,
-    max_tokens: int = 2048
+    prompt: str, model: str, api_key: str, max_tokens: int = 2048
 ) -> Optional[str]:
     """
     Call the teacher model API to generate a response.
-    
+
     HOW IT WORKS:
         - Uses OpenAI API (or compatible) to generate completion
         - Falls back to local model if API key not provided
-    
+
     TUNABLE:
         - Change API endpoint for different providers
         - Adjust temperature, top_p for different creativity levels
         - Modify max_tokens based on expected output length
-    
+
     SAFETY:
         - API key is passed via environment, never logged
         - Fail gracefully if API call fails
@@ -250,30 +230,34 @@ def call_teacher_model(
     if not api_key:
         print("[WARN] No API key provided, using synthetic fallback", file=sys.stderr)
         return generate_synthetic_response(prompt)
-    
+
     try:
         # Import openai - install with: pip install openai
         import openai
+
         openai.api_key = api_key
-        
+
         # For OpenAI compatible APIs, set base URL if needed
         # openai.api_base = "https://api.your-provider.com/v1"
-        
+
         response = openai.ChatCompletion.create(
             model=model,
             messages=[
-                {"role": "system", "content": "You are a helpful coding assistant that generates high-quality, well-documented code."},
-                {"role": "user", "content": prompt}
+                {
+                    "role": "system",
+                    "content": "You are a helpful coding assistant that generates high-quality, well-documented code.",
+                },
+                {"role": "user", "content": prompt},
             ],
-            temperature=0.7,          # Balance creativity and determinism
-            max_tokens=max_tokens,    # Max response length
-            top_p=0.95,               # Nucleus sampling
-            frequency_penalty=0.0,    # Don't repeat similar phrases
-            presence_penalty=0.0,     # Don't favor new topics
+            temperature=0.7,  # Balance creativity and determinism
+            max_tokens=max_tokens,  # Max response length
+            top_p=0.95,  # Nucleus sampling
+            frequency_penalty=0.0,  # Don't repeat similar phrases
+            presence_penalty=0.0,  # Don't favor new topics
         )
-        
+
         return response.choices[0].message.content
-        
+
     except ImportError:
         print("[WARN] openai package not installed, using synthetic fallback", file=sys.stderr)
         return generate_synthetic_response(prompt)
@@ -285,11 +269,11 @@ def call_teacher_model(
 def generate_synthetic_response(prompt: str) -> str:
     """
     Generate a synthetic response when no API is available.
-    
+
     HOW IT WORKS:
         - Creates a basic response based on prompt type
         - Ensures pipeline can run without external API
-    
+
     TUNABLE:
         - Expand this with more sophisticated synthetic generation
         - Consider using a local model (e.g., llama.cpp) as fallback
@@ -305,7 +289,6 @@ def solution():
 ```
 
 This implements the requested functionality with proper error handling.""",
-        
         """I'll help you with this coding task:
 
 ```python
@@ -319,7 +302,6 @@ def process_data(data):
 ```
 
 This provides a clean implementation with appropriate documentation.""",
-        
         """Here's a complete solution:
 
 ```python
@@ -334,7 +316,7 @@ class Handler:
 
 The code handles the main use cases with proper structure.""",
     ]
-    
+
     return random.choice(responses)
 
 
@@ -344,17 +326,17 @@ def generate_sample(
     template: Dict[str, str],
     teacher_model: str,
     api_key: str,
-    max_output: int
+    max_output: int,
 ) -> Dict[str, Any]:
     """
     Generate a single training sample.
-    
+
     HOW IT WORKS:
         1. Selects a random template and code sample
         2. Generates prompt from template
         3. Calls teacher model for response
         4. Constructs sample with metadata
-    
+
     TUNABLE:
         - Adjust template selection for different task distributions
         - Modify metadata fields as needed
@@ -365,16 +347,16 @@ def generate_sample(
         code_sample = f"Algorithm: {algo_name}\nDescription: {algo_desc}"
     else:
         code_sample = random.choice(SYNTHETIC_CODE_SAMPLES)
-    
+
     # Generate prompt
     prompt = generate_prompt(template, code_sample)
-    
+
     # Get response from teacher
     output = call_teacher_model(prompt, teacher_model, api_key, max_output)
-    
+
     if output is None:
         output = generate_synthetic_response(prompt)
-    
+
     # Construct sample
     sample = {
         "id": f"round_{round_num}_{idx:04d}",
@@ -385,92 +367,87 @@ def generate_sample(
             "task_type": template["task_type"],
             "round": round_num,
             "timestamp": datetime.utcnow().isoformat(),
-            "teacher_model": teacher_model
-        }
+            "teacher_model": teacher_model,
+        },
     }
-    
+
     return sample
 
 
 def generate_dataset(
-    num_samples: int,
-    round_num: int,
-    teacher_model: str,
-    api_key: str,
-    max_output: int,
-    seed: int
+    num_samples: int, round_num: int, teacher_model: str, api_key: str, max_output: int, seed: int
 ) -> List[Dict[str, Any]]:
     """
     Generate the complete dataset for a round.
-    
+
     HOW IT WORKS:
         1. Sets random seed for reproducibility
         2. Distributes samples across different task types
         3. Generates each sample individually
-    
+
     TUNABLE:
         - Adjust task type distribution by modifying weights
         - Add more templates for coverage
     """
     random.seed(seed)
-    
+
     samples = []
-    
+
     # Distribute samples across task types evenly
     for i in range(num_samples):
         # Select template (could weight this for different distributions)
         template = random.choice(PROMPT_TEMPLATES)
-        
+
         sample = generate_sample(
             idx=i,
             round_num=round_num,
             template=template,
             teacher_model=teacher_model,
             api_key=api_key,
-            max_output=max_output
+            max_output=max_output,
         )
-        
+
         samples.append(sample)
-        
+
         # Progress indicator
         if (i + 1) % 10 == 0:
             print(f"  Generated {i + 1}/{num_samples} samples", file=sys.stderr)
-    
+
     return samples
 
 
 def save_jsonl(samples: List[Dict[str, Any]], output_path: str) -> None:
     """
     Save samples to JSONL file.
-    
+
     HOW IT WORKS:
         - Writes one JSON object per line
         - Creates parent directories if needed
     """
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    
+
     with open(output_path, "w") as f:
         for sample in samples:
             f.write(json.dumps(sample) + "\n")
-    
+
     print(f"[OK] Saved {len(samples)} samples to {output_path}")
 
 
 def main():
     """
     Main entry point for dataset generation.
-    
+
     TUNABLE:
         - All parameters can be adjusted via CLI args or env vars
         - See parse_args() for full list of options
     """
     args = parse_args()
-    
+
     print(f"[INFO] Generating {args.samples} samples (round {args.round})")
     print(f"[INFO] Teacher model: {args.teacher}")
     print(f"[INFO] Output file: {args.output}")
     print(f"[INFO] Seed: {args.seed}")
-    
+
     # Generate dataset
     samples = generate_dataset(
         num_samples=args.samples,
@@ -478,13 +455,13 @@ def main():
         teacher_model=args.teacher,
         api_key=args.api_key,
         max_output=int(os.environ.get("MAX_OUTPUT_LENGTH", 2048)),
-        seed=args.seed
+        seed=args.seed,
     )
-    
+
     # Save to file
     save_jsonl(samples, args.output)
-    
-    print(f"[OK] Dataset generation complete!")
+
+    print("[OK] Dataset generation complete!")
     return 0
 
 

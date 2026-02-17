@@ -7,7 +7,7 @@ name = "heidi-engine"
 version = "0.1.0"
 description = "Heidi Engine - AutoTraining pipeline with real-time dashboard"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
     {name = "Heidi AI Team"}
@@ -18,21 +18,20 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "rich>=13.0.0",
-    "pyyaml>=6.0",
+    "rich>=14.3.2",
+    "pyyaml>=6.0.3",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0",
-    "ruff>=0.1.0",
+    "pytest>=9.0.2",
+    "ruff>=0.15.1",
 ]
 ml = [
     "transformers>=4.30.0",
@@ -55,7 +54,7 @@ include = ["heidi_engine*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py38"
+target-version = "py39"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
