@@ -22,5 +22,5 @@ wsl.exe %DISTRO_ARGS% -- bash -lc "cd %HEIDI_WSL_REPO% && if [ ! -d \"%HEIDI_WSL
 echo.
 echo [heidi-engine] Exit code: %errorlevel%
 echo.
-pause
+PAUSE
 endlocal
