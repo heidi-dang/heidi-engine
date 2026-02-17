@@ -528,14 +528,13 @@ def setup_trainer(
     # Create trainer
     trainer = SFTTrainer(
         model=model,
-        tokenizer=tokenizer,
         args=training_args,
+        data_collator=data_collator,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
-        data_collator=data_collator,
-        max_seq_length=args.seq_len,
+        processing_class=tokenizer,
     )
-    
+
     return trainer
 
 
