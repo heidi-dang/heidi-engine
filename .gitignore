@@ -9,6 +9,11 @@
 # -----------------------------------------------------------------------------
 # DATA & OUTPUTS
 # -----------------------------------------------------------------------------
+# Runtime output directories (not source code)
+autotrain/data/
+autotrain/eval/
+autotrain/logs/
+autotrain/out_lora*/
 # Local ML runtime — keep docs & scripts tracked; only ignore runtime artifacts
 .local/ml/data/**
 .local/ml/runs/**
