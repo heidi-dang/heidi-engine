@@ -1,0 +1,56 @@
+# AutoTrain Configuration
+# =============================================================================
+# This is the default configuration for the AutoTraining pipeline.
+# You can edit this file directly or use ./scripts/menu.py for interactive setup.
+#
+# HOW TO USE:
+#     1. Run ./scripts/menu.py to configure interactively
+#     2. Or edit this file directly
+#     3. Run ./scripts/loop.sh to start training
+#
+# All parameters can also be set via environment variables or command-line args.
+# =============================================================================
+
+# Model Configuration
+BASE_MODEL: microsoft/phi-2          # Base model to fine-tune
+TEACHER_MODEL: gpt-4o-mini            # Teacher model for generation
+
+# Dataset Configuration
+SAMPLES_PER_ROUND: 50                # Samples to generate per round
+ROUNDS: 3                             # Number of training rounds
+VAL_RATIO: 0.1                        # Validation split ratio (0.0-1.0)
+
+# Training Configuration - VRAM-safe defaults (RTX 2080 Ti - 11GB)
+SEQ_LEN: 2048                         # Sequence length
+BATCH_SIZE: 1                         # Batch size per device
+GRAD_ACCUM: 8                         # Gradient accumulation steps
+TRAIN_STEPS: 500                      # Training steps per round
+SAVE_STEPS: 100                       # Save checkpoint every N steps
+EVAL_STEPS: 50                        # Run evaluation every N steps
+LORA_R: 64                            # LoRA rank (reduce to 32 if OOM)
+LORA_ALPHA: 128                       # LoRA alpha (typically 2 * LORA_R)
+LORA_DROPOUT: 0.1                     # LoRA dropout
+LR: 2e-4                              # Learning rate
+
+# Other Options
+RUN_UNIT_TESTS: "0"                   # Enable unit test gate (0 or 1)
+SEED: 42                              # Random seed for reproducibility
+
+# Output Directory
+OUT_DIR: ./autotrain                  # Base output directory
+
+# =============================================================================
+# VRAM OPTIMIZATION GUIDE
+# =============================================================================
+#
+# RTX 2080 Ti (11GB) - Default settings above
+# RTX 3060 (6GB):
+#     SEQ_LEN: 1024
+#     LORA_R: 32
+#     GRAD_ACCUM: 16
+# RTX 3090/4090 (24GB):
+#     SEQ_LEN: 4096
+#     BATCH_SIZE: 2
+#     LORA_R: 128
+#
+# =============================================================================
