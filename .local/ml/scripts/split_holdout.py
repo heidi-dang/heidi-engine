@@ -9,6 +9,7 @@ Writes:
   default: .local/ml/data/train/train.jsonl
            .local/ml/data/eval/val.jsonl
 """
+
 import argparse
 import json
 import random
@@ -24,7 +25,12 @@ def parse_args():
     p.add_argument("--out-train", dest="out_train", default=".local/ml/data/train/train.jsonl")
     p.add_argument("--out-eval", dest="out_eval", default=".local/ml/data/eval/val.jsonl")
     p.add_argument("--seed", dest="seed", type=int, default=42)
-    p.add_argument("--no-redaction-check", dest="no_redaction", action="store_true", help="Skip redaction check")
+    p.add_argument(
+        "--no-redaction-check",
+        dest="no_redaction",
+        action="store_true",
+        help="Skip redaction check",
+    )
     return p.parse_args()
 
 
@@ -52,11 +58,11 @@ def main():
     out_train.parent.mkdir(parents=True, exist_ok=True)
     out_eval.parent.mkdir(parents=True, exist_ok=True)
 
-    with out_train.open('w') as f:
+    with out_train.open("w") as f:
         for s in train:
             f.write(json.dumps(s, ensure_ascii=False) + "\n")
 
-    with out_eval.open('w') as f:
+    with out_eval.open("w") as f:
         for s in val:
             f.write(json.dumps(s, ensure_ascii=False) + "\n")
 
@@ -64,11 +70,22 @@ def main():
 
     if not args.no_redaction:
         # Run redaction check script if present
-        redaction_script = Path('.local/ml/scripts/redaction_check.py')
+        redaction_script = Path(".local/ml/scripts/redaction_check.py")
         if redaction_script.exists():
-            subprocess.run([sys.executable, str(redaction_script), "--file", str(out_train), "--file", str(out_eval)], check=True)
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(redaction_script),
+                    "--file",
+                    str(out_train),
+                    "--file",
+                    str(out_eval),
+                ],
+                check=True,
+            )
         else:
             print("Warning: redaction_check.py not found — skipping redaction check")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

@@ -2,6 +2,7 @@
 Unit tests for secret redaction in telemetry module.
 Tests that SECRET_PATTERNS correctly redact sensitive data.
 """
+
 import pytest
 
 from heidi_engine.telemetry import redact_secrets, sanitize_for_log
@@ -106,9 +107,7 @@ class TestSecretRedaction:
         """Test sanitize_for_log function."""
         data = {
             "message": "ghp_1234567890abcdefghijklmnopqrstuvwxyz",
-            "nested": {
-                "key": "sk-1234567890abcdefghijklmnopqrstuvwxyz1234567890"
-            }
+            "nested": {"key": "sk-1234567890abcdefghijklmnopqrstuvwxyz1234567890"},
         }
         sanitized = sanitize_for_log(data)
         assert "ghp_" not in str(sanitized)
@@ -127,15 +126,23 @@ class TestEventSchema:
     def test_allowed_event_fields(self):
         """Test that allowed event fields are defined."""
         from heidi_engine.telemetry import ALLOWED_EVENT_FIELDS
+
         required_fields = {
-            "event_version", "ts", "run_id", "round", "stage",
-            "level", "event_type", "message"
+            "event_version",
+            "ts",
+            "run_id",
+            "round",
+            "stage",
+            "level",
+            "event_type",
+            "message",
         }
         assert required_fields.issubset(ALLOWED_EVENT_FIELDS)
 
     def test_allowed_status_fields(self):
         """Test that allowed status fields are defined."""
         from heidi_engine.telemetry import ALLOWED_STATUS_FIELDS
+
         required_fields = {"run_id", "status", "counters", "usage"}
         assert required_fields.issubset(ALLOWED_STATUS_FIELDS)
 
