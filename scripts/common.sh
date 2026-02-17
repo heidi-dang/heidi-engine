@@ -73,6 +73,10 @@ export SECRET_DROP_THRESHOLD="${SECRET_DROP_THRESHOLD:-1}" # Drop sample if any 
 export RUN_UNIT_TESTS="${RUN_UNIT_TESTS:-0}"            # Set to 1 to enable unit test gate
 export UNIT_TEST_TIMEOUT="${UNIT_TEST_TIMEOUT:-30}"    # Timeout per test in seconds
 
+# Pipeline mode: "full" or "collect"
+# In collect mode, pipeline runs generate+validate only and waits for train request
+export PIPELINE_MODE="${PIPELINE_MODE:-full}"
+
 # Random seed for reproducibility
 export SEED="${SEED:-42}"
 
