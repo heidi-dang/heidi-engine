@@ -717,7 +717,7 @@ def create_events_panel() -> Panel:
     for event in events_list:
         ts = format_time(event.get("ts", ""))
         stage = event.get("stage", "")
-        event_type = event.get("event_type", "")
+        event.get("event_type", "")
         message = event.get("message", "")[:50]
 
         # Color code by level
@@ -1106,10 +1106,10 @@ def run_dashboard(run_id: str):
                 state["config"] = config
 
                 # Check for new events
-                new_events = load_new_events(run_id)
+                load_new_events(run_id)
 
                 # Check for new data lines
-                new_data = load_new_data_lines(run_id)
+                load_new_data_lines(run_id)
 
                 # Build layout
                 layout, title = create_main_layout(state)
