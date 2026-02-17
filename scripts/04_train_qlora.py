@@ -462,20 +462,23 @@ def setup_trainer(
         text = format_instruction(sample)
         return {"text": text}
     
-    # Create datasets
+    # Create datasets (pre-tokenize with truncation/padding to avoid batching errors)
     train_dataset = Dataset.from_list([format_for_training(s) for s in train_data])
-    
+    train_dataset = train_dataset.map(lambda batch: tokenizer(batch['text'], truncation=True, padding='longest', max_length=args.seq_len), batched=True)
+    # copy input_ids to labels for causal LM training
+    train_dataset = train_dataset.map(lambda batch: {'labels': batch['input_ids']}, batched=True)
+
     if val_data:
         val_dataset = Dataset.from_list([format_for_training(s) for s in val_data])
+        val_dataset = val_dataset.map(lambda batch: tokenizer(batch['text'], truncation=True, padding='longest', max_length=args.seq_len), batched=True)
+        val_dataset = val_dataset.map(lambda batch: {'labels': batch['input_ids']}, batched=True)
     else:
         val_dataset = None
-    
+
     # Data collator
     # TUNABLE: mlm=False for causal language models (like GPT)
-    data_collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer,
-        mlm=False,  # Causal LM (predict next token)
-    )
+    from transformers import default_data_collator
+    data_collator = default_data_collator
     
     # Training arguments
     # TUNABLE: All hyperparameters can be adjusted
@@ -502,7 +505,7 @@ def setup_trainer(
         logging_dir=f"{args.output}/logs",
         
         # Optimization
-        optim="paged_adamw_32bit",  # Memory-efficient optimizer
+        optim=("paged_adamw_32bit" if __import__('importlib').util.find_spec('bitsandbytes') else "adamw_torch"),  # Prefer bnb when available
         weight_decay=args.weight_decay,
         max_grad_norm=0.3,  # Gradient clipping
         
@@ -525,7 +528,7 @@ def setup_trainer(
         ddp_find_unused_parameters=False,
     )
     
-    # Create trainer
+    # Create trainer (TRL v0.28+ expects different constructor args)
     trainer = SFTTrainer(
         model=model,
         args=training_args,
