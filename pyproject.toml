@@ -64,4 +64,3 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
->>>>>>> 044daf4 (feat: add CI workflow, tests, and improve project setup)

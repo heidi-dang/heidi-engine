@@ -3,7 +3,7 @@ Unit tests for secret redaction in telemetry module.
 Tests that SECRET_PATTERNS correctly redact sensitive data.
 """
 import pytest
-from autotrain.telemetry import redact_secrets, sanitize_for_log
+from heidi_engine.telemetry import redact_secrets, sanitize_for_log
 
 
 class TestSecretRedaction:
@@ -125,7 +125,7 @@ class TestEventSchema:
 
     def test_allowed_event_fields(self):
         """Test that allowed event fields are defined."""
-        from autotrain.telemetry import ALLOWED_EVENT_FIELDS
+        from heidi_engine.telemetry import ALLOWED_EVENT_FIELDS
         required_fields = {
             "event_version", "ts", "run_id", "round", "stage",
             "level", "event_type", "message"
@@ -134,7 +134,7 @@ class TestEventSchema:
 
     def test_allowed_status_fields(self):
         """Test that allowed status fields are defined."""
-        from autotrain.telemetry import ALLOWED_STATUS_FIELDS
+        from heidi_engine.telemetry import ALLOWED_STATUS_FIELDS
         required_fields = {"run_id", "status", "counters", "usage"}
         assert required_fields.issubset(ALLOWED_STATUS_FIELDS)
 
@@ -145,7 +145,7 @@ class TestHTTPSecurity:
     def test_default_host_is_localhost(self):
         """Test that HTTP server defaults to localhost only."""
         import argparse
-        from autotrain.http import main
+        from heidi_engine.http import main
         import sys
         
         original_argv = sys.argv
