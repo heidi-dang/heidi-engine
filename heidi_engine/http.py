@@ -28,9 +28,6 @@ def main():
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
     args = parser.parse_args()
     
-    # Add parent to path
-    sys.path.insert(0, str(__file__).parent)
-    
     from heidi_engine.telemetry import start_http_server, get_latest_run
     
     print(f"Starting HTTP status server on {args.host}:{args.port}")
