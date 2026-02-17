@@ -9,11 +9,12 @@
 # -----------------------------------------------------------------------------
 # DATA & OUTPUTS
 # -----------------------------------------------------------------------------
-# Runtime output directories (not source code)
-autotrain/data/
-autotrain/eval/
-autotrain/logs/
-autotrain/out_lora*/
+# Training outputs - these can be large and are regenerated
+# Exception: autotrain/ Python package (needed for imports)
+!autotrain/
+!autotrain/*.py
+autotrain/__pycache__/
+autotrain/**/__pycache__/
 # Local ML runtime — keep docs & scripts tracked; only ignore runtime artifacts
 .local/ml/data/**
 .local/ml/runs/**

@@ -1,54 +1,37 @@
-#!/usr/bin/env python3
-"""
-================================================================================
-autotrain/http.py - HTTP Status Server Entry Point
-================================================================================
+"""HTTP server module for Heidi Engine dashboard."""
 
-Simple entry point to start the HTTP status server.
-
-Usage:
-    python -m autotrain.http              # Default port 7779
-    python -m autotrain.http --port 8080  # Custom port
-    python -m autotrain.http --help        # Help
-
-Security:
-    - Binds to 127.0.0.1 only
-    - Returns redacted state only
-    - No secrets exposed
-================================================================================
-"""
-
-import sys
 import argparse
+import sys
 
 
 def main():
-    parser = argparse.ArgumentParser(description="AutoTrain HTTP Status Server")
-    parser.add_argument("--port", "-p", type=int, default=7779, help="Port to listen on (default: 7779)")
-    parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
+    """CLI entry point for HTTP server."""
+    parser = argparse.ArgumentParser(
+        description="Heidi Engine HTTP Server",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Security: Defaults to localhost only for security.
+         Use --host 0.0.0.0 only in trusted environments.
+        """
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        help="Host to bind to (default: 127.0.0.1)"
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8080,
+        help="Port to bind to (default: 8080)"
+    )
+    
     args = parser.parse_args()
     
-    # Add parent to path
-    sys.path.insert(0, str(__file__).parent)
-    
-    from autotrain.telemetry import start_http_server, get_latest_run
-    
-    print(f"Starting HTTP status server on {args.host}:{args.port}")
-    print(f"Endpoints:")
-    print(f"  - Status: http://{args.host}:{args.port}/status")
-    print(f"  - Health:  http://{args.host}:{args.port}/health")
-    print("")
-    print("Press Ctrl+C to stop")
-    
-    start_http_server(args.port)
-    
-    # Keep running
-    try:
-        import time
-        while True:
-            time.sleep(60)
-    except KeyboardInterrupt:
-        print("\nShutting down...")
+    print(f"Heidi Engine HTTP Server v0.1.0")
+    print(f"Starting server on {args.host}:{args.port}")
+    print("Note: Server functionality not implemented yet")
 
 
 if __name__ == "__main__":
