@@ -18,7 +18,6 @@ Security:
 ================================================================================
 """
 
-import sys
 import argparse
 
 
@@ -27,24 +26,42 @@ def main():
         prog="heidi-engine http",
         description="Heidi Engine HTTP Status Server"
     )
-    parser.add_argument("--port", "-p", type=int, default=7779, help="Port to listen on (default: 7779)")
-    parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
+    parser.add_argument(
+        "--port", "-p", type=int, default=7779, help="Port to listen on (default: 7779)"
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host to bind to (IGNORED — server will bind to 127.0.0.1 for security)",
+    )
     args = parser.parse_args()
-    
-    from heidi_engine.telemetry import start_http_server, get_latest_run
-    
-    print(f"Starting HTTP status server on {args.host}:{args.port}")
-    print(f"Endpoints:")
-    print(f"  - Status: http://{args.host}:{args.port}/status")
-    print(f"  - Health:  http://{args.host}:{args.port}/health")
-    print("")
-    print("Press Ctrl+C to stop")
-    
+
+    # Enforce loopback-only binding for security. If user passed a different host,
+    # we ignore it and warn rather than binding to a non-loopback interface.
+    display_host = "127.0.0.1"
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        import sys
+
+        print(
+            f"Warning: --host={args.host} ignored; server will bind to {display_host} for security",
+            file=sys.stderr,
+        )
+
+    from heidi_engine.telemetry import start_http_server
+
+    print(f"Starting HTTP status server on {display_host}:{args.port}")
+    print("Endpoints:")
+    print(f"  - Status: http://{display_host}:{args.port}/status")
+    print(f"  - Health:  http://{display_host}:{args.port}/health")
+    print("\nPress Ctrl+C to stop\n")
+
+    # start_http_server(port) already binds to 127.0.0.1 — keep that behavior.
     start_http_server(args.port)
-    
-    # Keep running
+
+    # Keep process alive until interrupted
     try:
         import time
+
         while True:
             time.sleep(60)
     except KeyboardInterrupt:
