@@ -1,0 +1,2 @@
+{"id":"sample-1","instruction":"Write a Python function add(a,b) that returns a+b","input":"Parameters: two integers a and b","output":"def add(a, b):\n    return a + b\n# returns the sum of a and b","metadata":{}}
+{"id":"sample-2","instruction":"Return the number of lines in the input text","input":"Text: hello\nworld\nfoo","output":"The number of lines is 3. This function counts newline characters and returns an integer.","metadata":{}}

@@ -1,6 +1,26 @@
-# Heidi Autonomous Coding Agent - AutoTraining Pipeline
+# Heidi Engine
 
 An end-to-end automated pipeline for training a coding agent using QLoRA (Quantized LoRA). This pipeline generates synthetic training data, validates it, fine-tunes a base model, and evaluates the results - all in a fully automated loop.
+
+## 60-Second Quick Start
+
+```bash
+# 1. Clone and install
+git clone https://github.com/heidi-dang/heidi-engine.git
+cd heidi-engine
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+
+# 2. Run the dashboard
+autotrain-dashboard
+
+# 3. (Optional) Start HTTP status server
+autotrain-serve --port 7779
+# Visit http://127.0.0.1:7779/status
+
+# 4. Run a minimal training loop
+./scripts/loop.sh --rounds 1 --samples 10 --train-steps 50
+```
 
 ## Features
 
@@ -11,15 +31,19 @@ An end-to-end automated pipeline for training a coding agent using QLoRA (Quanti
 - **Comprehensive evaluation** - JSON parse rate, format compliance, quality metrics
 - **Automatic best model selection** - Tracks metrics across rounds
 - **VRAM-safe defaults** - Works on RTX 2080 Ti (11GB)
+- **Real-time dashboard** - Live monitoring with Rich TUI
+- **HTTP status endpoint** - Localhost-only REST API for status queries
 
-## Quick Start
+## CLI Commands
 
-5-line quickstart — minimal local smoke:
-1) python3 -m venv .venv && source .venv/bin/activate
-2) pip install -r .local/ml/requirements-transformers-only.txt
-3) .local/ml/scripts/prepare_data.sh path/to/raw.jsonl
-4) .local/ml/scripts/train_adapter.sh --smoke-cpu --train-steps 50
-5) See `.local/ml/fine_tuning_guide.md` for full workflow
+| Command | Description |
+|---------|-------------|
+| `autotrain-dashboard` | Launch real-time TUI dashboard |
+| `autotrain-serve` | Start HTTP status server (127.0.0.1 only) |
+| `heidi-telemetry` | Telemetry CLI commands |
+| `python scripts/menu.py` | Interactive menu controller |
+
+## Training
 
 ```bash
 # Run with default settings (RTX 2080 Ti safe)
@@ -217,15 +241,19 @@ The pipeline also supports other OpenAI-compatible APIs by modifying `01_teacher
 
 See [LICENSE](LICENSE) for details. This project uses permissive licensing for generated artifacts.
 
+## Roadmap
+
+**Next big feature**: Auto profile recommender feeding dashboard + server - automatically recommend optimal training profiles based on hardware detection and continuously feed recommendations to the dashboard and HTTP status endpoints.
+
 ## Citation
 
 If you use this pipeline in your research, please cite:
 
 ```bibtex
-@software{heidi_autotrain,
-  title={Heidi Autonomous Coding Agent - AutoTraining Pipeline},
+@software{heidi_engine,
+  title={Heidi Engine - AutoTraining Pipeline},
   author={Heidi AI Team},
   year={2024},
-  url={https://github.com/heidi-ai/autotrain}
+  url={https://github.com/heidi-dang/heidi-engine}
 }
 ```

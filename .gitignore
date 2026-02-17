@@ -9,6 +9,7 @@
 # -----------------------------------------------------------------------------
 # DATA & OUTPUTS
 # -----------------------------------------------------------------------------
+# Training outputs - these can be large and are regenerated
 # Local ML runtime — keep docs & scripts tracked; only ignore runtime artifacts
 .local/ml/data/**
 .local/ml/runs/**
@@ -19,6 +20,7 @@ out_lora_*/
 out_lora*/
 *.jsonl
 !data/.gitkeep
+!.local/ml/data/raw_sample.jsonl
 
 # autotrain/ package is TRACKED (source code)
 # Runtime artifacts inside autotrain/ are IGNORED
