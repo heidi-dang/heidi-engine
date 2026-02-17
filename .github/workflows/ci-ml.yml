@@ -19,6 +19,15 @@ jobs:
           source .venv/bin/activate
           python -m pip install -U pip
           pip install -r .local/ml/requirements-ci.txt
+
+      - name: Create sample raw data (CI-only, not committed)
+        run: |
+          mkdir -p .local/ml/data
+          cat > .local/ml/data/raw_sample.jsonl <<'JSONL'
+{"id":"sample-1","instruction":"Write a Python function add(a,b) that returns a+b","input":"Parameters: two integers a and b","output":"def add(a, b):\n    return a + b\n# returns the sum of a and b","metadata":{}}
+{"id":"sample-2","instruction":"Return the number of lines in the input text","input":"Text: hello\nworld\nfoo","output":"The number of lines is 3.","metadata":{}}
+JSONL
+
       - name: Prepare data
         run: |
           source .venv/bin/activate
