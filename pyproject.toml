@@ -55,6 +55,7 @@ include = ["heidi_engine*"]
 [tool.ruff]
 line-length = 100
 target-version = "py39"
+exclude = [".local", "tests", "*.sh", "*.bat"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]

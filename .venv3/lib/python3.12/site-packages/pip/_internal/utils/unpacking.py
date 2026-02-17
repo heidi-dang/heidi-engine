@@ -1,5 +1,4 @@
-"""Utilities related archives.
-"""
+"""Utilities related archives."""
 
 import logging
 import os
@@ -49,9 +48,7 @@ def current_umask() -> int:
 
 def split_leading_dir(path: str) -> List[str]:
     path = path.lstrip("/").lstrip("\\")
-    if "/" in path and (
-        ("\\" in path and path.find("/") < path.find("\\")) or "\\" not in path
-    ):
+    if "/" in path and (("\\" in path and path.find("/") < path.find("\\")) or "\\" not in path):
         return path.split("/", 1)
     elif "\\" in path:
         return path.split("\\", 1)

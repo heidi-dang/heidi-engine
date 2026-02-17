@@ -61,15 +61,15 @@ jobs:
       - name: Test dashboard help
         run: |
           source .venv/bin/activate
-          python -m autotrain.dashboard --help
+          python -m heidi_engine.dashboard --help
       - name: Test HTTP help
         run: |
           source .venv/bin/activate
-          python -m autotrain.http --help
+          python -m heidi_engine.http --help
       - name: Test telemetry status
         run: |
           source .venv/bin/activate
-          python -m autotrain.telemetry status --json
+          python -m heidi_engine.telemetry status --json
       - name: Prepare data
         run: |
           source .venv/bin/activate

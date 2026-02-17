@@ -1,5 +1,4 @@
-"""Metadata generation logic for source distributions.
-"""
+"""Metadata generation logic for source distributions."""
 
 import os
 
@@ -29,9 +28,7 @@ def generate_editable_metadata(
         # Note that BuildBackendHookCaller implements a fallback for
         # prepare_metadata_for_build_wheel/editable, so we don't have to
         # consider the possibility that this hook doesn't exist.
-        runner = runner_with_spinner_message(
-            "Preparing editable metadata (pyproject.toml)"
-        )
+        runner = runner_with_spinner_message("Preparing editable metadata (pyproject.toml)")
         with backend.subprocess_runner(runner):
             try:
                 distinfo_dir = backend.prepare_metadata_for_build_editable(metadata_dir)
