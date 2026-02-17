@@ -23,7 +23,10 @@ import argparse
 
 
 def main():
-    parser = argparse.ArgumentParser(description="AutoTrain HTTP Status Server")
+    parser = argparse.ArgumentParser(
+        prog="heidi-engine http",
+        description="Heidi Engine HTTP Status Server"
+    )
     parser.add_argument("--port", "-p", type=int, default=7779, help="Port to listen on (default: 7779)")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
     args = parser.parse_args()
