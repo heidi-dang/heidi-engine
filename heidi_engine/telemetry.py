@@ -175,13 +175,28 @@ MAX_ERROR_LENGTH = 200
 MAX_PATH_LENGTH = 100
 
 
+# Pre-compile patterns for individual replacement (preserves backreferences)
+_INDIVIDUAL_PATTERNS = [(re.compile(p, re.IGNORECASE), r) for p, r in SECRET_PATTERNS]
+
+# Combined regex for single-pass identification
+# We use named groups to identify which pattern matched
+_COMBINED_SECRET_RE = None
+if SECRET_PATTERNS:
+    _COMBINED_SECRET_RE = re.compile(
+        "|".join(
+            f"(?P<redact_{i}>{p.replace('(?i)', '')})" for i, (p, _) in enumerate(SECRET_PATTERNS)
+        ),
+        re.IGNORECASE,
+    )
+
+
 def redact_secrets(text: str) -> str:
     """
     Redact secrets from text before writing to logs.
 
     HOW IT WORKS:
-        - Iterates through SECRET_PATTERNS
-        - Replaces matches with placeholder
+        - Uses a combined pre-compiled regex for all SECRET_PATTERNS
+        - Performs redaction in a single pass for efficiency
         - Strips ANSI escape sequences
 
     SECURITY:
@@ -194,11 +209,22 @@ def redact_secrets(text: str) -> str:
     # Strip ANSI first
     text = ANSI_ESCAPE.sub("", text)
 
-    # Redact secrets
-    for pattern, replacement in SECRET_PATTERNS:
-        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    if not _COMBINED_SECRET_RE:
+        return text
 
-    return text
+    # Redact secrets in a single pass
+    def _redact_callback(match):
+        val = match.group(0)
+        # Find which group matched to use the correct replacement
+        for i in range(len(_INDIVIDUAL_PATTERNS)):
+            if match.group(f"redact_{i}") is not None:
+                p, r = _INDIVIDUAL_PATTERNS[i]
+                # Use individual p.sub to correctly handle backreferences and nested groups
+                # Note: val is just the matched portion, so p.sub is very efficient
+                return p.sub(r, val)
+        return val
+
+    return _COMBINED_SECRET_RE.sub(_redact_callback, text)
 
 
 def truncate_string(text: str, max_length: int) -> str:
