@@ -32,6 +32,7 @@ def validate_code(language: str, code: str) -> bool:
             return _validate_javascript(code)
         else:
             # Unknown language, assume valid to avoid blocking
+            print(f"[WARN] Validation skipped: Unsupported language '{language}'", file=sys.stderr)
             return True
     except Exception as e:
         print(f"[WARN] Validation error for {language}: {e}", file=sys.stderr)

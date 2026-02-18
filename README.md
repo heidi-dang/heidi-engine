@@ -192,7 +192,16 @@ This starts one telemetry server and one worker by default.
 | **"No runs found"** | Check that `AUTOTRAIN_DIR` is consistent. The default is `~/.local/heidi_engine`. Ensure yours doesn't have a typo (e.g., `heidi-engine`). |
 | **Connection Refused** | Ensure the telemetry server is running and the port `7779` is open in your firewall. |
 | **Authentication Failed** | Verify that `TELEMETRY_PASS` matches on both the server and the worker. |
-| **Validation Failed** | If code validation is skipping too many samples, ensure you have `g++`, `node`, and `go` installed on the worker machine. |
+| **Validation Failed** | If code validation is skipping too many samples, ensure you have the following tools installed on the worker machine: |
+
+### External Validation Tools
+To enable full code validation, the worker machines should have:
+- **Python**: `python3` (built-in)
+- **C++**: `g++` (for C++ syntax check)
+- **JavaScript**: `node` (for JS syntax check)
+- **Go**: `go` and `gofmt` (for Go syntax check)
+
+Validation will be automatically skipped with a warning if these tools are missing.
 
 ## 🧪 Testing
 
