@@ -4,6 +4,9 @@ project(heidi-engine VERSION 0.2.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Find zlib
+find_package(ZLIB REQUIRED)
+
 # Add heidi-kernel as a subdirectory
 add_subdirectory(submodules/heidi-kernel)
 
@@ -26,7 +29,7 @@ target_link_libraries(heidid
         heidi-kernel-job
         heidi-kernel-governor
         heidi-kernel-lib
-        z
+        ZLIB::ZLIB
 )
 
 # Optional: Build Python extension using CMake if desired, 

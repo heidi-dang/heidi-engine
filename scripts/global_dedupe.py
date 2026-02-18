@@ -12,6 +12,7 @@ import json
 import os
 import sys
 from glob import glob
+
 from tqdm import tqdm
 
 # Add project root to sys.path to allow importing heidi_engine
@@ -32,43 +33,43 @@ def main():
     # Find all clean_round_*.jsonl files
     print(f"Scanning {args.data_dir} for data files...")
     files = glob(os.path.join(args.data_dir, "**", "clean_round_*.jsonl"), recursive=True)
-    
+
     if not files:
         # Fallback to look for tested or raw if clean not found? user wants 'clean' usually.
         print("No clean_round_*.jsonl files found.")
         return
 
     print(f"Found {len(files)} files.")
-    
+
     seen_hashes = set()
     total_samples = 0
     unique_samples = 0
-    
+
     with open(args.output, 'w') as out_f:
         for jsonl_file in tqdm(files, desc="Processing files"):
             try:
                 with open(jsonl_file, 'r') as in_f:
                     for line in in_f:
                         line = line.strip()
-                        if not line: continue
-                        
+                        if not line:
+                            continue
+
                         try:
                             data = json.loads(line)
-                            start_count = total_samples
                             total_samples += 1
-                            
+
                             h = get_hash(data)
                             if h not in seen_hashes:
                                 seen_hashes.add(h)
                                 out_f.write(line + "\n")
                                 unique_samples += 1
-                                
+
                         except json.JSONDecodeError:
                             continue
             except Exception as e:
                 print(f"Error reading {jsonl_file}: {e}")
 
-    print(f"Finished.")
+    print("Finished.")
     print(f"Total processed: {total_samples}")
     print(f"Unique saved:    {unique_samples}")
     print(f"Duplicates:      {total_samples - unique_samples}")

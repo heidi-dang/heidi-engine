@@ -11,7 +11,9 @@
 #include <thread>
 #include <mutex>
 #include <zlib.h>
+#ifndef _WIN32
 #include <sys/resource.h>
+#endif
 #include <heidi-kernel/resource_governor.h>
 
 #ifdef HAS_CUDA
@@ -188,14 +190,16 @@ std::vector<py::bytes> compress_logs(const std::vector<std::string>& logs) {
 // 10. Resource Limiter Wrapper
 void run_with_limits(const std::function<void()>& func, int max_threads, size_t max_memory_mb) {
     // Note: Setting caps in a shared library can affect the whole process.
+#ifndef _WIN32
     // Memory limit (Address Space)
     if (max_memory_mb > 0) {
         struct rlimit lim;
         if (getrlimit(RLIMIT_AS, &lim) == 0) {
-            lim.rlim_cur = max_memory_mb * 1024 * 1024;
+            lim.rlim_cur = static_cast<rlim_t>(max_memory_mb) * 1024 * 1024;
             setrlimit(RLIMIT_AS, &lim);
         }
     }
+#endif
     // Note: max_threads enforcement would typically be done via OpenMP or pool control.
     // We'll execute the function as a wrapper.
     func();

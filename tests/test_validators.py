@@ -1,6 +1,9 @@
-import pytest
 import shutil
+
+import pytest
+
 from heidi_engine.validator import validate_code
+
 
 def test_validate_python():
     valid_python = "def hello():\n    print('world')"

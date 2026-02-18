@@ -62,11 +62,13 @@ import re
 import stat
 import sys
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
+
 try:
     import requests
 except ImportError:
@@ -387,6 +389,69 @@ def get_run_id() -> str:
 
 
 # =============================================================================
+# TELEMETRY HELPERS
+# =============================================================================
+
+
+def get_gpu_summary() -> Dict[str, Any]:
+    """Get minimal GPU info without exposing sensitive data."""
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.used,memory.total,utilization.gpu",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            parts = result.stdout.strip().split(",")
+            if len(parts) >= 2:
+                return {
+                    "vram_used_mb": int(parts[0].strip()),
+                    "vram_total_mb": int(parts[1].strip()),
+                    "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
+                }
+    except Exception:
+        pass
+    return {"available": False}
+
+
+def get_last_event_ts() -> Optional[str]:
+    """Get timestamp of last event."""
+    try:
+        events_file = get_events_path()
+        if events_file.exists() and events_file.stat().st_size > 0:
+            with open(events_file, "rb") as f:
+                f.seek(-500, 2)  # Read last 500 bytes
+                lines = f.read().decode().strip().split("\n")
+                if lines:
+                    last_line = lines[-1]
+                    event = json.loads(last_line)
+                    return event.get("ts")
+    except Exception:
+        pass
+    return None
+
+
+def redact_state(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Redact state to only allowed fields."""
+    redacted = {}
+    for key in ALLOWED_STATUS_FIELDS:
+        if key in state:
+            value = state[key]
+            # Sanitize any nested secrets
+            if isinstance(value, dict):
+                value = {k: sanitize_for_log(v, 100) for k, v in value.items()}
+            redacted[key] = value
+    return redacted
+
+
+# =============================================================================
 # PRICING CONFIGURATION
 # =============================================================================
 
@@ -643,7 +708,7 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     HOW IT WORKS:
         - Reads state.json file
         - Returns empty state if file doesn't exist
-    
+
     ARGS:
         run_id: Run to read (defaults to current run)
 
@@ -674,44 +739,44 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
 def resolve_status(state: Dict[str, Any]) -> str:
     """
     Resolve run status from on-disk metadata.
-    
+
     STATUS VALUES:
         - idle: No active run, or run_id present but no events
         - running: Worker active / stop not requested / still processing
         - stopped: stop_requested=true or pipeline complete
         - error: last_error present or health degraded
-    
+
     HOW IT WORKS:
         - Checks stop_requested flag
         - Checks status field
         - Checks for error indicators
-    
+
     ARGS:
         state: State dictionary from state.json
-    
+
     RETURNS:
         Status string: idle, running, stopped, error
     """
     # Explicit stop requested
     if state.get("stop_requested", False):
         return "stopped"
-    
+
     # Check explicit status first
     status = state.get("status", "")
     if status in ("running", "completed", "stopped", "error"):
         return status
-    
+
     # Check for errors
     if state.get("last_error") or state.get("health") == "degraded":
         return "error"
-    
+
     # Check if there's an active run_id but no recent activity
     run_id = state.get("run_id")
     if run_id:
         # Has run_id - check for activity
         counters = state.get("counters", {})
         usage = state.get("usage", {})
-        
+
         # If there's any activity, consider it running
         if counters.get("teacher_generated", 0) > 0:
             return "running"
@@ -719,10 +784,10 @@ def resolve_status(state: Dict[str, Any]) -> str:
             return "running"
         if counters.get("train_step", 0) > 0:
             return "running"
-        
+
         # No activity - idle
         return "idle"
-    
+
     # Default to idle if no run_id
     return "idle"
 
@@ -1292,7 +1357,7 @@ def start_reporter(dashboard_url: str):
         error_count = 0
         telemetry_pass = os.environ.get("TELEMETRY_PASS")
         auth = ("admin", telemetry_pass) if telemetry_pass else None
-        
+
         while True:
             try:
                 state = get_state()
@@ -1301,7 +1366,7 @@ def start_reporter(dashboard_url: str):
                 # Add run_id to top level if not present
                 if "run_id" not in redacted:
                     redacted["run_id"] = get_run_id()
-                
+
                 requests.post(f"{dashboard_url}/report", json=redacted, timeout=5, auth=auth)
                 error_count = 0
             except Exception:
@@ -1332,67 +1397,6 @@ def start_http_server(port: int = 7779) -> None:
         print("[WARN] HTTP server not available", file=sys.stderr)
         return
 
-    # Use existing helper functions
-    # (get_gpu_summary, get_last_event_ts, redact_state are defined in outer scope or helper scope)
-    # Wait, in the original code they were defined INSIDE start_http_server.
-    # I should redefine them or move them out. 
-    # Moving them out is better but changes too much structure. 
-    # I will keep them inside for minimal diff, but I need to include them in replacement.
-    
-    def get_gpu_summary() -> Dict[str, Any]:
-        """Get minimal GPU info without exposing sensitive data."""
-        try:
-            import subprocess
-
-            result = subprocess.run(
-                [
-                    "nvidia-smi",
-                    "--query-gpu=memory.used,memory.total,utilization.gpu",
-                    "--format=csv,noheader,nounits",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                parts = result.stdout.strip().split(",")
-                if len(parts) >= 2:
-                    return {
-                        "vram_used_mb": int(parts[0].strip()),
-                        "vram_total_mb": int(parts[1].strip()),
-                        "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
-                    }
-        except Exception:
-            pass
-        return {"available": False}
-
-    def get_last_event_ts() -> Optional[str]:
-        """Get timestamp of last event."""
-        try:
-            events_file = get_events_path()
-            if events_file.exists() and events_file.stat().st_size > 0:
-                with open(events_file, "rb") as f:
-                    f.seek(-500, 2)  # Read last 500 bytes
-                    lines = f.read().decode().strip().split("\n")
-                    if lines:
-                        last_line = lines[-1]
-                        event = json.loads(last_line)
-                        return event.get("ts")
-        except Exception:
-            pass
-        return None
-
-    def redact_state(state: Dict[str, Any]) -> Dict[str, Any]:
-        """Redact state to only allowed fields."""
-        redacted = {}
-        for key in ALLOWED_STATUS_FIELDS:
-            if key in state:
-                value = state[key]
-                # Sanitize any nested secrets
-                if isinstance(value, dict):
-                    value = {k: sanitize_for_log(v, 100) for k, v in value.items()}
-                redacted[key] = value
-        return redacted
 
     class StateHandler(BaseHTTPRequestHandler):
         """HTTP handler with security restrictions."""
@@ -1422,7 +1426,7 @@ def start_http_server(port: int = 7779) -> None:
                     with open(dashboard_path, "rb") as f:
                         self.wfile.write(f.read())
                     return
-            
+
             # List all runs (local + remote)
             if self.path == "/runs":
                 local_runs = list_runs()
@@ -1438,7 +1442,7 @@ def start_http_server(port: int = 7779) -> None:
                         redacted_run = redact_state(run) if "run_id" in run else run
                         unique_runs.append(redacted_run)
                         seen_ids.add(run.get("run_id"))
-                
+
                 self.send_response(200)
                 self._send_cors_headers()
                 self.send_header("Content-Type", "application/json")
@@ -1454,7 +1458,7 @@ def start_http_server(port: int = 7779) -> None:
                         query_run_id = self.path.split("?run_id=")[1].split("&")[0]
                     except IndexError:
                         pass
-                
+
                 # Check remote states first if run_id provided
                 if query_run_id and query_run_id in _remote_states:
                     state = _remote_states[query_run_id]
@@ -1512,7 +1516,7 @@ def start_http_server(port: int = 7779) -> None:
                     self.end_headers()
                     print(f"[ERROR] Failed to process report: {e}", file=sys.stderr)
                 return
-            
+
             self.send_response(404)
             self._send_cors_headers()
             self.end_headers()
@@ -1628,7 +1632,7 @@ def main():
         python -m heidi_engine.telemetry emit <type> <message>
     """
     import argparse
-    
+
     parser = argparse.ArgumentParser(prog="heidi-engine telemetry")
     subparsers = parser.add_subparsers(dest="command")
 
