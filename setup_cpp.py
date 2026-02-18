@@ -12,8 +12,12 @@ include_dirs = [
     os.path.abspath("submodules/heidi-kernel/include"),
 ]
 library_dirs = []
-libraries = ["z"] # Always link zlib
+libraries = []
 macros = []
+
+# Link zlib if not on Windows (where it's usually available via pkg-config or standard paths)
+if os.name != 'nt':
+    libraries.append("z")
 
 if cuda_home and os.path.exists(os.path.join(cuda_home, "include/cuda_runtime.h")):
     include_dirs.append(os.path.join(cuda_home, "include"))

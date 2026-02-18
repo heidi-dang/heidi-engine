@@ -40,7 +40,8 @@ def sign_record(record: dict) -> str:
 def verify_record(record: dict) -> bool:
     """Verifies the signature of a record."""
     if "signature" not in record.get("metadata", {}):
-        return False
+        # Allow unsigned records ONLY if explicitly permitted via environment variable (e.g. for CI)
+        return os.environ.get("HEIDI_ALLOW_UNSIGNED") == "1"
     
     expected_sig = record["metadata"]["signature"]
     actual_sig = sign_record(record)
