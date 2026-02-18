@@ -66,12 +66,56 @@ def test_arena():
     print("Arena reset successful.")
     assert arena.remaining() == 1024
 
+def benchmark_parallel_validate():
+    print("\n--- Benchmarking Parallel Validation ---")
+    snippets = [f"def func_{i}():\n    return {i}" for i in range(50000)]
+    
+    # Serial validation (Python)
+    start = time.time()
+    py_results = [len(s) > 5 for s in snippets]
+    py_time = time.time() - start
+    print(f"Python serial validation time: {py_time:.4f}s")
+    
+    # C++ Parallel validation
+    start = time.time()
+    cpp_results = heidi_cpp.parallel_validate(snippets, threads=4)
+    cpp_time = time.time() - start
+    print(f"C++ parallel_validate (4 threads) time: {cpp_time:.4f}s")
+    print(f"Speedup: {py_time / cpp_time:.2f}x")
+    
+    assert py_results == cpp_results, "Parallel validation mismatch"
+    print("Correctness verified.")
+
+def benchmark_compression():
+    print("\n--- Benchmarking Compression ---")
+    # Large JSON-like string
+    data = json.dumps([{"id": i, "content": "synthetic data " * 10} for i in range(1000)])
+    
+    start = time.time()
+    compressed = heidi_cpp.compress_data(data)
+    cpp_time = time.time() - start
+    
+    ratio = len(data) / len(compressed)
+    print(f"C++ compress_data time: {cpp_time:.4f}s")
+    print(f"Compression ratio: {ratio:.2f}x")
+    assert ratio > 1.0, "Compression failed"
+
+def test_gpu_memory():
+    print("\n--- Testing GPU Memory Checker ---")
+    free_mem = heidi_cpp.get_free_gpu_memory()
+    print(f"Free GPU memory: {free_mem} bytes")
+    # If 0, it might just mean no CUDA or no GPU, which is fine for a test
+
 if __name__ == "__main__":
+    import json
     try:
         benchmark_dedupe()
         benchmark_sort()
         test_arena()
-        print("\nAll C++ optimizations verified successfully!")
+        benchmark_parallel_validate()
+        benchmark_compression()
+        test_gpu_memory()
+        print("\nAll C++ phase 2 optimizations verified successfully!")
     except Exception as e:
         print(f"\nVerification failed: {e}")
         import traceback
