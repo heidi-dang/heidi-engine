@@ -40,8 +40,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Any, Dict, List, Tuple
 from pathlib import Path
+from typing import Any, Dict, Iterable, Iterator, List, Tuple
 
 # Add project root to sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -347,31 +347,32 @@ def test_sample(
     return sample
 
 
-def load_jsonl(path: str) -> List[Dict[str, Any]]:
-    """Load samples from JSONL file."""
-    samples = []
-
+def load_jsonl(path: str) -> Iterator[Dict[str, Any]]:
+    """Load samples from JSONL file (generator)."""
     with open(path, "r") as f:
-        for line in f:
+        for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
                 continue
             try:
-                samples.append(json.loads(line))
+                yield json.loads(line)
             except json.JSONDecodeError as e:
-                print(f"[WARN] JSON parse error: {e}", file=sys.stderr)
+                print(f"[WARN] Line {line_num}: JSON parse error: {e}", file=sys.stderr)
                 continue
 
-    return samples
 
-
-def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
+def save_jsonl(samples: Iterable[Dict[str, Any]], path: str) -> int:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    dir_name = os.path.dirname(path)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
 
+    count = 0
     with open(path, "w") as f:
         for sample in samples:
             f.write(json.dumps(sample) + "\n")
+            count += 1
+    return count
 
 
 def main():
@@ -380,44 +381,47 @@ def main():
     """
     args = parse_args()
 
-    print(f"[INFO] Loading samples from: {args.input}")
-
-    # Load samples
-    samples = load_jsonl(args.input)
-    print(f"[INFO] Loaded {len(samples)} samples")
+    print(f"[INFO] Processing samples from: {args.input}")
 
     # Create base temp directory
     base_temp_dir = tempfile.mkdtemp(prefix="unit_test_gate_")
     print(f"[INFO] Using temp directory: {base_temp_dir}")
 
-    # Test each sample
-    tested_samples = []
+    # Test each sample (streaming)
     passed_count = 0
     failed_count = 0
+    total_count = 0
 
-    for i, sample in enumerate(samples):
-        # Create isolated temp directory for this sample
-        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
-        os.makedirs(sample_temp_dir, exist_ok=True)
+    def tested_samples_gen():
+        nonlocal passed_count, failed_count, total_count
+        for i, sample in enumerate(load_jsonl(args.input)):
+            total_count += 1
+            # Create isolated temp directory for this sample
+            sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
+            os.makedirs(sample_temp_dir, exist_ok=True)
 
-        # Test the sample
-        tested = test_sample(sample, sample_temp_dir, args.execution_timeout)
-        tested_samples.append(tested)
+            # Test the sample
+            tested = test_sample(sample, sample_temp_dir, args.execution_timeout)
 
-        # Count results
-        test_result = tested.get("test_result", {})
-        if test_result.get("passed", False):
-            passed_count += 1
-        else:
-            failed_count += 1
+            # Count results
+            test_result = tested.get("test_result", {})
+            if test_result.get("passed", False):
+                passed_count += 1
+            else:
+                failed_count += 1
 
-        # Progress
-        if (i + 1) % 10 == 0:
-            print(
-                f"  Tested {i + 1}/{len(samples)} samples "
-                f"(passed: {passed_count}, failed: {failed_count})",
-                file=sys.stderr,
-            )
+            # Progress
+            if (i + 1) % 10 == 0:
+                print(
+                    f"  Tested {i + 1} samples "
+                    f"(passed: {passed_count}, failed: {failed_count})",
+                    file=sys.stderr,
+                )
+
+            yield tested
+
+    # Process and save samples
+    save_jsonl(tested_samples_gen(), args.output)
 
     # Cleanup temp directory
     if not args.keep_temp:
@@ -427,12 +431,9 @@ def main():
         except Exception as e:
             print(f"[WARN] Failed to cleanup temp dir: {e}")
 
-    # Save results
-    save_jsonl(tested_samples, args.output)
-
     # Summary
     print("[OK] Unit test gate complete!")
-    print(f"  - Input: {len(samples)} samples")
+    print(f"  - Input: {total_count} samples")
     print(f"  - Passed: {passed_count}")
     print(f"  - Failed: {failed_count}")
     print(f"  - Output: {args.output}")

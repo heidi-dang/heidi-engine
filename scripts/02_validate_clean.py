@@ -48,7 +48,7 @@ import os
 import re
 import sys
 from collections import Counter
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple
 
 # Add project root to sys.path to allow importing heidi_engine
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -305,10 +305,10 @@ def fuzzy_hash(sample: Dict[str, Any], n: int = 5) -> str:
 
 
 def deduplicate_samples(
-    samples: List[Dict[str, Any]], max_dup_ratio: float = 0.8
-) -> Tuple[List[Dict[str, Any]], int]:
+    samples: Iterable[Dict[str, Any]], max_dup_ratio: float = 0.8
+) -> Iterator[Dict[str, Any]]:
     """
-    Remove duplicate samples.
+    Remove duplicate samples (streaming).
 
     HOW IT WORKS:
         1. Exact dedupe: Remove samples with identical instruction+output
@@ -323,15 +323,12 @@ def deduplicate_samples(
     """
     seen_hashes: Set[str] = set()
     seen_fuzzy: Set[str] = set()
-    unique_samples = []
-    duplicates = 0
 
     for sample in samples:
         # Exact hash
         exact_hash = compute_hash(sample)
 
         if exact_hash in seen_hashes:
-            duplicates += 1
             continue
 
         # Fuzzy hash
@@ -339,14 +336,11 @@ def deduplicate_samples(
 
         if fuzzy in seen_fuzzy:
             # Check if this is a near-duplicate
-            duplicates += 1
             continue
 
         seen_hashes.add(exact_hash)
         seen_fuzzy.add(fuzzy)
-        unique_samples.append(sample)
-
-    return unique_samples, duplicates
+        yield sample
 
 
 def process_sample(
@@ -402,17 +396,15 @@ def process_sample(
     return sample, "ok"
 
 
-def load_jsonl(path: str) -> List[Dict[str, Any]]:
+def load_jsonl(path: str) -> Iterator[Dict[str, Any]]:
     """
-    Load samples from JSONL file.
+    Load samples from JSONL file (generator).
 
     HOW IT WORKS:
         - Reads one JSON object per line
         - Skips empty lines
         - Reports parse errors
     """
-    samples = []
-
     with open(path, "r") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
@@ -421,23 +413,26 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
             try:
                 sample = json.loads(line)
-                samples.append(sample)
+                yield sample
             except json.JSONDecodeError as e:
                 print(f"[WARN] Line {line_num}: JSON parse error: {e}", file=sys.stderr)
                 continue
 
-    return samples
 
-
-def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
+def save_jsonl(samples: Iterable[Dict[str, Any]], path: str) -> int:
     """
     Save samples to JSONL file.
     """
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    dir_name = os.path.dirname(path)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
 
+    count = 0
     with open(path, "w") as f:
         for sample in samples:
             f.write(json.dumps(sample) + "\n")
+            count += 1
+    return count
 
 
 def main():
@@ -446,33 +441,47 @@ def main():
     """
     args = parse_args()
 
-    print(f"[INFO] Loading samples from: {args.input}")
+    print(f"[INFO] Processing samples from: {args.input}")
 
-    # Load raw samples
-    raw_samples = load_jsonl(args.input)
-    print(f"[INFO] Loaded {len(raw_samples)} raw samples")
-
-    # Process samples
-    valid_samples = []
+    # Process samples (streaming)
     dropped_reasons: dict = {}
+    raw_count = 0
+    valid_count = 0
 
-    for sample in raw_samples:
-        processed, reason = process_sample(
-            sample,
-            max_input=args.max_input,
-            max_output=args.max_output,
-            min_input=args.min_input,
-            min_output=args.min_output,
-            strict_secrets=True,
-        )
+    def validated_samples_gen():
+        nonlocal raw_count, valid_count
+        for sample in load_jsonl(args.input):
+            raw_count += 1
+            processed, reason = process_sample(
+                sample,
+                max_input=args.max_input,
+                max_output=args.max_output,
+                min_input=args.min_input,
+                min_output=args.min_output,
+                strict_secrets=True,
+            )
 
-        if processed is not None:
-            valid_samples.append(processed)
-        else:
-            reason_type = reason.split(":")[0]
-            dropped_reasons[reason_type] = dropped_reasons.get(reason_type, 0) + 1
+            if processed is not None:
+                valid_count += 1
+                yield processed
+            else:
+                reason_type = reason.split(":")[0]
+                dropped_reasons[reason_type] = dropped_reasons.get(reason_type, 0) + 1
 
-    print(f"[INFO] After validation: {len(valid_samples)} samples")
+    samples_to_save = validated_samples_gen()
+
+    # Deduplication (optional, still streaming)
+    if not args.no_dedupe:
+        print("[INFO] Running deduplication...")
+        max_dup_ratio = float(os.environ.get("MAX_DUPLICATE_RATIO", 0.8))
+        samples_to_save = deduplicate_samples(samples_to_save, max_dup_ratio)
+
+    # Save cleaned samples (this consumes the generator pipeline)
+    final_count = save_jsonl(samples_to_save, args.output)
+
+    # Summary reports (after consumption)
+    print(f"[INFO] Loaded {raw_count} raw samples")
+    print(f"[INFO] After validation: {valid_count} samples")
 
     # Report dropped samples
     if dropped_reasons:
@@ -480,23 +489,15 @@ def main():
         for reason, count in sorted(dropped_reasons.items()):
             print(f"  - {reason}: {count}")
 
-    # Deduplication (optional)
     if not args.no_dedupe:
-        print("[INFO] Running deduplication...")
-        max_dup_ratio = float(os.environ.get("MAX_DUPLICATE_RATIO", 0.8))
-
-        valid_samples, num_dupes = deduplicate_samples(valid_samples, max_dup_ratio)
-        print(f"[INFO] Removed {num_dupes} duplicate samples")
-        print(f"[INFO] After dedupe: {len(valid_samples)} samples")
-
-    # Save cleaned samples
-    save_jsonl(valid_samples, args.output)
+        print(f"[INFO] Removed {valid_count - final_count} duplicate samples")
+        print(f"[INFO] After dedupe: {final_count} samples")
 
     # Summary
     print("[OK] Cleaning complete!")
-    print(f"  - Input: {len(raw_samples)} samples")
-    print(f"  - Output: {len(valid_samples)} samples")
-    print(f"  - Dropped: {len(raw_samples) - len(valid_samples)} samples")
+    print(f"  - Input: {raw_count} samples")
+    print(f"  - Output: {final_count} samples")
+    print(f"  - Dropped: {raw_count - final_count} samples")
 
     return 0
 
