@@ -1,11 +1,11 @@
-# Heidi Engine - Autonomous Coding Agent
+# Heidi Engine: Building an Autonomous Coding Agent
 
-Heidi Engine is a research project for building an autonomous coding agent through iterative self-improvement (Teacher-Student distillation).
+Heidi Engine is an innovative research project designed to create an autonomous coding agent through iterative self-improvement, leveraging a teacher-student distillation approach.
 
-## 🚀 Quick Start
+## Getting Started
 
-### 1. Installation
-
+### Installation
+To get the project up and running:
 ```bash
 # Clone the repository
 git clone https://github.com/heidi-dang/heidi-engine.git
@@ -15,26 +15,29 @@ cd heidi-engine
 pip install -e .
 ```
 
-### 2. Data Collection (The Loop)
+## Data Collection (The Core Loop)
 
-Use `loop_repos.sh` to scrape GitHub repositories, generate synthetic training data, and validate it.
+The `loop_repos.sh` script manages the process of scraping GitHub repositories, generating synthetic training data, and validating it in a streamlined workflow.
 
-**New Powerful Features:**
+### Key New Features:
 
-*   **Stack Presets**: Easily target your tech stack.
-    *   `--stack python`: Python projects (`.py`, `.ipynb`)
-    *   `--stack cpp`: C++ projects (`.cpp`, `.h`, etc.)
-    *   `--stack vite`: Modern frontend (`.ts`, `.tsx`, `.vue`, `.svelte`)
-    *   `--stack web`: General web (`.js`, `.ts`)
-*   **Smart Filtering**: automatically skips "homework/assignments", checks licenses (MIT/Apache 2.0), and filters by file size.
-*   **Golden Repos**: Inject high-quality curated repos (e.g., Flask, React, PyTorch) with `--golden`.
-*   **Resume Mode**: Resume interrupted runs with `--resume`.
-*   **Global Deduplication**: Merge all data at the end with `--dedupe`.
+- **Stack Presets**: Customize the process for specific tech stacks.
+  - `--stack python`: Targets Python projects (`.py`, `.ipynb` files).
+  - `--stack cpp`: Focuses on C++ projects (`.cpp`, `.h`, etc.).
+  - `--stack vite`: Suited for modern frontend frameworks (`.ts`, `.tsx`, `.vue`, `.svelte`).
+  - `--stack web`: Handles general web development (`.js`, `.ts`).
+  - `--stack go`: Targets Go projects (`.go` files).
 
-**Example Command:**
+- **Smart Filtering**: Automatically excludes homework-like repositories, checks for permissive licenses (e.g., MIT or Apache 2.0), and caps file sizes for better efficiency.
+- **Golden Repos**: Include curated, high-quality repositories (such as Flask, React, or PyTorch) with `--golden`.
+- **Resume Support**: Continue from previous runs using `--resume`.
+- **Global Deduplication**: Merge and deduplicate data at the end with `--dedupe`.
 
+By default, the script uses a formula where each round processes up to 33 maximum samples (1 round = 33 max samples). You can override this with custom values for `--rounds` and `--samples`.
+
+### Example Command:
 ```bash
-# Collect high-quality Python data from 100 repos
+# Collect high-quality Python data from up to 100 repositories
 ./scripts/loop_repos.sh \
   --stack python \
   --max 100 \
@@ -45,21 +48,19 @@ Use `loop_repos.sh` to scrape GitHub repositories, generate synthetic training d
   --dedupe
 ```
 
-**Push to Hub:**
-You can also automatically push the final dataset to Hugging Face:
-
+### Uploading to Hugging Face:
+Push your final dataset to Hugging Face for easy sharing:
 ```bash
 ./scripts/loop_repos.sh --stack python --max 100 --push-to-hub my-org/my-dataset
 ```
 
-### 3. Training
+## Model Training
 
-You can train in the loop (using `--full` in `loop_repos.sh`) or use the **dedicated training script** for more control.
+Integrate training into the data collection loop with `--full` in `loop_repos.sh`, or use the dedicated script for more control.
 
-**Standalone Training:**
-
+### Standalone Training Example:
 ```bash
-# Train on the deduplicated dataset from step 2
+# Train on the deduplicated dataset from data collection
 ./scripts/train_only.py \
   --data ./autotrain_repos/merged_dataset.jsonl \
   --base-model microsoft/phi-2 \
@@ -67,149 +68,65 @@ You can train in the loop (using `--full` in `loop_repos.sh`) or use the **dedic
   --out-dir ./my_model_output
 ```
 
-### 4. Monitoring (New!)
+## Monitoring Progress
 
-A premium, real-time dashboard is available to track your progress.
+Track your runs in real time with our dashboard tools.
 
-**1. One-Click TUI Dashboard (Recommended):**
+### Option 1: Simple TUI Dashboard (Recommended):
 ```bash
 ./scripts/dashboard.sh
 ```
 
-**2. Web Dashboard:**
+### Option 2: Web-Based Dashboard:
 Start the telemetry server:
 ```bash
 python3 -m heidi_engine.telemetry init --server
 ```
-Then open **[http://127.0.0.1:7779/](http://127.0.0.1:7779/)**.
+Then access it at `http://127.0.0.1:7779/`.
 
-Features:
-*   Real-time counters (generated, validated, failed)
-*   Live training metrics (loss, steps)
-*   GPU VRAM monitoring
-*   API cost estimation
-*   Dark Mode UI
+**Highlights:**
+- Real-time stats on generation, validation, and failure rates.
+- Training metrics like loss and steps.
+- GPU VRAM monitoring.
+- API cost estimates.
+- Dark mode for a modern look.
 
-*   Dark Mode UI
+### Multi-Machine Monitoring
+Monitor distributed training from a single dashboard.
 
-### 5. Multi-Machine Monitoring (New!)
+1. **On the Dashboard Machine**:
+   Launch the server:
+   ```bash
+   python3 -m heidi_engine.telemetry init --server
+   ```
+   View at `http://127.0.0.1:7779/`.
 
-Monitor multiple training machines from a single dashboard.
+2. **On Worker Machines**:
+   Include `--monitor` in your command, specifying the dashboard address:
+   ```bash
+   ./scripts/loop_repos.sh --stack python --monitor http://<dashboard-ip>:7779
+   ```
 
-1.  **On the Dashboard Machine**:
-    Start the server:
-    ```bash
-    python3 -m heidi_engine.telemetry init --server
-    ```
-    Open **[http://127.0.0.1:7779/](http://127.0.0.1:7779/)**.
+## Performance Optimizations (C++ Extension)
 
-2.  **On Worker Machines**:
-    Run `loop_repos.sh` with `--monitor`:
-    ```bash
-    ./scripts/loop_repos.sh --stack python --monitor http://<dashboard-ip>:7779
-    ```
+Heidi Engine includes a high-performance C++ extension (`heidi_cpp`) for data-intensive operations, providing:
+- **Fast Deduplication**: custom cache-aware hashing.
+- **Efficient Transpose**: In-place square matrix transpose for QLoRA prep.
+- **Batch Compression**: `zlib`-based vectorized log compression.
+- **Resource Management**: `rlimit` wrappers for memory/thread capping.
 
-3.  **View All Runs**:
-    Use the dropdown menu in the dashboard header to switch between active runs.
+## System Requirements
 
-### 6. Multi-Language Support
+### Compiler Requirements for Validation
+For full multi-language validation, ensure these compilers are installed:
+- `g++` for C++.
+- `node` for JavaScript/TypeScript.
+- `go` for Go.
 
-The engine now supports generating data for multiple programming languages.
+## Troubleshooting
 
-*   **Supported Languages**: Python, JavaScript, Go, C++.
-*   **Templates**: customizable YAML files in `heidi_engine/templates/`.
-*   **Usage**:
-    ```bash
-    # Generate Python data (default)
-    ./scripts/loop_repos.sh --stack python
-    
-    # Generate JavaScript data
-    ./scripts/loop_repos.sh --stack web
-    
-    # Generate Go data
-    ./scripts/loop_repos.sh --stack go
-    
-    # Generate C++ data
-    ./scripts/loop_repos.sh --stack cpp
-    ```
+- **Connection Issues**: Verify firewall settings and that the telemetry server is running.
+- **Authentication Errors**: Set the `TELEMETRY_PASS` environment variable for secure access.
+- **Validation Failures**: Check for missing compilers or unsupported languages; fallback logging is enabled.
 
-## 📂 Project Structure
-
-*   `heidi_engine/`: Core Python package.
-*   `scripts/`: Automation scripts.
-    *   `loop_repos.sh`: Main data collection entry point.
-    *   `train_only.py`: Dedicated QLoRA training script.
-    *   `global_dedupe.py`: Data aggregation and deduplication tool.
-    *   `01_teacher_generate.py`: Synthetic data generation.
-    *   `04_train_qlora.py`: Low-level training script.
-
-## 🛠️ Advanced Usage
-
-### Environment Variables
-
-*   `OPENAI_API_KEY`: Required for the teacher model (GPT-4o).
-*   `HF_TOKEN`: Required for pushing to Hugging Face Hub.
-*   `SAMPLES_PER_ROUND`: Default samples to generate (default: 50).
-
-### Customizing the Loop
-
-You can tweak `scripts/loop_repos.sh` to change:
-*   `VAL_RATIO`: Validation split (default: 0.05)
-*   `SLEEP_BETWEEN_REQUESTS`: Rate limiting (default: 0)
-
-
-## 🌐 Multi-Machine Setup Guide
-
-Heidi Engine is designed to scale across multiple workers reporting to a central dashboard.
-
-### 1. Central Dashboard Machine
-On the machine that will host the dashboard:
-```bash
-# Set a password for security
-export TELEMETRY_PASS="your_secure_password"
-python3 -m heidi_engine.telemetry_server
-```
-
-### 2. Worker Machines
-On each worker machine, point to the central dashboard:
-```bash
-export DASHBOARD_HOST="http://<dashboard-ip>:7779"
-export TELEMETRY_PASS="your_secure_password" # Must match server
-./scripts/loop_repos.sh --stack python --monitor
-```
-
-### 3. Using Docker Compose (Recommended)
-You can launch a complete multi-machine environment locally or on a server using Docker:
-```bash
-docker-compose up --build
-```
-This starts one telemetry server and one worker by default.
-
-## 🔧 Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| **"No runs found"** | Check that `AUTOTRAIN_DIR` is consistent. The default is `~/.local/heidi_engine`. Ensure yours doesn't have a typo (e.g., `heidi-engine`). |
-| **Connection Refused** | Ensure the telemetry server is running and the port `7779` is open in your firewall. |
-| **Authentication Failed** | Verify that `TELEMETRY_PASS` matches on both the server and the worker. |
-| **Validation Failed** | If code validation is skipping too many samples, ensure you have the following tools installed on the worker machine: |
-
-### External Validation Tools
-To enable full code validation, the worker machines should have:
-- **Python**: `python3` (built-in)
-- **C++**: `g++` (for C++ syntax check)
-- **JavaScript**: `node` (for JS syntax check)
-- **Go**: `go` and `gofmt` (for Go syntax check)
-
-Validation will be automatically skipped with a warning if these tools are missing.
-
-## 🧪 Testing
-
-Run the test suite to verify your installation:
-```bash
-pytest tests/
-```
-
-## 📄 License
-
-MIT License.
+For more details, see [walkthrough_v1.md](file:///home/heidi/work/heidi-engine-dev1/docs/walkthrough_v1.md).
