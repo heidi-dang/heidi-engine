@@ -167,6 +167,18 @@ def test_resource_limits():
     except Exception as e:
         print(f"Resource limiter failed (expected on some systems): {e}")
 
+def benchmark_kernel_bounds():
+    print("\n11. Testing Kernel Resource Governor...")
+    def dummy_task():
+        # Simulate some work
+        sum(i * i for i in range(1000))
+    
+    start = time.time()
+    for _ in range(100):
+        heidi_cpp.run_with_kernel_bounds(dummy_task, max_jobs=5, cpu_limit=80.0)
+    end = time.time()
+    print(f"    Kernel Bounds (100 runs): {end - start:.4f}s")
+
 if __name__ == "__main__":
     import json
     try:
@@ -182,6 +194,7 @@ if __name__ == "__main__":
         benchmark_custom_dedup()
         benchmark_batch_compression()
         test_resource_limits()
+        benchmark_kernel_bounds()
         
         print("\nAll 10 C++ optimizations verified successfully!")
     except Exception as e:

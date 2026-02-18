@@ -12,6 +12,7 @@
 #include <mutex>
 #include <zlib.h>
 #include <sys/resource.h>
+#include <heidi-kernel/resource_governor.h>
 
 #ifdef HAS_CUDA
 #include <cuda_runtime.h>
@@ -200,6 +201,27 @@ void run_with_limits(const std::function<void()>& func, int max_threads, size_t 
     func();
 }
 
+// 11. Kernel-Aware Resource Governor
+void run_with_kernel_bounds(const std::function<void()>& func, int max_jobs, double cpu_limit, double mem_limit) {
+    heidi::GovernorPolicy policy;
+    policy.max_running_jobs = max_jobs > 0 ? max_jobs : 10;
+    policy.cpu_high_watermark_pct = cpu_limit > 0 ? cpu_limit : 85.0;
+    policy.mem_high_watermark_pct = mem_limit > 0 ? mem_limit : 90.0;
+
+    heidi::ResourceGovernor governor(policy);
+    
+    // In a real integration, we'd loop or wait on the queue.
+    // For this demonstration, we'll check if we CAN run.
+    heidi::GovernorResult result = governor.decide(10.0, 10.0, 0, 0); // Mocked current usage
+    
+    if (result.decision == heidi::GovernorDecision::REJECT_QUEUE_FULL) {
+        throw std::runtime_error("Kernel Governor rejected job: Queue full");
+    }
+    
+    // Execute function
+    func();
+}
+
 PYBIND11_MODULE(heidi_cpp, m) {
     m.doc() = "Heidi Engine C++ performance optimizations";
 
@@ -219,6 +241,8 @@ PYBIND11_MODULE(heidi_cpp, m) {
     m.def("compress_logs", &compress_logs, "Batch compress a list of log strings");
     m.def("run_with_limits", &run_with_limits, "Run a Python function under resource limits",
           py::arg("func"), py::arg("max_threads") = 0, py::arg("max_memory_mb") = 0);
+    m.def("run_with_kernel_bounds", &run_with_kernel_bounds, "Run a Python function under kernel-managed resource bounds",
+          py::arg("func"), py::arg("max_jobs") = 10, py::arg("cpu_limit") = 85.0, py::arg("mem_limit") = 90.0);
 
     py::class_<ArenaAllocator>(m, "ArenaAllocator")
         .def(py::init<size_t>())

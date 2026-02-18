@@ -8,7 +8,9 @@ cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH")
 if not cuda_home and os.path.exists("/usr/local/cuda"):
     cuda_home = "/usr/local/cuda"
 
-include_dirs = []
+include_dirs = [
+    os.path.abspath("submodules/heidi-kernel/include"),
+]
 library_dirs = []
 libraries = ["z"] # Always link zlib
 macros = []
@@ -23,7 +25,10 @@ if cuda_home and os.path.exists(os.path.join(cuda_home, "include/cuda_runtime.h"
 ext_modules = [
     Pybind11Extension(
         "heidi_cpp",
-        ["heidi_engine/cpp/heidi_cpp.cpp"],
+        [
+            "heidi_engine/cpp/heidi_cpp.cpp",
+            "submodules/heidi-kernel/src/governor/resource_governor.cpp"
+        ],
         include_dirs=include_dirs,
         library_dirs=library_dirs,
         libraries=libraries,

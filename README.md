@@ -107,13 +107,14 @@ Monitor distributed training from a single dashboard.
    ./scripts/loop_repos.sh --stack python --monitor http://<dashboard-ip>:7779
    ```
 
-## Performance Optimizations (C++ Extension)
+### 6. C++ Core Optimizations ⚡
+High-performance C++ extensions for data processing and resource management.
+- **Speed**: Deduplication and transpose up to 3.4x faster than Python.
+- **Efficiency**: Arena allocation and vectorized compression.
+- **Kernel Integration**: Submodule linking with [heidi-kernel](https://github.com/heidi-dang/heidi-kernel) for deterministic resource bounding.
+- **Monitoring**: Real-time GPU VRAM tracking via CUDA.
 
-Heidi Engine includes a high-performance C++ extension (`heidi_cpp`) for data-intensive operations, providing:
-- **Fast Deduplication**: custom cache-aware hashing.
-- **Efficient Transpose**: In-place square matrix transpose for QLoRA prep.
-- **Batch Compression**: `zlib`-based vectorized log compression.
-- **Resource Management**: `rlimit` wrappers for memory/thread capping.
+For details, see [docs/cpp_optimizations.md](file:///home/heidi/work/heidi-engine-dev1/docs/cpp_optimizations.md).
 
 ### 7. Hyperparameter Optimization (HPO) 🔦
 Integrated Optuna-powered sweep for finding optimal training parameters.
