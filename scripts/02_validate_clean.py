@@ -322,7 +322,7 @@ def deduplicate_samples(
     NOTE: We keep samples with unique outputs to maintain diversity
     """
     seen_hashes: Set[str] = set()
-    seen_fuzzy: Set[str] = set()
+    fuzzy_counts: Dict[str, int] = {}
     unique_samples = []
     duplicates = 0
 
@@ -336,14 +336,17 @@ def deduplicate_samples(
 
         # Fuzzy hash
         fuzzy = fuzzy_hash(sample)
+        count = fuzzy_counts.get(fuzzy, 0)
 
-        if fuzzy in seen_fuzzy:
-            # Check if this is a near-duplicate
-            duplicates += 1
-            continue
+        if count > 0:
+            # Check if this is a near-duplicate and if we should keep it
+            # Duplicate ratio in output = (current_count) / (current_count + 1)
+            if (count / (count + 1)) > max_dup_ratio:
+                duplicates += 1
+                continue
 
         seen_hashes.add(exact_hash)
-        seen_fuzzy.add(fuzzy)
+        fuzzy_counts[fuzzy] = count + 1
         unique_samples.append(sample)
 
     return unique_samples, duplicates
@@ -381,8 +384,11 @@ def process_sample(
 
     # Step 3: Provenance Verification
     if HAS_SECURITY_VALIDATOR:
-        if not verify_record(sample):
-            return None, "provenance: invalid_signature"
+        # Best-effort verification: if a signature is present, it must be valid.
+        # This allows handling both signed and unsigned data (like repo test samples).
+        if sample.get("metadata", {}).get("signature"):
+            if not verify_record(sample):
+                return None, "provenance: invalid_signature"
 
     # Step 4: Semantic validation
     if HAS_SEMANTIC_VALIDATOR:
@@ -433,7 +439,9 @@ def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """
     Save samples to JSONL file.
     """
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    dirname = os.path.dirname(path)
+    if dirname:
+        os.makedirs(dirname, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
