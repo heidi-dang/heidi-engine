@@ -45,14 +45,17 @@ python3 -m pytest tests/test_validators.py
 - [heidi_engine/telemetry.py](file:///home/heidi/work/heidi-engine-dev1/heidi_engine/telemetry.py) [MODIFIED]
 - [README.md](file:///home/heidi/work/heidi-engine-dev1/README.md) [MODIFIED]
 
-### 4. C++ Performance Optimizations
+### 4. C++ Performance Optimizations [Phase 1 & 2]
 Implemented high-performance C++ modules bound via `pybind11` for data-intensive operations:
 - **String Deduplication**: `heidi_cpp.deduplicate_strings` using `std::unordered_set`.
 - **In-place Sort**: `heidi_cpp.sort_batch_inplace` for NumPy arrays.
 - **Arena Allocator**: `heidi_cpp.ArenaAllocator` for pooled memory management.
+- **Parallel Validation**: `heidi_cpp.parallel_validate` for multi-threaded snippet checks.
+- **Compressed Serializer**: `heidi_cpp.compress_data` using `zlib` for efficient I/O.
+- **GPU Monitor**: `heidi_cpp.get_free_gpu_memory` for CUDA-based resource tracking.
 
 > [!NOTE]
-> **Performance Insight**: In initial benchmarks on ~1M elements, Python's native `set()` and NumPy's `.sort()` remain extremely competitive. The C++ extension is recommended for scenarios where memory fragmentation or extremely large iteratively-processed buffers are a bottleneck.
+> **Performance Insight**: In initial benchmarks on ~1M elements, Python's native `set()` and NumPy's `.sort()` remain extremely competitive. The C++ extension is recommended for scenarios where memory fragmentation, extremely large iteratively-processed buffers, or multi-threaded CPU-bound validation are a bottleneck.
 
 ---
 All changes have been pushed to `feature/multi-machine-multi-lang-fixes`.
