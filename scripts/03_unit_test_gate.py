@@ -33,6 +33,7 @@ NOTE:
 """
 
 import argparse
+import ast
 import json
 import os
 import re
@@ -40,8 +41,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Any, Dict, List, Tuple
+import textwrap
 from pathlib import Path
+from typing import Any, Dict, List, Tuple
 
 # Add project root to sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -71,19 +73,19 @@ CODE_BLOCK_PATTERNS = [
 
 # Patterns that indicate code should NOT be executed
 # TUNABLE: Add more dangerous patterns to block
+# These are used as a first-pass heuristic alongside AST analysis
 DANGEROUS_PATTERNS = [
-    r"import\s+os\s*;",  # os import with semicolon
-    r"import\s+subprocess",  # subprocess
-    r"import\s+sys\s*;",  # sys import with semicolon
-    r"eval\s*\(",  # eval()
-    r"exec\s*\(",  # exec()
-    r"__import__\s*\(",  # dynamic imports
-    r'open\s*\([^)]*,\s*[\'"]w',  # file write
-    r'open\s*\([^)]*,\s*[\'"]a',  # file append
-    r"requests\.",  # HTTP requests
-    r"urllib\.",  # URL handling
-    r"socket\.",  # network sockets
-    r"pickle\.load",  # pickle deserialization
+    r"import\s+(os|subprocess|sys|shutil|importlib|pathlib|socket|urllib|requests|pickle|marshal|shelve|ctypes|platform|pty|commands)",
+    r"from\s+(os|subprocess|sys|shutil|importlib|pathlib|socket|urllib|requests|pickle|marshal|shelve|ctypes|platform|pty|commands)",
+    r"eval\s*\(",
+    r"exec\s*\(",
+    r"__import__\s*\(",
+    r"getattr\s*\(",
+    r"setattr\s*\(",
+    r'open\s*\([^)]*,\s*[\'"][^"\']*[wa+x]',  # file write/append/exclusive
+    r'open\s*\([^)]*,\s*[\'"][wa+x]',  # file write/append/exclusive (short)
+    r"socket\.",
+    r"pickle\.",
 ]
 
 
@@ -172,22 +174,118 @@ def extract_python_code(text: str) -> List[str]:
     return python_code
 
 
-def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
+def check_dangerous_code_ast(code: str) -> Tuple[bool, List[str]]:
     """
-    Check if code contains dangerous patterns.
+    Check if code contains dangerous patterns using AST analysis.
 
     HOW IT WORKS:
-        - Matches against list of dangerous patterns
-        - Returns (is_dangerous, list_of_matches)
+        - Parses code into AST
+        - Walks tree to find dangerous imports and function calls
+        - Provides more robust protection than regex alone
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        # If it doesn't parse, it won't run.
+        # Syntax checking happens later in the pipeline.
+        return False, []
 
-    TUNABLE:
-        - Adjust DANGEROUS_PATTERNS for your security needs
+    # Comprehensive list of dangerous modules
+    dangerous_modules = {
+        "os", "subprocess", "sys", "shutil", "importlib", "pathlib",
+        "socket", "urllib", "requests", "pickle", "marshal", "shelve",
+        "ctypes", "platform", "pty", "commands", "builtins"
+    }
+
+    # Comprehensive list of dangerous functions
+    dangerous_functions = {
+        "eval", "exec", "__import__", "getattr", "setattr", "breakpoint",
+        "input", "compile", "globals", "locals", "vars", "open"
+    }
+
+    found = []
+
+    for node in ast.walk(tree):
+        # Check imports
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                base_module = alias.name.split(".")[0]
+                if base_module in dangerous_modules:
+                    found.append(f"import {alias.name}")
+
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                base_module = node.module.split(".")[0]
+                if base_module in dangerous_modules:
+                    found.append(f"from {node.module} import ...")
+
+        # Check function calls
+        elif isinstance(node, ast.Call):
+            func = node.func
+            # Direct calls: eval(), exec()
+            if isinstance(func, ast.Name):
+                if func.id in dangerous_functions:
+                    if func.id == "open":
+                        # Check for write/append modes in open()
+                        is_dangerous_open = True
+                        # If mode is not provided, it defaults to 'r'
+                        if len(node.args) > 1:
+                            mode_arg = node.args[1]
+                            if isinstance(mode_arg, ast.Constant) and isinstance(mode_arg.value, str):
+                                if all(m not in mode_arg.value for m in "wa+x"):
+                                    is_dangerous_open = False
+                            elif isinstance(mode_arg, ast.Str): # Support older Python
+                                if all(m not in mode_arg.s for m in "wa+x"):
+                                    is_dangerous_open = False
+                        elif len(node.args) == 1:
+                            is_dangerous_open = False # Default is read
+                            # But check keywords
+                            for kw in node.keywords:
+                                if kw.arg == "mode" and (
+                                    (isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str) and any(m in kw.value.value for m in "wa+x")) or
+                                    (isinstance(kw.value, ast.Str) and any(m in kw.value.s for m in "wa+x"))
+                                ):
+                                    is_dangerous_open = True
+
+                        if is_dangerous_open:
+                            found.append("call to open() with potential write mode")
+                    else:
+                        found.append(f"call to {func.id}()")
+
+            # Attribute calls: os.system(), subprocess.run()
+            elif isinstance(func, ast.Attribute):
+                if isinstance(func.value, ast.Name):
+                    if func.value.id in dangerous_modules:
+                        found.append(f"call to {func.value.id}.{func.attr}()")
+
+                # Check for things like __subclasses__()...
+                if func.attr in ["__subclasses__", "__globals__", "__init__", "__builtins__"]:
+                    found.append(f"access to dangerous attribute: {func.attr}")
+
+    return len(found) > 0, found
+
+
+def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
+    """
+    Check if code contains dangerous patterns using regex and AST.
+
+    HOW IT WORKS:
+        1. Runs regex-based check for quick heuristic
+        2. Runs AST-based check for robust analysis
+        3. Returns (is_dangerous, list_of_matches)
     """
     found = []
 
+    # 1. Regex check
     for pattern in DANGEROUS_PATTERNS:
         if re.search(pattern, code, re.IGNORECASE):
-            found.append(pattern)
+            found.append(f"regex:{pattern}")
+
+    # 2. AST check
+    is_dangerous_ast, ast_matches = check_dangerous_code_ast(code)
+    if is_dangerous_ast:
+        for match in ast_matches:
+            found.append(f"ast:{match}")
 
     return len(found) > 0, found
 
@@ -213,6 +311,9 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     # Write code to temp file
     test_file = os.path.join(temp_dir, "test_code.py")
 
+    # Correctly indent the user code for the try block
+    indented_code = textwrap.indent(code, "    ")
+
     # Wrap code to capture output safely
     wrapped_code = f"""
 import sys
@@ -229,7 +330,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
