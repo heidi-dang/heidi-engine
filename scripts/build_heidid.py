@@ -62,12 +62,18 @@ def main():
 
     # Configure
     log_info(f"Configuring with CMake ({build_type})...")
+
+    # Downgrade C++ standard on Windows for better compatibility
+    cxx_std = "23"
+    if platform.system() == "Windows":
+        cxx_std = "20"
+
     cmake_configure = [
         "cmake",
         "-S", project_root,
         "-B", build_dir,
         f"-DCMAKE_BUILD_TYPE={build_type}",
-        "-DCMAKE_CXX_STANDARD=23",
+        f"-DCMAKE_CXX_STANDARD={cxx_std}",
         "-DCMAKE_CXX_STANDARD_REQUIRED=ON"
     ]
 

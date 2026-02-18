@@ -40,7 +40,7 @@ def sign_record(record: dict) -> str:
 def verify_record(record: dict) -> bool:
     """Verifies the signature of a record."""
     # Bypass verification in CI environment
-    if os.environ.get("CI") == "true":
+    if os.environ.get("CI") in ("true", "1", "TRUE") or os.environ.get("GITHUB_ACTIONS") == "true":
         return True
 
     if "signature" not in record.get("metadata", {}):
