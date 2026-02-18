@@ -322,7 +322,7 @@ def deduplicate_samples(
     NOTE: We keep samples with unique outputs to maintain diversity
     """
     seen_hashes: Set[str] = set()
-    seen_fuzzy: Set[str] = set()
+    fuzzy_counts: Dict[str, int] = {}
     unique_samples = []
     duplicates = 0
 
@@ -336,14 +336,17 @@ def deduplicate_samples(
 
         # Fuzzy hash
         fuzzy = fuzzy_hash(sample)
+        count = fuzzy_counts.get(fuzzy, 0)
 
-        if fuzzy in seen_fuzzy:
-            # Check if this is a near-duplicate
-            duplicates += 1
-            continue
+        if count > 0:
+            # Check if this is a near-duplicate and if we should keep it
+            # Duplicate ratio in output = (current_count) / (current_count + 1)
+            if (count / (count + 1)) > max_dup_ratio:
+                duplicates += 1
+                continue
 
         seen_hashes.add(exact_hash)
-        seen_fuzzy.add(fuzzy)
+        fuzzy_counts[fuzzy] = count + 1
         unique_samples.append(sample)
 
     return unique_samples, duplicates
