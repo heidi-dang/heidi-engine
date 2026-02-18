@@ -37,9 +37,6 @@ fi
 
 echo "Raw samples: $raw_count"
 
-# Sign records for local workflow (security requirement)
-python .local/ml/scripts/sign_data.py .local/ml/data/raw/raw.jsonl
-
 # Validate & clean (uses existing repo script)
 python scripts/02_validate_clean.py --input .local/ml/data/raw/raw.jsonl --output .local/ml/data/clean/clean.jsonl
 
