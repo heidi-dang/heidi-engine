@@ -196,7 +196,7 @@ run_id = tm.init_telemetry(
     config=json.loads(sys.argv[2])
 )
 print(run_id)
-" "$OUT_DIR" "$config_json" 2>/dev/null || echo "$RUN_ID"
+" "$OUT_DIR" "$config_json" 2>/dev/null || echo "${RUN_ID:-}"
     fi
     
     # Always set RUN_ID if not set
