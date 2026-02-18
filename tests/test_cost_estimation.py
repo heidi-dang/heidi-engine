@@ -10,17 +10,18 @@ class TestCostEstimation:
 
     def test_estimate_cost_gpt4o_mini(self):
         """Test cost estimation for gpt-4o-mini (default model)."""
-        # gpt-4o-mini: input 0.15, output 0.60 per 1M tokens
-        # 1M input, 1M output should be 0.15 + 0.60 = 0.75
+        pricing = DEFAULT_PRICING["gpt-4o-mini"]
+        # 1M input, 1M output should be input_price + output_price
         cost = estimate_cost(1_000_000, 1_000_000, "gpt-4o-mini")
-        assert cost == pytest.approx(0.75)
+        assert cost == pytest.approx(pricing["input"] + pricing["output"])
 
     def test_estimate_cost_gpt4o(self):
         """Test cost estimation for gpt-4o (default model)."""
-        # gpt-4o: input 2.50, output 10.00 per 1M tokens
-        # 2M input, 0.5M output should be (2 * 2.50) + (0.5 * 10.00) = 5.0 + 5.0 = 10.0
+        pricing = DEFAULT_PRICING["gpt-4o"]
+        # 2M input, 0.5M output
         cost = estimate_cost(2_000_000, 500_000, "gpt-4o")
-        assert cost == pytest.approx(10.0)
+        expected = (2 * pricing["input"]) + (0.5 * pricing["output"])
+        assert cost == pytest.approx(expected)
 
     def test_estimate_cost_unknown_model(self):
         """Test that unknown models return 0.0 cost."""

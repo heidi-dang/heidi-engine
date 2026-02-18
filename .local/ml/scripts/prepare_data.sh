@@ -38,7 +38,8 @@ fi
 echo "Raw samples: $raw_count"
 
 # Validate & clean (uses existing repo script)
-python scripts/02_validate_clean.py --input .local/ml/data/raw/raw.jsonl --output .local/ml/data/clean/clean.jsonl
+# Use --no-provenance because sample data doesn't have signatures
+python scripts/02_validate_clean.py --input .local/ml/data/raw/raw.jsonl --output .local/ml/data/clean/clean.jsonl --no-provenance
 
 if [ ! -f .local/ml/data/clean/clean.jsonl ]; then
   echo "ERROR: cleaning failed - clean.jsonl not produced" >&2
