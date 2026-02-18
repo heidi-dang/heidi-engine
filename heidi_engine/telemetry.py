@@ -643,10 +643,7 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     HOW IT WORKS:
         - Reads state.json file
         - Returns empty state if file doesn't exist
-
-    TUNABLE:
-        - N/A - just reads file
-
+    
     ARGS:
         run_id: Run to read (defaults to current run)
 
@@ -658,17 +655,76 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     if not state_file.exists():
         return {
             "run_id": get_run_id(),
-            "status": "unknown",
+            "status": "idle",
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
 
     try:
         with open(state_file) as f:
-            return json.load(f)
+            state = json.load(f)
+            # Resolve status from on-disk metadata
+            state["status"] = resolve_status(state)
+            return state
     except Exception as e:
         print(f"[WARN] Failed to load state: {e}", file=sys.stderr)
-        return {}
+        return {"status": "error", "error": str(e)}
+
+
+def resolve_status(state: Dict[str, Any]) -> str:
+    """
+    Resolve run status from on-disk metadata.
+    
+    STATUS VALUES:
+        - idle: No active run, or run_id present but no events
+        - running: Worker active / stop not requested / still processing
+        - stopped: stop_requested=true or pipeline complete
+        - error: last_error present or health degraded
+    
+    HOW IT WORKS:
+        - Checks stop_requested flag
+        - Checks status field
+        - Checks for error indicators
+    
+    ARGS:
+        state: State dictionary from state.json
+    
+    RETURNS:
+        Status string: idle, running, stopped, error
+    """
+    # Explicit stop requested
+    if state.get("stop_requested", False):
+        return "stopped"
+    
+    # Check explicit status first
+    status = state.get("status", "")
+    if status in ("running", "completed", "stopped", "error"):
+        return status
+    
+    # Check for errors
+    if state.get("last_error") or state.get("health") == "degraded":
+        return "error"
+    
+    # Check if there's an active run_id but no recent activity
+    run_id = state.get("run_id")
+    if run_id:
+        # Has run_id - check for activity
+        counters = state.get("counters", {})
+        usage = state.get("usage", {})
+        
+        # If there's any activity, consider it running
+        if counters.get("teacher_generated", 0) > 0:
+            return "running"
+        if usage.get("requests_sent", 0) > 0:
+            return "running"
+        if counters.get("train_step", 0) > 0:
+            return "running"
+        
+        # No activity - idle
+        return "idle"
+    
+    # Default to idle if no run_id
+    return "idle"
 
 
 def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
@@ -1572,8 +1628,8 @@ def main():
         python -m heidi_engine.telemetry emit <type> <message>
     """
     import argparse
-
-    parser = argparse.ArgumentParser(description="AutoTrain Telemetry CLI")
+    
+    parser = argparse.ArgumentParser(prog="heidi-engine telemetry")
     subparsers = parser.add_subparsers(dest="command")
 
     # init command
