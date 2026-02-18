@@ -37,9 +37,11 @@ fi
 
 echo "Raw samples: $raw_count"
 
+# Sign records for local workflow (security requirement)
+python .local/ml/scripts/sign_data.py .local/ml/data/raw/raw.jsonl
+
 # Validate & clean (uses existing repo script)
-# We skip provenance for local smoke tests as sample data isn't signed
-python scripts/02_validate_clean.py --skip-provenance --input .local/ml/data/raw/raw.jsonl --output .local/ml/data/clean/clean.jsonl
+python scripts/02_validate_clean.py --input .local/ml/data/raw/raw.jsonl --output .local/ml/data/clean/clean.jsonl
 
 if [ ! -f .local/ml/data/clean/clean.jsonl ]; then
   echo "ERROR: cleaning failed - clean.jsonl not produced" >&2
