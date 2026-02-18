@@ -1,0 +1,14 @@
+[Unit]
+Description=Heidi Engine Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=heidi
+WorkingDirectory=/home/heidi/work/heidi-engine-dev1
+ExecStart=/home/heidi/work/heidi-engine-dev1/build/bin/heidid --config engine_config.yaml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
