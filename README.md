@@ -69,14 +69,19 @@ You can train in the loop (using `--full` in `loop_repos.sh`) or use the **dedic
 
 ### 4. Monitoring (New!)
 
-A premium, real-time web dashboard is available to track your progress.
+A premium, real-time dashboard is available to track your progress.
 
-1. **Start the server** (if not running):
-   ```bash
-   python3 -m heidi_engine.telemetry init --server
-   ```
-2. **Open Dashboard**:
-   **[http://127.0.0.1:7779/](http://127.0.0.1:7779/)**
+**1. One-Click TUI Dashboard (Recommended):**
+```bash
+./scripts/dashboard.sh
+```
+
+**2. Web Dashboard:**
+Start the telemetry server:
+```bash
+python3 -m heidi_engine.telemetry init --server
+```
+Then open **[http://127.0.0.1:7779/](http://127.0.0.1:7779/)**.
 
 Features:
 *   Real-time counters (generated, validated, failed)

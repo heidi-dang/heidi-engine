@@ -37,7 +37,7 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 # NOTE: Default output directory changed to ~/.local/heidi-engine to avoid
 # polluting the repository root. Set OUT_DIR explicitly if needed.
-export AUTOTRAIN_DIR="${AUTOTRAIN_DIR:-$HOME/.local/heidi-engine}"
+export AUTOTRAIN_DIR="${AUTOTRAIN_DIR:-$HOME/.local/heidi_engine}"
 
 export ROUNDS="${ROUNDS:-3}"                          # Number of training rounds
 export SAMPLES_PER_ROUND="${SAMPLES_PER_ROUND:-200}"    # Samples to generate per round

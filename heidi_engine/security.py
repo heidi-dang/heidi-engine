@@ -6,7 +6,7 @@ from pathlib import Path
 
 # Use a persistent secret for signing
 # In production, this should be set via environment variable
-SECRET_PATH = Path(os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi-engine"))) / ".secret_key"
+SECRET_PATH = Path(os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi_engine"))) / ".secret_key"
 
 def get_secret() -> str:
     """Gets or generates a persistent secret key for this installation."""

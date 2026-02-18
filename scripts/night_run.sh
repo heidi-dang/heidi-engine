@@ -47,7 +47,7 @@ SAMPLES="${SAMPLES:-50}"
 SESSION_NAME="heidi-night"
 
 # Set up directories
-export AUTOTRAIN_DIR="${AUTOTRAIN_DIR:-$HOME/.local/heidi-engine}"
+export AUTOTRAIN_DIR="${AUTOTRAIN_DIR:-$HOME/.local/heidi_engine}"
 export OUT_DIR="${OUT_DIR:-$AUTOTRAIN_DIR}"
 
 show_help() {
