@@ -10,8 +10,14 @@
 #include <stdexcept>
 #include <thread>
 #include <mutex>
+
+#ifndef _WIN32
 #include <zlib.h>
 #include <sys/resource.h>
+#define HAS_ZLIB 1
+#define HAS_RLIMIT 1
+#endif
+
 #include <heidi-kernel/resource_governor.h>
 
 #ifdef HAS_CUDA
@@ -107,6 +113,7 @@ std::vector<bool> parallel_validate(const std::vector<std::string>& snippets, in
 std::string compress_data(const std::string& data) {
     if (data.empty()) return "";
     
+#ifdef HAS_ZLIB
     uLongf destLen = compressBound(data.size());
     std::vector<Bytef> buffer(destLen);
     
@@ -115,6 +122,9 @@ std::string compress_data(const std::string& data) {
     }
     
     return std::string((const char*)buffer.data(), destLen);
+#else
+    throw std::runtime_error("Compression not supported on this platform (zlib missing)");
+#endif
 }
 
 // 6. GPU Memory Checker
@@ -171,6 +181,7 @@ std::vector<std::string> dedup_with_custom_hash(const std::vector<std::string>& 
 // 9. Batch Compressor for Logs
 std::vector<py::bytes> compress_logs(const std::vector<std::string>& logs) {
     std::vector<py::bytes> compressed;
+#ifdef HAS_ZLIB
     compressed.reserve(logs.size());
     for (const auto& log : logs) {
         uLongf source_len = log.size();
@@ -182,6 +193,12 @@ std::vector<py::bytes> compress_logs(const std::vector<std::string>& logs) {
             compressed.emplace_back(""); // Or throw
         }
     }
+#else
+    // Fallback: return uncompressed logs as bytes
+    for (const auto& log : logs) {
+        compressed.emplace_back(log);
+    }
+#endif
     return compressed;
 }
 
@@ -190,11 +207,13 @@ void run_with_limits(const std::function<void()>& func, int max_threads, size_t 
     // Note: Setting caps in a shared library can affect the whole process.
     // Memory limit (Address Space)
     if (max_memory_mb > 0) {
+#ifdef HAS_RLIMIT
         struct rlimit lim;
         if (getrlimit(RLIMIT_AS, &lim) == 0) {
             lim.rlim_cur = max_memory_mb * 1024 * 1024;
             setrlimit(RLIMIT_AS, &lim);
         }
+#endif
     }
     // Note: max_threads enforcement would typically be done via OpenMP or pool control.
     // We'll execute the function as a wrapper.
