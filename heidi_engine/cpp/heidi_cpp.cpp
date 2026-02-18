@@ -112,10 +112,10 @@ std::string compress_data(const std::string& data) {
 #ifdef HAS_ZLIB
     if (data.empty()) return "";
     
-    uLongf destLen = compressBound(data.size());
+    uLongf destLen = compressBound(static_cast<uLong>(data.size()));
     std::vector<Bytef> buffer(destLen);
     
-    if (compress(buffer.data(), &destLen, (const Bytef*)data.data(), data.size()) != Z_OK) {
+    if (compress(buffer.data(), &destLen, (const Bytef*)data.data(), static_cast<uLong>(data.size())) != Z_OK) {
         throw std::runtime_error("zlib compression failed");
     }
     
@@ -182,7 +182,7 @@ std::vector<py::bytes> compress_logs(const std::vector<std::string>& logs) {
     std::vector<py::bytes> compressed;
     compressed.reserve(logs.size());
     for (const auto& log : logs) {
-        uLongf source_len = log.size();
+        uLongf source_len = static_cast<uLongf>(log.size());
         uLongf dest_len = compressBound(source_len);
         std::vector<Bytef> buf(dest_len);
         if (compress(buf.data(), &dest_len, reinterpret_cast<const Bytef*>(log.data()), source_len) == Z_OK) {
