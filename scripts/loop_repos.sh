@@ -37,6 +37,8 @@ RESUME=false
 STACK=""
 VAL_RATIO="${VAL_RATIO:-0.05}"
 SLEEP_BETWEEN_REQUESTS="${SLEEP_BETWEEN_REQUESTS:-0}"
+OPTUNA=false
+N_TRIALS=10
 DO_DEDUPE=false
 PUSH_TO_HUB=""
 USE_GOLDEN=false
@@ -68,6 +70,8 @@ Options:
   --sleep SECONDS      Sleep between API requests (default: $SLEEP_BETWEEN_REQUESTS)
   --monitor URL        Stream status to central dashboard (e.g. http://192.168.1.10:7779)
   --assistant          Run in assistant mode (uses code-assistant RUN_ID)
+  --optuna             Enable Hyperparameter Optimization for training
+  --n-trials N         Number of HPO trials (default: 10)
   --help               Show this help
 
 Examples:
@@ -134,6 +138,10 @@ while [[ $# -gt 0 ]]; do
             check_arg "$1" "$2"; export DASHBOARD_URL="$2"; shift 2;;
         --assistant)
             ASSISTANT_MODE=true; shift;;
+        --optuna)
+            OPTUNA=true; shift;;
+        --n-trials)
+            check_arg "$1" "$2"; N_TRIALS="$2"; shift 2;;
         --help|-h)
             print_usage; exit 0;;
         *)
@@ -370,7 +378,9 @@ while true; do
     else
         # assume local path
         if [ -d "$repo" ]; then
-            target_dir="$repo"
+            echo "Copying local repository: $repo -> $target_dir"
+            mkdir -p "$target_dir"
+            cp -r "$repo/." "$target_dir/"
         else
             echo "Local path not found: $repo" >&2
             continue
@@ -413,11 +423,7 @@ while true; do
     
     # We want to DELETE files that do NOT match the criteria
     # It's safer to find matching files and move them, OR find non-matching and delete.
-    # Approach: Find ALL files, if it doesn't match extension OR doesn't match size, delete.
-    # Note: 'find' with ! is easier.
-    
-    # But constructing the complex find command dynamically in bash is tricky with eval.
-    # Simpler approach: Find ALL files. Loop and check. Slow but reliable in bash.
+    # Approach: Find ALL files. Loop and check. Slow but reliable in bash.
     # OR: Use 'find' to delete everything that is NOT a directory and NOT in the keep list.
     
     # Let's try to construct the 'keep' expression
@@ -459,7 +465,10 @@ while true; do
 
     echo "Running pipeline for $safe_name (RUN_ID=$RUN_ID, OUT_DIR=$OUT_DIR)"
 
-    if bash "$SCRIPT_DIR/loop.sh" --rounds "$ROUNDS" --samples "$SAMPLES" $( [ "$PIPELINE_MODE" = "collect" ] && echo --collect ); then
+    if bash "$SCRIPT_DIR/loop.sh" --rounds "$ROUNDS" --samples "$SAMPLES" \
+        $( [ "$PIPELINE_MODE" = "collect" ] && echo --collect ) \
+        $( [ "$OPTUNA" = true ] && echo --optuna ) \
+        --n-trials "$N_TRIALS"; then
          touch "$OUT_DIR/.done"
     else
          echo "Pipeline failed for $safe_name"

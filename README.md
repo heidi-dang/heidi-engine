@@ -1,43 +1,67 @@
-# Heidi Engine: Building an Autonomous Coding Agent
+# Heidi Engine: Autonomous Coding Agent
 
-Heidi Engine is an innovative research project designed to create an autonomous coding agent through iterative self-improvement, leveraging a teacher-student distillation approach.
+Heidi Engine is a research project focused on building an autonomous coding agent through iterative self-improvement, leveraging teacher-student distillation and advanced data pipelines.
 
-## Getting Started
+---
 
-### Installation
-To get the project up and running:
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Installation](#installation)
+3. [Data Collection Pipeline](#data-collection-pipeline)
+4. [Model Training](#model-training)
+5. [Monitoring & Dashboard](#monitoring--dashboard)
+6. [C++ Core Optimizations](#c-core-optimizations)
+7. [Hyperparameter Optimization (HPO)](#hyperparameter-optimization-hpo)
+8. [System Requirements](#system-requirements)
+9. [Troubleshooting](#troubleshooting)
+
+---
+
+## Overview
+
+Heidi Engine automates the process of collecting, cleaning, and validating code data, then trains and evaluates models in a closed loop. It supports multi-language validation, distributed monitoring, and high-performance C++ extensions for efficiency.
+
+---
+
+## Installation
+
+Clone the repository and install dependencies:
+
 ```bash
-# Clone the repository
 git clone https://github.com/heidi-dang/heidi-engine.git
 cd heidi-engine
-
-# Install dependencies
 pip install -e .
 ```
 
-## Data Collection (The Core Loop)
+---
 
-The `loop_repos.sh` script manages the process of scraping GitHub repositories, generating synthetic training data, and validating it in a streamlined workflow.
+## Data Collection Pipeline
 
-### Key New Features:
+The core data pipeline is managed by `loop_repos.sh`, which automates:
 
-- **Stack Presets**: Customize the process for specific tech stacks.
-  - `--stack python`: Targets Python projects (`.py`, `.ipynb` files).
-  - `--stack cpp`: Focuses on C++ projects (`.cpp`, `.h`, etc.).
-  - `--stack vite`: Suited for modern frontend frameworks (`.ts`, `.tsx`, `.vue`, `.svelte`).
-  - `--stack web`: Handles general web development (`.js`, `.ts`).
-  - `--stack go`: Targets Go projects (`.go` files).
+- Scraping GitHub repositories
+- Generating and validating synthetic training data
+- Filtering and deduplication
 
-- **Smart Filtering**: Automatically excludes homework-like repositories, checks for permissive licenses (e.g., MIT or Apache 2.0), and caps file sizes for better efficiency.
-- **Golden Repos**: Include curated, high-quality repositories (such as Flask, React, or PyTorch) with `--golden`.
-- **Resume Support**: Continue from previous runs using `--resume`.
-- **Global Deduplication**: Merge and deduplicate data at the end with `--dedupe`.
+**Key Features:**
 
-By default, the script uses a formula where each round processes up to 33 maximum samples (1 round = 33 max samples). You can override this with custom values for `--rounds` and `--samples`.
+- **Stack Presets:**
+  - `--stack python` (Python: `.py`, `.ipynb`)
+  - `--stack cpp` (C++: `.cpp`, `.h`)
+  - `--stack vite` (Modern frontend: `.ts`, `.tsx`, `.vue`, `.svelte`)
+  - `--stack web` (Web: `.js`, `.ts`)
+  - `--stack go` (Go: `.go`)
+- **Smart Filtering:** Excludes homework-like repos, checks for permissive licenses, and limits file sizes.
+- **Golden Repos:** Add curated, high-quality repos with `--golden`.
+- **Resume Support:** Continue previous runs with `--resume`.
+- **Global Deduplication:** Merge and deduplicate with `--dedupe`.
 
-### Example Command:
+**Default:** Each round processes up to 33 samples. Override with `--rounds` and `--samples`.
+
+**Example:**
+
 ```bash
-# Collect high-quality Python data from up to 100 repositories
 ./scripts/loop_repos.sh \
   --stack python \
   --max 100 \
@@ -48,19 +72,19 @@ By default, the script uses a formula where each round processes up to 33 maximu
   --dedupe
 ```
 
-### Uploading to Hugging Face:
-Push your final dataset to Hugging Face for easy sharing:
+**Upload to Hugging Face:**
+
 ```bash
 ./scripts/loop_repos.sh --stack python --max 100 --push-to-hub my-org/my-dataset
 ```
 
+---
+
 ## Model Training
 
-Integrate training into the data collection loop with `--full` in `loop_repos.sh`, or use the dedicated script for more control.
+Train models as part of the data loop (`--full`), or standalone for more control:
 
-### Standalone Training Example:
 ```bash
-# Train on the deduplicated dataset from data collection
 ./scripts/train_only.py \
   --data ./autotrain_repos/merged_dataset.jsonl \
   --base-model microsoft/phi-2 \
@@ -68,63 +92,78 @@ Integrate training into the data collection loop with `--full` in `loop_repos.sh
   --out-dir ./my_model_output
 ```
 
-## Monitoring Progress
+---
 
-Track your runs in real time with our dashboard tools.
+## Monitoring & Dashboard
 
-### Option 1: Simple TUI Dashboard (Recommended):
+Track progress in real time with two dashboard options:
+
+### 1. Terminal Dashboard (Recommended)
+
 ```bash
 ./scripts/dashboard.sh
 ```
 
-### Option 2: Web-Based Dashboard:
+### 2. Web Dashboard
+
 Start the telemetry server:
+
 ```bash
 python3 -m heidi_engine.telemetry init --server
 ```
-Then access it at `http://127.0.0.1:7779/`.
+Access at: [http://127.0.0.1:7779/](http://127.0.0.1:7779/)
 
-**Highlights:**
-- Real-time stats on generation, validation, and failure rates.
-- Training metrics like loss and steps.
-- GPU VRAM monitoring.
-- API cost estimates.
-- Dark mode for a modern look.
+**Features:**
+
+- Real-time stats: generation, validation, failure rates
+- Training metrics: loss, steps
+- GPU VRAM monitoring
+- API cost estimates
+- Dark mode
 
 ### Multi-Machine Monitoring
-Monitor distributed training from a single dashboard.
 
-1. **On the Dashboard Machine**:
-   Launch the server:
-   ```bash
-   python3 -m heidi_engine.telemetry init --server
-   ```
-   View at `http://127.0.0.1:7779/`.
+Monitor distributed training from a single dashboard:
 
-2. **On Worker Machines**:
-   Include `--monitor` in your command, specifying the dashboard address:
-   ```bash
-   ./scripts/loop_repos.sh --stack python --monitor http://<dashboard-ip>:7779
-   ```
+**On Dashboard Machine:**
 
-### 6. C++ Core Optimizations ⚡
-High-performance C++ extensions for data processing and resource management.
-- **Speed**: Deduplication and transpose up to 3.4x faster than Python.
-- **Efficiency**: Arena allocation and vectorized compression.
-- **Kernel Integration**: Submodule linking with [heidi-kernel](https://github.com/heidi-dang/heidi-kernel) for deterministic resource bounding.
-- **Monitoring**: Real-time GPU VRAM tracking via CUDA.
+```bash
+python3 -m heidi_engine.telemetry init --server
+```
+View at [http://127.0.0.1:7779/](http://127.0.0.1:7779/)
 
-For details, see [docs/cpp_optimizations.md](file:///home/heidi/work/heidi-engine-dev1/docs/cpp_optimizations.md).
+**On Worker Machines:**
 
-### 7. Hyperparameter Optimization (HPO) 🔦
-Integrated Optuna-powered sweep for finding optimal training parameters.
+```bash
+./scripts/loop_repos.sh --stack python --monitor http://<dashboard-ip>:7779
+```
 
-- **Automated Searches**: Explore `learning_rate`, `batch_size`, and `lora_r`.
-- **Resource Aware**: Uses `heidi_cpp` to skip trials if GPU VRAM is low (<1GB).
-- **Dashboard Integration**: Real-time broadcasting of "Best So Far" params to the telemetry dashboard.
-- **Fail-Safe Trials**: Automated infinite-loss fallback for trials that encounter OOM or script crashes.
+---
 
-**Usage:**
+## C++ Core Optimizations
+
+High-performance C++ extensions accelerate data processing and resource management:
+
+- **Speed:** Deduplication and transpose up to 3.4x faster than Python
+- **Efficiency:** Arena allocation, vectorized compression
+- **Kernel Integration:** Submodule linking with [heidi-kernel](https://github.com/heidi-dang/heidi-kernel)
+- **Monitoring:** Real-time GPU VRAM tracking via CUDA
+
+See [docs/cpp_optimizations.md](docs/cpp_optimizations.md) for details.
+
+---
+
+## Hyperparameter Optimization (HPO)
+
+Integrated Optuna-powered sweeps for optimal training parameters:
+
+- **Automated Search:** Explores `learning_rate`, `batch_size`, `lora_r`
+- **Resource Awareness:** Skips trials if GPU VRAM <1GB
+- **Dashboard Integration:** Broadcasts best params in real time
+- **Fail-Safe:** Infinite-loss fallback for OOM or script crashes
+
+**Example:**
+
 ```bash
 ./scripts/train_only.py --data dataset.jsonl --optuna --n-trials 20
 ```
@@ -133,16 +172,18 @@ Integrated Optuna-powered sweep for finding optimal training parameters.
 
 ## System Requirements
 
-### Compiler Requirements for Validation
-For full multi-language validation, ensure these compilers are installed:
-- `g++` for C++.
-- `node` for JavaScript/TypeScript.
-- `go` for Go.
+**Compiler Requirements for Validation:**
+
+- `g++` (C++)
+- `node` (JavaScript/TypeScript)
+- `go` (Go)
+
+---
 
 ## Troubleshooting
 
-- **Connection Issues**: Verify firewall settings and that the telemetry server is running.
-- **Authentication Errors**: Set the `TELEMETRY_PASS` environment variable for secure access.
-- **Validation Failures**: Check for missing compilers or unsupported languages; fallback logging is enabled.
+- **Connection Issues:** Check firewall and telemetry server status
+- **Authentication Errors:** Set `TELEMETRY_PASS` environment variable
+- **Validation Failures:** Ensure compilers are installed; fallback logging is enabled
 
-For more details, see [walkthrough_v1.md](file:///home/heidi/work/heidi-engine-dev1/docs/walkthrough_v1.md).
+For more, see [docs/walkthrough_v1.md](docs/walkthrough_v1.md).

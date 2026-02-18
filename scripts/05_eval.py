@@ -44,6 +44,9 @@ import sys
 from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
+# Add project root to sys.path to allow importing heidi_engine
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 
 def parse_args() -> argparse.Namespace:
     """

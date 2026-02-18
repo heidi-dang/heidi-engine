@@ -10,8 +10,12 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 from glob import glob
 from tqdm import tqdm
+
+# Add project root to sys.path to allow importing heidi_engine
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def get_hash(obj):
     """Generate a hash for the sample content (instruction + input + output)."""

@@ -6,6 +6,12 @@ import sys
 import json
 from pathlib import Path
 
+# Add project root to sys.path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+import sys
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 try:
     import optuna
     HAS_OPTUNA = True
@@ -129,13 +135,27 @@ def main():
         print("[ERROR] Optuna not found. Install with: pip install optuna")
         sys.exit(1)
 
-    # Initialize Telemetry
-    tel.init_telemetry(config=vars(args))
-
     # Paths
     script_dir = Path(__file__).parent.absolute()
     data_path = Path(args.data).absolute()
     out_dir = Path(args.out_dir).absolute()
+
+    # Initialize Telemetry (Filter to only pass fields in telemetry schema)
+    # The schema expects uppercase keys, but we can also just pass what it needs.
+    tel_config = {
+        "BASE_MODEL": args.base_model,
+        "SEQ_LEN": args.seq_len,
+        "BATCH_SIZE": args.batch_size,
+        "GRAD_ACCUM": args.grad_accum,
+        "TRAIN_STEPS": args.steps,
+        "LORA_R": args.lora_r,
+        "LR": str(args.lr),
+        "SEED": args.seed,
+        "VAL_RATIO": args.val_ratio,
+        "OUT_DIR": str(out_dir)
+    }
+    # Add HPO specific if desired, but telemetry schema might need update first.
+    tel.init_telemetry(config=tel_config)
     
     if not data_path.exists():
         print(f"[ERROR] Data file not found: {data_path}")
@@ -186,6 +206,26 @@ def main():
         with open(out_dir / "best_params.json", "w") as f:
             json.dump(study.best_params, f, indent=2)
             
+        # Symlink best trial's adapter 'final' directory to the expected 'final' location
+        best_trial_dir = out_dir / f"trial_{study.best_trial.number}"
+        best_adapter_src = best_trial_dir / "adapter" / "final"
+        adapter_dest = out_dir / "final"
+        
+        if adapter_dest.exists() or adapter_dest.is_symlink():
+            if adapter_dest.is_dir() and not adapter_dest.is_symlink():
+                import shutil
+                shutil.rmtree(adapter_dest)
+            else:
+                adapter_dest.unlink()
+        
+        try:
+            # Create parent if it doesn't exist (it should, but just in case)
+            adapter_dest.parent.mkdir(parents=True, exist_ok=True)
+            os.symlink(best_adapter_src, adapter_dest)
+            print(f"[INFO] Symlinked best trial ({study.best_trial.number}) adapter to {adapter_dest}")
+        except Exception as e:
+            print(f"[WARN] Failed to symlink best trial: {e}")
+
         # Optional: Run final training with best params
         print("\n[INFO] Final training with best parameters skipped (manual override recommended).")
         return
