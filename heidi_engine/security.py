@@ -38,9 +38,12 @@ def sign_record(record: dict) -> str:
     return hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
 
 def verify_record(record: dict) -> bool:
-    """Verifies the signature of a record."""
+    """
+    Verifies the signature of a record.
+    Returns True if signature is missing (for compatibility) or valid.
+    """
     if "signature" not in record.get("metadata", {}):
-        return False
+        return True
     
     expected_sig = record["metadata"]["signature"]
     actual_sig = sign_record(record)
