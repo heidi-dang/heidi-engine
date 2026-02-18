@@ -181,15 +181,45 @@ _INDIVIDUAL_PATTERNS = [(re.compile(p, re.IGNORECASE), r) for p, r in SECRET_PAT
 # Combined regex for single-pass identification
 # We use named groups to identify which pattern matched
 _COMBINED_SECRET_RE = None
-if SECRET_PATTERNS:
-    _normalized_patterns = []
-    for i, (p, _) in enumerate(SECRET_PATTERNS):
-        # Robustly remove inline ignore-case flag as we apply it globally to the combined regex.
-        # We do this separately to avoid backslashes in f-string expressions for Python < 3.12.
-        p_str = p.pattern if hasattr(p, "pattern") else str(p)
-        clean_p = re.sub(r"\(\?i\)", "", p_str)
-        _normalized_patterns.append(f"(?P<redact_{i}>{clean_p})")
-    _COMBINED_SECRET_RE = re.compile("|".join(_normalized_patterns), re.IGNORECASE)
+_INDIVIDUAL_PATTERNS = []
+
+def _ensure_compiled():
+    """Ensure the combined regex is compiled, handle dynamic updates to SECRET_PATTERNS."""
+    global _COMBINED_SECRET_RE, _INDIVIDUAL_PATTERNS
+
+    # In most cases it's already compiled
+    if _COMBINED_SECRET_RE is not None and len(_INDIVIDUAL_PATTERNS) == len(SECRET_PATTERNS):
+        return
+
+    with _lock:
+        # Double-check inside lock
+        if _COMBINED_SECRET_RE is not None and len(_INDIVIDUAL_PATTERNS) == len(SECRET_PATTERNS):
+            return
+
+        _INDIVIDUAL_PATTERNS = [(re.compile(p, re.IGNORECASE), r) for p, r in SECRET_PATTERNS]
+
+        if not SECRET_PATTERNS:
+            _COMBINED_SECRET_RE = None
+            return
+
+        _normalized_patterns = []
+        for i, (p, _) in enumerate(SECRET_PATTERNS):
+            # Robustly remove inline ignore-case flag as we apply it globally to the combined regex.
+            # We do this separately to avoid backslashes in f-string expressions for Python < 3.12.
+            p_str = p.pattern if hasattr(p, "pattern") else str(p)
+            clean_p = re.sub(r"\(\?i\)", "", p_str)
+
+            # To avoid group name collisions if the original pattern has named groups,
+            # we convert them to non-capturing groups.
+            clean_p = re.sub(r"\(\?P<[^>]+>", "(?:", clean_p)
+
+            _normalized_patterns.append(f"(?P<redact_{i}>{clean_p})")
+
+        try:
+            _COMBINED_SECRET_RE = re.compile("|".join(_normalized_patterns), re.IGNORECASE)
+        except re.error:
+            # Fallback to None if compilation fails (e.g. invalid combined regex)
+            _COMBINED_SECRET_RE = None
 
 
 def redact_secrets(text: str) -> str:
@@ -211,14 +241,18 @@ def redact_secrets(text: str) -> str:
     # Strip ANSI first
     text = ANSI_ESCAPE.sub("", text)
 
+    _ensure_compiled()
     if not _COMBINED_SECRET_RE:
-        return text
+        # Fallback to sequential if combined failed or is empty
+        res = text
+        for p_re, replacement in _INDIVIDUAL_PATTERNS:
+            res = p_re.sub(replacement, res)
+        return res
 
     # Redact secrets in a single pass
     def _redact_callback(match):
         val = match.group(0)
         # Use match.lastgroup for efficient O(1) identification of the matching pattern.
-        # We fallback to a loop if an internal named group within a pattern matched last.
         group_name = match.lastgroup
         if group_name and group_name.startswith("redact_"):
             try:
@@ -229,12 +263,14 @@ def redact_secrets(text: str) -> str:
                 pass
 
         # Fallback: Find which top-level group matched to use the correct replacement
+        # This handles cases where match.lastgroup might be an internal group (if conversion failed)
         for i in range(len(_INDIVIDUAL_PATTERNS)):
-            if match.group(f"redact_{i}") is not None:
-                p, r = _INDIVIDUAL_PATTERNS[i]
-                # Use individual p.sub to correctly handle backreferences and nested groups
-                # Note: val is just the matched portion, so p.sub is very efficient
-                return p.sub(r, val)
+            try:
+                if match.group(f"redact_{i}") is not None:
+                    p, r = _INDIVIDUAL_PATTERNS[i]
+                    return p.sub(r, val)
+            except IndexError:
+                continue
         return val
 
     return _COMBINED_SECRET_RE.sub(_redact_callback, text)
