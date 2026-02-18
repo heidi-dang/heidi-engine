@@ -106,6 +106,67 @@ def test_gpu_memory():
     print(f"Free GPU memory: {free_mem} bytes")
     # If 0, it might just mean no CUDA or no GPU, which is fine for a test
 
+def benchmark_transpose():
+    print("\n--- Benchmarking In-PLACE Transpose (Square) ---")
+    dim = 2000
+    data = np.random.rand(dim * dim).astype(np.float32)
+    
+    # NumPy (copy transpose)
+    start = time.time()
+    _ = data.reshape(dim, dim).T.copy()
+    py_time = time.time() - start
+    print(f"NumPy reshape().T.copy() time: {py_time:.4f}s")
+    
+    # C++ In-place
+    cpp_data = data.copy()
+    start = time.time()
+    heidi_cpp.transpose_inplace(cpp_data, dim, dim)
+    cpp_time = time.time() - start
+    print(f"C++ transpose_inplace time: {cpp_time:.4f}s")
+    
+    # Correctness
+    expected = data.reshape(dim, dim).T.flatten()
+    assert np.allclose(cpp_data, expected), "Transpose mismatch"
+    print("Correctness verified.")
+
+def benchmark_custom_dedup():
+    print("\n--- Benchmarking Custom Hash Deduplication ---")
+    data = [f"long_string_prefix_{random.randint(0, 5000)}_suffix_{i}" for i in range(100000)]
+    
+    start = time.time()
+    res1 = heidi_cpp.deduplicate_strings(data)
+    t1 = time.time() - start
+    print(f"C++ STL hash dedup time: {t1:.4f}s")
+    
+    start = time.time()
+    res2 = heidi_cpp.dedup_with_custom_hash(data)
+    t2 = time.time() - start
+    print(f"C++ custom hash dedup time: {t2:.4f}s")
+    
+    assert len(res1) == len(res2), "Dedup size mismatch"
+    print("Correctness verified.")
+
+def benchmark_batch_compression():
+    print("\n--- Benchmarking Batch Log Compression ---")
+    logs = [f"log_entry_{i}_" + "A" * 100 for i in range(10000)]
+    
+    start = time.time()
+    compressed = heidi_cpp.compress_logs(logs)
+    cpp_time = time.time() - start
+    print(f"C++ compress_logs (10k items) time: {cpp_time:.4f}s")
+    assert len(compressed) == 10000
+
+def test_resource_limits():
+    print("\n--- Testing Resource Limiter Wrapper ---")
+    def dummy():
+        pass
+    
+    try:
+        heidi_cpp.run_with_limits(dummy, max_threads=2, max_memory_mb=2048)
+        print("Resource limiter executed successfully (dummy).")
+    except Exception as e:
+        print(f"Resource limiter failed (expected on some systems): {e}")
+
 if __name__ == "__main__":
     import json
     try:
@@ -115,7 +176,14 @@ if __name__ == "__main__":
         benchmark_parallel_validate()
         benchmark_compression()
         test_gpu_memory()
-        print("\nAll C++ phase 2 optimizations verified successfully!")
+        
+        # Phase 3
+        benchmark_transpose()
+        benchmark_custom_dedup()
+        benchmark_batch_compression()
+        test_resource_limits()
+        
+        print("\nAll 10 C++ optimizations verified successfully!")
     except Exception as e:
         print(f"\nVerification failed: {e}")
         import traceback

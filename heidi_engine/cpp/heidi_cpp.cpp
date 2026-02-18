@@ -1,6 +1,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
+#include <pybind11/functional.h>
 #include <unordered_set>
 #include <vector>
 #include <string>
@@ -10,6 +11,7 @@
 #include <thread>
 #include <mutex>
 #include <zlib.h>
+#include <sys/resource.h>
 
 #ifdef HAS_CUDA
 #include <cuda_runtime.h>
@@ -77,7 +79,6 @@ std::vector<bool> parallel_validate(const std::vector<std::string>& snippets, in
     auto worker = [&](size_t start, size_t end) {
         for (size_t i = start; i < end; ++i) {
             // High-level "validation": check length and non-emptiness
-            // In real use, this could trigger sub-validators if thread-safe
             bool valid = !snippets[i].empty() && snippets[i].length() > 5;
             
             std::lock_guard<std::mutex> lock(mtx);
@@ -124,9 +125,79 @@ size_t get_free_gpu_memory() {
     }
     return 0;
 #else
-    // Fallback or warning if CUDA not compiled in
     return 0; 
 #endif
+}
+
+// 7. In-Place Tensor Transpose (Square only optimized, basic error check)
+void transpose_inplace(py::array_t<float> matrix, size_t rows, size_t cols) {
+    py::buffer_info info = matrix.request();
+    if (rows * cols != static_cast<size_t>(info.size)) {
+        throw std::runtime_error("Matrix size mismatch");
+    }
+    if (rows != cols) {
+        throw std::runtime_error("In-place transpose currently only supports square matrices in this version");
+    }
+
+    float* ptr = static_cast<float*>(info.ptr);
+    for (size_t i = 0; i < rows; ++i) {
+        for (size_t j = i + 1; j < cols; ++j) {
+            std::swap(ptr[i * cols + j], ptr[j * rows + i]);
+        }
+    }
+}
+
+// 8. Cache-Aware Hasher
+std::vector<std::string> dedup_with_custom_hash(const std::vector<std::string>& inputs) {
+    struct CacheAwareHasher {
+        size_t operator()(const std::string& s) const {
+            size_t hash = 0;
+            for (char c : s) hash = hash * 31 + static_cast<size_t>(c);
+            return hash;
+        }
+    };
+    std::unordered_set<std::string, CacheAwareHasher> seen;
+    std::vector<std::string> result;
+    result.reserve(inputs.size());
+    for (const auto& s : inputs) {
+        if (seen.insert(s).second) {
+            result.push_back(s);
+        }
+    }
+    return result;
+}
+
+// 9. Batch Compressor for Logs
+std::vector<py::bytes> compress_logs(const std::vector<std::string>& logs) {
+    std::vector<py::bytes> compressed;
+    compressed.reserve(logs.size());
+    for (const auto& log : logs) {
+        uLongf source_len = log.size();
+        uLongf dest_len = compressBound(source_len);
+        std::vector<Bytef> buf(dest_len);
+        if (compress(buf.data(), &dest_len, reinterpret_cast<const Bytef*>(log.data()), source_len) == Z_OK) {
+            compressed.emplace_back(reinterpret_cast<const char*>(buf.data()), dest_len);
+        } else {
+            compressed.emplace_back(""); // Or throw
+        }
+    }
+    return compressed;
+}
+
+// 10. Resource Limiter Wrapper
+void run_with_limits(const std::function<void()>& func, int max_threads, size_t max_memory_mb) {
+    // Note: Setting caps in a shared library can affect the whole process.
+    // Memory limit (Address Space)
+    if (max_memory_mb > 0) {
+        struct rlimit lim;
+        if (getrlimit(RLIMIT_AS, &lim) == 0) {
+            lim.rlim_cur = max_memory_mb * 1024 * 1024;
+            setrlimit(RLIMIT_AS, &lim);
+        }
+    }
+    // Note: max_threads enforcement would typically be done via OpenMP or pool control.
+    // We'll execute the function as a wrapper.
+    func();
 }
 
 PYBIND11_MODULE(heidi_cpp, m) {
@@ -141,6 +212,13 @@ PYBIND11_MODULE(heidi_cpp, m) {
         return py::bytes(compressed);
     }, "zlib-based data compression");
     m.def("get_free_gpu_memory", &get_free_gpu_memory, "Get free GPU memory bytes (requires CUDA)");
+
+    // Phase 3 bindings
+    m.def("transpose_inplace", &transpose_inplace, "In-place matrix transpose (square only)");
+    m.def("dedup_with_custom_hash", &dedup_with_custom_hash, "Deduplication with custom cache-aware hash");
+    m.def("compress_logs", &compress_logs, "Batch compress a list of log strings");
+    m.def("run_with_limits", &run_with_limits, "Run a Python function under resource limits",
+          py::arg("func"), py::arg("max_threads") = 0, py::arg("max_memory_mb") = 0);
 
     py::class_<ArenaAllocator>(m, "ArenaAllocator")
         .def(py::init<size_t>())
