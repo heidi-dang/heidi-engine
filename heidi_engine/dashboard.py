@@ -59,6 +59,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from heidi_engine.telemetry import get_gpu_info
 from rich import box
 
 # Rich imports for TUI
@@ -352,56 +353,6 @@ def format_time(ts: str) -> str:
 # =============================================================================
 
 
-def poll_gpu_info() -> Dict[str, Any]:
-    """
-    Poll GPU information using nvidia-smi.
-
-    HOW IT WORKS:
-        - Runs nvidia-smi command
-        - Parses output for VRAM usage
-        - Caches result for display
-
-    TUNABLE:
-        - Adjust polling frequency via GPU_POLL_INTERVAL
-        - Add more metrics as needed
-
-    RETURNS:
-        Dictionary with GPU info (empty if no GPU)
-    """
-    try:
-        import subprocess
-
-        result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=memory.used,memory.total,utilization.gpu",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-
-        if result.returncode == 0:
-            parts = result.stdout.strip().split(",")
-            if len(parts) >= 2:
-                used = int(parts[0].strip())
-                total = int(parts[1].strip())
-                util = int(parts[2].strip()) if len(parts) > 2 else 0
-
-                return {
-                    "available": True,
-                    "memory_used_mb": used,
-                    "memory_total_mb": total,
-                    "memory_used_pct": (used / total * 100) if total > 0 else 0,
-                    "utilization_pct": util,
-                }
-    except Exception:
-        pass
-
-    return {"available": False}
-
-
 def start_gpu_poller():
     """
     Start background thread for GPU polling.
@@ -419,7 +370,7 @@ def start_gpu_poller():
         while running:
             with gpu_lock:
                 global gpu_info
-                gpu_info = poll_gpu_info()
+                gpu_info = get_gpu_info()
             time.sleep(GPU_POLL_INTERVAL)
 
     thread = threading.Thread(target=poll_loop, daemon=True)
