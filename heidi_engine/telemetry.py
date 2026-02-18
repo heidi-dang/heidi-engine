@@ -182,14 +182,14 @@ _INDIVIDUAL_PATTERNS = [(re.compile(p, re.IGNORECASE), r) for p, r in SECRET_PAT
 # We use named groups to identify which pattern matched
 _COMBINED_SECRET_RE = None
 if SECRET_PATTERNS:
-    # Robustly remove inline ignore-case flag as we apply it globally to the combined regex
-    _COMBINED_SECRET_RE = re.compile(
-        "|".join(
-            f"(?P<redact_{i}>{re.sub(r'\(\?i\)', '', p)})"
-            for i, (p, _) in enumerate(SECRET_PATTERNS)
-        ),
-        re.IGNORECASE,
-    )
+    _normalized_patterns = []
+    for i, (p, _) in enumerate(SECRET_PATTERNS):
+        # Robustly remove inline ignore-case flag as we apply it globally to the combined regex.
+        # We do this separately to avoid backslashes in f-string expressions for Python < 3.12.
+        p_str = p.pattern if hasattr(p, "pattern") else str(p)
+        clean_p = re.sub(r"\(\?i\)", "", p_str)
+        _normalized_patterns.append(f"(?P<redact_{i}>{clean_p})")
+    _COMBINED_SECRET_RE = re.compile("|".join(_normalized_patterns), re.IGNORECASE)
 
 
 def redact_secrets(text: str) -> str:
@@ -217,7 +217,18 @@ def redact_secrets(text: str) -> str:
     # Redact secrets in a single pass
     def _redact_callback(match):
         val = match.group(0)
-        # Find which group matched to use the correct replacement
+        # Use match.lastgroup for efficient O(1) identification of the matching pattern.
+        # We fallback to a loop if an internal named group within a pattern matched last.
+        group_name = match.lastgroup
+        if group_name and group_name.startswith("redact_"):
+            try:
+                idx = int(group_name[7:])
+                p, r = _INDIVIDUAL_PATTERNS[idx]
+                return p.sub(r, val)
+            except (ValueError, IndexError):
+                pass
+
+        # Fallback: Find which top-level group matched to use the correct replacement
         for i in range(len(_INDIVIDUAL_PATTERNS)):
             if match.group(f"redact_{i}") is not None:
                 p, r = _INDIVIDUAL_PATTERNS[i]
