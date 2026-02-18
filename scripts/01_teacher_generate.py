@@ -340,13 +340,21 @@ def generate_dataset(
 
     samples = []
 
-    # Distribute samples across task types evenly
-    for i in range(num_samples):
+    # Try to import validator
+    try:
+        from heidi_engine.validator import validate_code
+        HAS_VALIDATOR = True
+    except ImportError:
+        HAS_VALIDATOR = False
+        print("[WARN] Validator not found, skipping code validation", file=sys.stderr)
+
+    while len(samples) < num_samples:
         # Select template (could weight this for different distributions)
         template = random.choice(PROMPT_TEMPLATES)
 
+        # Generate sample
         sample = generate_sample(
-            idx=i,
+            idx=len(samples),
             round_num=round_num,
             template=template,
             teacher_model=teacher_model,
@@ -354,6 +362,17 @@ def generate_dataset(
             max_output=max_output,
             language=language,
         )
+
+        # Validate code if validator is available
+        if HAS_VALIDATOR:
+            # Extract code block from output for validation
+            # Look for ```language ... ``` blocks
+            code_match = re.search(f"```{language}(.*?)```", sample["output"], re.DOTALL)
+            if code_match:
+                code_to_check = code_match.group(1)
+                if not validate_code(language, code_to_check):
+                    print(f"  [SKIP] Validation failed for sample {len(samples)} ({language})", file=sys.stderr)
+                    continue
 
         samples.append(sample)
 
@@ -363,8 +382,8 @@ def generate_dataset(
             time.sleep(sleep_time)
 
         # Progress indicator
-        if (i + 1) % 10 == 0:
-            print(f"  Generated {i + 1}/{num_samples} samples", file=sys.stderr)
+        if (len(samples)) % 10 == 0:
+            print(f"  Generated {len(samples)}/{num_samples} samples", file=sys.stderr)
 
     return samples
 

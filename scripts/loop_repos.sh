@@ -138,6 +138,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Auto-discovery for Docker/Multi-machine
+if [ -z "${DASHBOARD_URL:-}" ] && [ -n "${DASHBOARD_HOST:-}" ]; then
+    export DASHBOARD_URL="$DASHBOARD_HOST"
+    echo "[INFO] Auto-discovered dashboard at: $DASHBOARD_URL"
+fi
+
 if [ -n "$STACK" ]; then
     # Default license filter for stacks
     license_filter="license:mit"

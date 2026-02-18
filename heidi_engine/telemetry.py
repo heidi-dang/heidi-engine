@@ -1234,6 +1234,9 @@ def start_reporter(dashboard_url: str):
 
     def reporter_loop():
         error_count = 0
+        telemetry_pass = os.environ.get("TELEMETRY_PASS")
+        auth = ("admin", telemetry_pass) if telemetry_pass else None
+        
         while True:
             try:
                 state = get_state()
@@ -1243,7 +1246,7 @@ def start_reporter(dashboard_url: str):
                 if "run_id" not in redacted:
                     redacted["run_id"] = get_run_id()
                 
-                requests.post(f"{dashboard_url}/report", json=redacted, timeout=5)
+                requests.post(f"{dashboard_url}/report", json=redacted, timeout=5, auth=auth)
                 error_count = 0
             except Exception:
                 error_count += 1

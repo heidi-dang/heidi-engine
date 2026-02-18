@@ -157,6 +157,50 @@ You can tweak `scripts/loop_repos.sh` to change:
 *   `VAL_RATIO`: Validation split (default: 0.05)
 *   `SLEEP_BETWEEN_REQUESTS`: Rate limiting (default: 0)
 
+
+## 🌐 Multi-Machine Setup Guide
+
+Heidi Engine is designed to scale across multiple workers reporting to a central dashboard.
+
+### 1. Central Dashboard Machine
+On the machine that will host the dashboard:
+```bash
+# Set a password for security
+export TELEMETRY_PASS="your_secure_password"
+python3 -m heidi_engine.telemetry_server
+```
+
+### 2. Worker Machines
+On each worker machine, point to the central dashboard:
+```bash
+export DASHBOARD_HOST="http://<dashboard-ip>:7779"
+export TELEMETRY_PASS="your_secure_password" # Must match server
+./scripts/loop_repos.sh --stack python --monitor
+```
+
+### 3. Using Docker Compose (Recommended)
+You can launch a complete multi-machine environment locally or on a server using Docker:
+```bash
+docker-compose up --build
+```
+This starts one telemetry server and one worker by default.
+
+## 🔧 Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| **"No runs found"** | Check that `AUTOTRAIN_DIR` is consistent. The default is `~/.local/heidi_engine`. Ensure yours doesn't have a typo (e.g., `heidi-engine`). |
+| **Connection Refused** | Ensure the telemetry server is running and the port `7779` is open in your firewall. |
+| **Authentication Failed** | Verify that `TELEMETRY_PASS` matches on both the server and the worker. |
+| **Validation Failed** | If code validation is skipping too many samples, ensure you have `g++`, `node`, and `go` installed on the worker machine. |
+
+## 🧪 Testing
+
+Run the test suite to verify your installation:
+```bash
+pytest tests/
+```
+
 ## 📄 License
 
 MIT License.
