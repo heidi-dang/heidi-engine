@@ -86,7 +86,7 @@ source "$SCRIPT_DIR/common.sh"
 
 # Check if Python telemetry module is available
 TELEMETRY_AVAILABLE=false
-if python3 -c "import autotrain.telemetry" 2>/dev/null; then
+if python3 -c "import heidi_engine.telemetry" 2>/dev/null; then
     TELEMETRY_AVAILABLE=true
 fi
 
@@ -113,7 +113,7 @@ emit_event() {
         fi
         
         python3 -c "
-import autotrain.telemetry as tm
+import heidi_engine.telemetry as tm
 tm.emit_event(
     event_type='$event_type',
     message=\"$message\",
@@ -132,7 +132,7 @@ tm.flush_events()
 check_stop_request() {
     if [ "$TELEMETRY_AVAILABLE" = true ]; then
         python3 -c "
-import autotrain.telemetry as tm
+import heidi_engine.telemetry as tm
 if tm.check_stop_requested():
     exit(0)
 exit(1)
@@ -145,7 +145,7 @@ exit(1)
 check_pause_request() {
     if [ "$TELEMETRY_AVAILABLE" = true ]; then
         python3 -c "
-import autotrain.telemetry as tm
+import heidi_engine.telemetry as tm
 if tm.check_pause_requested():
     exit(0)
 exit(1)
@@ -174,7 +174,7 @@ init_telemetry() {
         }"
         
         python3 -c "
-import autotrain.telemetry as tm
+import heidi_engine.telemetry as tm
 import os
 os.environ['AUTOTRAIN_DIR'] = '$OUT_DIR'
 run_id = tm.init_telemetry(
@@ -202,7 +202,7 @@ set_status() {
     
     if [ "$TELEMETRY_AVAILABLE" = true ]; then
         python3 -c "
-import autotrain.telemetry as tm
+import heidi_engine.telemetry as tm
 tm.set_status('$status', '$stage', $round)
 " 2>/dev/null || true
     fi
@@ -214,7 +214,7 @@ update_counters() {
     
     if [ "$TELEMETRY_AVAILABLE" = true ] && [ -n "$delta" ]; then
         python3 -c "
-import autotrain.telemetry as tm
+import heidi_engine.telemetry as tm
 tm.update_counters($delta)
 " 2>/dev/null || true
     fi
@@ -226,7 +226,7 @@ update_usage() {
     
     if [ "$TELEMETRY_AVAILABLE" = true ] && [ -n "$delta" ]; then
         python3 -c "
-import autotrain.telemetry as tm
+import heidi_engine.telemetry as tm
 tm.update_usage($delta, '$TEACHER_MODEL')
 " 2>/dev/null || true
     fi
@@ -801,7 +801,7 @@ graceful_stop() {
     
     # Request stop in telemetry for menu.py to see
     if [ "$TELEMETRY_AVAILABLE" = true ]; then
-        python3 -c "import autotrain.telemetry as tm; tm.request_stop()" 2>/dev/null || true
+        python3 -c "import heidi_engine.telemetry as tm; tm.request_stop()" 2>/dev/null || true
     fi
     
     exit 0
