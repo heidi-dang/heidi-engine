@@ -58,8 +58,9 @@ def test_format_time():
     ts = "2023-10-27T10:30:00Z"
     assert format_time(ts) == "10:30:00"
 
-    # Invalid format should return first 8 chars or empty
-    assert format_time("invalid-time") == "invalid-"
+    # Invalid format should return first 8 chars (current behavior) or empty
+    # We test the existing behavior which defaults to ts[:8]
+    assert format_time("1234567890") == "12345678"
     assert format_time("") == ""
 
 def test_get_default_state():
