@@ -345,12 +345,23 @@ def get_run_dir(run_id: Optional[str] = None) -> Path:
         Creates runs/<run_id>/ directory structure.
         All run-specific files go here.
 
+    SECURITY:
+        - Prevents path traversal by ensuring run_id stays within runs/
+
     TUNABLE:
         - Modify directory structure by changing path construction
     """
     if run_id is None:
         run_id = get_run_id()
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+
+    # SECURITY FIX: Prevent path traversal in run_id
+    # We take the filename part of each component or just the final name
+    # If run_id is a simple string, Path(run_id).name is enough.
+    # If it's intended to be hierarchical, we should be more careful.
+    # Given the risks, we'll be restrictive and allow only the final name component.
+    safe_run_id = Path(run_id).name
+
+    return Path(AUTOTRAIN_DIR) / "runs" / safe_run_id
 
 
 def get_events_path(run_id: Optional[str] = None) -> Path:
@@ -1128,8 +1139,29 @@ def _rotate_events_log(events_file: Path) -> None:
     HOW IT WORKS:
         - Renames current log to .1, .2, etc.
         - Deletes oldest if over retention limit
+
+    SECURITY:
+        - Validates that events_file is within authorized runs directory
+        - Prevents path traversal and arbitrary file deletion
     """
-    run_dir = events_file.parent
+    # Fix: Resolve paths and ensure they are within AUTOTRAIN_DIR/runs
+    try:
+        # Use absolute paths for comparison to prevent traversal
+        events_file = events_file.resolve()
+        base_runs_dir = Path(AUTOTRAIN_DIR).resolve() / "runs"
+
+        # Ensure run_dir is under base_runs_dir
+        run_dir = events_file.parent.resolve()
+        run_dir.relative_to(base_runs_dir)
+
+        # Also ensure we are actually rotating an "events.jsonl" file
+        if not events_file.name.startswith("events.jsonl"):
+            return
+
+    except (ValueError, RuntimeError):
+        # ValueError: run_dir is not under base_runs_dir
+        # RuntimeError: resolve() failed
+        return
 
     # Remove oldest if at limit
     oldest = run_dir / f"events.jsonl.{EVENT_LOG_RETENTION}"
