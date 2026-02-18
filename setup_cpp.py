@@ -8,11 +8,13 @@ cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH")
 if not cuda_home and os.path.exists("/usr/local/cuda"):
     cuda_home = "/usr/local/cuda"
 
+import sys
+
 include_dirs = [
     os.path.abspath("submodules/heidi-kernel/include"),
 ]
 library_dirs = []
-libraries = ["z"] # Always link zlib
+libraries = [] if sys.platform == "win32" else ["z"] # Link zlib if not on Windows
 macros = []
 
 if cuda_home and os.path.exists(os.path.join(cuda_home, "include/cuda_runtime.h")):
