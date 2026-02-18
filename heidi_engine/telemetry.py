@@ -182,9 +182,11 @@ _INDIVIDUAL_PATTERNS = [(re.compile(p, re.IGNORECASE), r) for p, r in SECRET_PAT
 # We use named groups to identify which pattern matched
 _COMBINED_SECRET_RE = None
 if SECRET_PATTERNS:
+    # Robustly remove inline ignore-case flag as we apply it globally to the combined regex
     _COMBINED_SECRET_RE = re.compile(
         "|".join(
-            f"(?P<redact_{i}>{p.replace('(?i)', '')})" for i, (p, _) in enumerate(SECRET_PATTERNS)
+            f"(?P<redact_{i}>{re.sub(r'\(\?i\)', '', p)})"
+            for i, (p, _) in enumerate(SECRET_PATTERNS)
         ),
         re.IGNORECASE,
     )
