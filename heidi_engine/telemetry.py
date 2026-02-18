@@ -13,7 +13,7 @@ PURPOSE:
     4. Debugging via event log replay
 
 SECURITY:
-    - HTTP server binds to 127.0.0.1 only (never 0.0.0.0)
+    - HTTP server binds to 127.0.0.1 by default (configurable)
     - All sensitive data is redacted from events and HTTP responses
     - File permissions are set to 0600 where possible
     - No env vars, tokens, or raw prompts exposed
@@ -1313,12 +1313,12 @@ def start_reporter(dashboard_url: str):
     thread = threading.Thread(target=reporter_loop, daemon=True)
     thread.start()
 
-def start_http_server(port: int = 7779) -> None:
+def start_http_server(port: int = 7779, host: str = "127.0.0.1") -> None:
     """
     Start HTTP status server.
 
     SECURITY:
-        - Binds to 0.0.0.0 to allow multi-machine monitoring
+        - Binds to specified host (defaults to 127.0.0.1)
         - Adds /report endpoint to receive remote states
         - Adds /runs endpoint to list all runs
     """
@@ -1527,9 +1527,9 @@ def start_http_server(port: int = 7779) -> None:
 
     def run_server():
         try:
-            # SECURITY: Bind to 0.0.0.0 for multi-machine support
-            server = HTTPServer(("0.0.0.0", port), StateHandler)
-            print(f"[INFO] HTTP status server running on http://0.0.0.0:{port}")
+            # SECURITY: Bind to specified host (defaults to 127.0.0.1)
+            server = HTTPServer((host, port), StateHandler)
+            print(f"[INFO] HTTP status server running on http://{host}:{port}")
             server.serve_forever()
         except Exception as e:
             print(f"[WARN] HTTP server failed: {e}", file=sys.stderr)
