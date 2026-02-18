@@ -611,6 +611,13 @@ def main():
         check_oom_and_suggest()
         sys.exit(1)
 
+    # Evaluate if validation data provided
+    eval_metrics = {}
+    if val_data:
+        logger.info("Evaluating...")
+        eval_metrics = trainer.evaluate()
+        logger.info(f"Eval metrics: {eval_metrics}")
+
     # Save final model
     logger.info("Saving final adapter...")
     final_path = os.path.join(args.output, "final")
@@ -624,6 +631,7 @@ def main():
         "train_loss": train_result.training_loss
         if hasattr(train_result, "training_loss")
         else None,
+        "eval_loss": eval_metrics.get("eval_loss"),
         "base_model": args.base_model,
         "lora_r": args.lora_r,
         "lora_alpha": args.lora_alpha,

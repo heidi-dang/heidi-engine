@@ -64,5 +64,11 @@ Implemented a suite of 10 high-performance C++ modules bound via `pybind11` for 
 > [!TIP]
 > Use `heidi_cpp.transpose_inplace` during QLoRA data prep to eliminate large intermediate memory allocations.
 
+### 5. Hyperparameter Optimization (HPO) 🔦
+Integrated Optuna-powered sweep for finding optimal training parameters:
+- **Search Space**: `lr` (log-scale), `batch_size`, and `lora_r`.
+- **Resource Pruning**: Automated trial skipping if GPU VRAM is <1GB (via `heidi_cpp`).
+- **Real-time Telemetry**: Broadcasting of "Best Trial" results to the dashboard.
+
 ---
 All changes have been successfully implemented, verified, and pushed to `feature/multi-machine-multi-lang-fixes`.

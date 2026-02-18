@@ -115,6 +115,21 @@ Heidi Engine includes a high-performance C++ extension (`heidi_cpp`) for data-in
 - **Batch Compression**: `zlib`-based vectorized log compression.
 - **Resource Management**: `rlimit` wrappers for memory/thread capping.
 
+### 7. Hyperparameter Optimization (HPO) 🔦
+Integrated Optuna-powered sweep for finding optimal training parameters.
+
+- **Automated Searches**: Explore `learning_rate`, `batch_size`, and `lora_r`.
+- **Resource Aware**: Uses `heidi_cpp` to skip trials if GPU VRAM is low (<1GB).
+- **Dashboard Integration**: Real-time broadcasting of "Best So Far" params to the telemetry dashboard.
+- **Fail-Safe Trials**: Automated infinite-loss fallback for trials that encounter OOM or script crashes.
+
+**Usage:**
+```bash
+./scripts/train_only.py --data dataset.jsonl --optuna --n-trials 20
+```
+
+---
+
 ## System Requirements
 
 ### Compiler Requirements for Validation
