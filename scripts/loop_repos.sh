@@ -37,6 +37,9 @@ RESUME=false
 STACK=""
 VAL_RATIO="${VAL_RATIO:-0.05}"
 SLEEP_BETWEEN_REQUESTS="${SLEEP_BETWEEN_REQUESTS:-0}"
+DO_DEDUPE=false
+PUSH_TO_HUB=""
+USE_GOLDEN=false
 
 print_usage() {
     cat <<EOF
@@ -421,7 +424,7 @@ while true; do
     # find . -type f -not \( \( -name "*.py" -o -name "*.cpp" \) -a -size +100c -a -size -1M \) -delete
     
     # Construct extension clause: \( -name "*.py" -o -name "*.cpp" \)
-    ext_clause="( -name \"*.${EXTENSIONS//,/\" -o -name \"*.}\" )"
+    ext_clause="\\( -name \"*.${EXTENSIONS//,/\" -o -name \"*.}\" \\)"
     
     # Execute cleanup
     # We use 'eval' here because of the dynamic construction of args, watching out for injection (EXTENSIONS is internal/controlled)
