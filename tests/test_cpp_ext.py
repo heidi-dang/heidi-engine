@@ -1,4 +1,6 @@
-import heidi_cpp
+import pytest
+heidi_cpp = pytest.importorskip("heidi_cpp")
+
 import time
 import random
 import sys

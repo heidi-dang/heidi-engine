@@ -9,6 +9,12 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from scripts.train_only import run_trial
 
+try:
+    import heidi_cpp
+    HAS_HEIDI_CPP = True
+except ImportError:
+    HAS_HEIDI_CPP = False
+
 class TestHPO(unittest.TestCase):
     def setUp(self):
         self.tmp_dir = Path("./tmp_hpo_test")
@@ -58,6 +64,7 @@ class TestHPO(unittest.TestCase):
         self.assertEqual(loss, 0.5)
         mock_run.assert_called_once()
 
+    @unittest.skipIf(not HAS_HEIDI_CPP, "heidi_cpp extension not built")
     @patch("heidi_cpp.get_free_gpu_memory")
     def test_run_trial_low_vram(self, mock_gpu):
         # Mock low VRAM
