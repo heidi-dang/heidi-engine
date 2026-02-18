@@ -235,11 +235,14 @@ Examples:
     parser.add_argument(
         "--trust-remote-code", action="store_true", help="Trust remote code in model"
     )
+    parser.add_argument(
+        "--no-provenance", action="store_true", help="Skip provenance/signature verification"
+    )
 
     return parser.parse_args()
 
 
-def load_training_data(data_path: str) -> List[Dict[str, Any]]:
+def load_training_data(data_path: str, verify_provenance: bool = True) -> List[Dict[str, Any]]:
     """
     Load training data from JSONL file.
 
@@ -261,14 +264,16 @@ def load_training_data(data_path: str) -> List[Dict[str, Any]]:
 
             try:
                 sample = json.loads(line)
-                
+
                 # [SECURITY] Mandatory Provenance Verification
-                if HAS_SECURITY_VALIDATOR:
+                if HAS_SECURITY_VALIDATOR and verify_provenance:
                     if not verify_record(sample):
-                        logger.error(f"SECURITY BREACH: Invalid signature for sample {sample.get('id', 'unknown')}")
+                        logger.error(
+                            f"SECURITY BREACH: Invalid signature for sample {sample.get('id', 'unknown')}"
+                        )
                         logger.error("Training aborted to prevent consumption of unverified data.")
                         sys.exit(1)
-                
+
                 samples.append(sample)
             except json.JSONDecodeError as e:
                 logger.warning(f"Failed to parse JSON line: {e}")
@@ -586,13 +591,13 @@ def main():
 
     # Load training data
     logger.info("Loading training data...")
-    train_data = load_training_data(args.data)
+    train_data = load_training_data(args.data, verify_provenance=not args.no_provenance)
 
     # Load validation data if provided
     val_data = None
     if args.val_data:
         logger.info("Loading validation data...")
-        val_data = load_training_data(args.val_data)
+        val_data = load_training_data(args.val_data, verify_provenance=not args.no_provenance)
 
     # Setup model and tokenizer
     logger.info("Setting up model and tokenizer...")

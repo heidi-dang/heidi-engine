@@ -12,8 +12,31 @@ include_dirs = [
     os.path.abspath("submodules/heidi-kernel/include"),
 ]
 library_dirs = []
-libraries = ["z"] # Always link zlib
+libraries = []
 macros = []
+
+# zlib detection (more robust)
+has_zlib = False
+if os.name != "nt":
+    # On Unix, try to find it via pkg-config or common paths
+    try:
+        subprocess.run(["pkg-config", "--exists", "zlib"], check=True)
+        has_zlib = True
+        libraries.append("z")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # Fallback: assume it exists if not on Windows
+        has_zlib = True
+        libraries.append("z")
+else:
+    # On Windows, check if ZLIB_ROOT is set
+    if os.environ.get("ZLIB_ROOT") and os.path.exists(os.path.join(os.environ["ZLIB_ROOT"], "include/zlib.h")):
+        include_dirs.append(os.path.join(os.environ["ZLIB_ROOT"], "include"))
+        library_dirs.append(os.path.join(os.environ["ZLIB_ROOT"], "lib"))
+        libraries.append("zlib")
+        has_zlib = True
+
+if has_zlib:
+    macros.append(("HAS_ZLIB", "1"))
 
 if cuda_home and os.path.exists(os.path.join(cuda_home, "include/cuda_runtime.h")):
     include_dirs.append(os.path.join(cuda_home, "include"))
@@ -33,7 +56,7 @@ ext_modules = [
         library_dirs=library_dirs,
         libraries=libraries,
         define_macros=macros,
-        cxx_std=23,
+        cxx_std=17,
     ),
 ]
 

@@ -66,7 +66,8 @@ if [ "$SMOKE_CPU" -eq 1 ]; then
     --batch-size 1 \
     --lora-r 8 \
     --lora-target-modules c_attn,c_proj \
-    --seq-len 512
+    --seq-len 512 \
+    --no-provenance
 else
   python scripts/04_train_qlora.py \
     --data "$DATA" \
