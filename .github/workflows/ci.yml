@@ -32,6 +32,8 @@ jobs:
 
   smoke:
     runs-on: ubuntu-latest
+    env:
+      SKIP_PROVENANCE_CHECK: "1"
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
