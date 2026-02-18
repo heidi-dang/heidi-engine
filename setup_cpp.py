@@ -12,8 +12,11 @@ include_dirs = [
     os.path.abspath("submodules/heidi-kernel/include"),
 ]
 library_dirs = []
-libraries = ["z"] # Always link zlib
+libraries = []
 macros = []
+
+if os.name != "nt":
+    libraries.append("z") # link zlib on non-Windows
 
 if cuda_home and os.path.exists(os.path.join(cuda_home, "include/cuda_runtime.h")):
     include_dirs.append(os.path.join(cuda_home, "include"))
@@ -33,7 +36,7 @@ ext_modules = [
         library_dirs=library_dirs,
         libraries=libraries,
         define_macros=macros,
-        cxx_std=23,
+        cxx_std=17,
     ),
 ]
 

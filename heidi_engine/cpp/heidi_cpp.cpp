@@ -10,8 +10,12 @@
 #include <stdexcept>
 #include <thread>
 #include <mutex>
+#ifdef _WIN32
+// Windows-specific headers or omissions
+#else
 #include <zlib.h>
 #include <sys/resource.h>
+#endif
 #include <heidi-kernel/resource_governor.h>
 
 #ifdef HAS_CUDA
@@ -105,6 +109,10 @@ std::vector<bool> parallel_validate(const std::vector<std::string>& snippets, in
 
 // 5. Compressed Data Serializer
 std::string compress_data(const std::string& data) {
+#ifdef _WIN32
+    // zlib not easily available on Windows CI by default
+    throw std::runtime_error("compress_data is not supported on Windows");
+#else
     if (data.empty()) return "";
     
     uLongf destLen = compressBound(data.size());
@@ -115,6 +123,7 @@ std::string compress_data(const std::string& data) {
     }
     
     return std::string((const char*)buffer.data(), destLen);
+#endif
 }
 
 // 6. GPU Memory Checker
@@ -171,6 +180,10 @@ std::vector<std::string> dedup_with_custom_hash(const std::vector<std::string>& 
 // 9. Batch Compressor for Logs
 std::vector<py::bytes> compress_logs(const std::vector<std::string>& logs) {
     std::vector<py::bytes> compressed;
+#ifdef _WIN32
+    // Not supported on Windows
+    for (size_t i = 0; i < logs.size(); ++i) compressed.emplace_back("");
+#else
     compressed.reserve(logs.size());
     for (const auto& log : logs) {
         uLongf source_len = log.size();
@@ -182,11 +195,16 @@ std::vector<py::bytes> compress_logs(const std::vector<std::string>& logs) {
             compressed.emplace_back(""); // Or throw
         }
     }
+#endif
     return compressed;
 }
 
 // 10. Resource Limiter Wrapper
 void run_with_limits(const std::function<void()>& func, int max_threads, size_t max_memory_mb) {
+#ifdef _WIN32
+    // rlimit not available on Windows
+    func();
+#else
     // Note: Setting caps in a shared library can affect the whole process.
     // Memory limit (Address Space)
     if (max_memory_mb > 0) {
@@ -199,6 +217,7 @@ void run_with_limits(const std::function<void()>& func, int max_threads, size_t 
     // Note: max_threads enforcement would typically be done via OpenMP or pool control.
     // We'll execute the function as a wrapper.
     func();
+#endif
 }
 
 // 11. Kernel-Aware Resource Governor
