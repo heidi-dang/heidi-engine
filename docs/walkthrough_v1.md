@@ -32,8 +32,18 @@ python3 -m pytest tests/test_validators.py
 - `test_validate_go`: **SKIPPED** (No go in local env)
 - `test_validate_javascript`: **SKIPPED** (No node in local env)
 
+### Verification of Automation
+A full dry run confirmed the following flow:
+1. `loop_repos.sh` pulls/copies local dummy repo.
+2. `loop.sh` triggers teacher generation (synthetic fallback tested).
+3. `loop.sh` invokes `train_only.py` with `--optuna`.
+4. Optuna initiates trials and correctly suggests hyperparameter combinations.
+
+![HPO Dashboard Mockup](/home/heidi/.gemini/antigravity/brain/6c224ffa-4aa3-470f-a2e6-2c852f7a2f5d/hpo_dashboard_mockup_1771396709900.png)
+*Visual representation of the HPO dashboard tracking multiple trials.*
+
 > [!NOTE]
-> Tests for C++, Go, and JS were skipped because the corresponding compilers are not installed in the current environment. They will run automatically in environments where these tools are present.
+> All scripts now fail fast on error, preventing invalid metrics from being reported to the telemetry dashboard.
 
 ## 📂 New & Modified Files
 - [docker-compose.yml](file:///home/heidi/work/heidi-engine-dev1/docker-compose.yml) [NEW]

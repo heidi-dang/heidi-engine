@@ -55,6 +55,18 @@ except ImportError:
 # CONFIGURATION - Adjust these for your needs
 # =============================================================================
 
+# Fallback data for synthetic generation
+ALGORITHMS = [
+    ("Quicksort", "Efficient sorting using pivot"),
+    ("Binary Search", "O(log n) search in sorted list"),
+    ("Dijkstra", "Shortest path in weighted graph"),
+    ("FizzBuzz", "Classic interview question"),
+    ("Fibonacci", "Recursive or iterative sequence"),
+    ("Merge Sort", "Divide and conquer sorting"),
+    ("LRU Cache", "Least Recently Used eviction policy"),
+    ("Trie", "Prefix tree for fast string search")
+]
+
 # Prompt templates for generating diverse coding tasks
 # Each template produces a specific type of coding task
 # Templates are now loaded from YAML via load_templates()

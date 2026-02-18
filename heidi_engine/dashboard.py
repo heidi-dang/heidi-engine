@@ -457,20 +457,20 @@ def create_header(state: Dict[str, Any]) -> Panel:
     status_colors = {
         "running": "green",
         "paused": "yellow",
-        "stopped": "dim",
+        "stopped": "grey50",
         "completed": "cyan",
         "error": "red",
     }
     status_color = status_colors.get(status, "white")
 
     content = Text()
-    content.append("Run: ", Style(color="dim"))
+    content.append("Run: ", Style(dim=True))
     content.append(f"{state.get('run_id', 'unknown')}\n", Style(color="cyan", bold=True))
-    content.append("Status: ", Style(color="dim"))
+    content.append("Status: ", Style(dim=True))
     content.append(f"{status.upper()}\n", Style(color=status_color, bold=True))
-    content.append("Stage: ", Style(color="dim"))
+    content.append("Stage: ", Style(dim=True))
     content.append(f"{stage}\n", Style(color="white"))
-    content.append("Round: ", Style(color="dim"))
+    content.append("Round: ", Style(dim=True))
     content.append(f"{round_num}/{total_rounds}", Style(color="white"))
 
     if state.get("stop_requested"):
@@ -706,7 +706,7 @@ def create_events_panel() -> Panel:
         Rich Panel
     """
     table = Table(box=box.MINIMAL, show_header=True, header_style="bold yellow")
-    table.add_column("Time", style="dim", width=10)
+    table.add_column("Time", style="grey50", width=10)
     table.add_column("Stage", style="cyan", width=12)
     table.add_column("Event", style="white")
 
@@ -787,7 +787,7 @@ def create_data_panel() -> Panel:
         table.add_row("Waiting for data...")
 
     file_name = data_file.name if data_file else "none"
-    subtitle = f"[dim]File: {file_name} (d to toggle raw/clean)[/dim]"
+    subtitle = f"File: {file_name} (d to toggle raw/clean)"
 
     return Panel(
         table,
@@ -854,7 +854,7 @@ def create_config_panel(state: Dict[str, Any]) -> Panel:
         if value is not None:
             table.add_row(display_key, str(value))
 
-    return Panel(table, title="[bold]Configuration[/bold]", border_style="dim")
+    return Panel(table, title="[bold]Configuration[/bold]", border_style="grey50")
 
 
 def create_keybindings_panel() -> Panel:
@@ -891,7 +891,7 @@ def create_keybindings_panel() -> Panel:
     for key, action in shortcuts:
         table.add_row(key, action)
 
-    return Panel(table, title="[bold]Keyboard Shortcuts[/bold]", border_style="dim")
+    return Panel(table, title="[bold]Keyboard Shortcuts[/bold]", border_style="grey50")
 
 
 # =============================================================================

@@ -37,6 +37,10 @@
 #     Configuration can also be saved to autotrain/config.yaml
 #     Run ./scripts/menu.py to configure interactively
 #
+# HPO:
+#     --optuna            Enable Hyperparameter Optimization
+#     --n-trials N        Number of HPO trials (default: 10)
+#
 # GRACEFUL STOP/PAUSE:
 #     - Stop: Sets stop_requested=true in state.json, exits at stage boundaries
 #     - Pause: Sets pause_requested=true, pauses between batches
@@ -79,6 +83,10 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Source common configuration
 source "$SCRIPT_DIR/common.sh"
+
+# Set default for HPO variables
+OPTUNA=${OPTUNA:-false}
+N_TRIALS=${N_TRIALS:-10}
 
 # =============================================================================
 # TELEMETRY INTEGRATION
@@ -170,7 +178,9 @@ init_telemetry() {
             \"GRAD_ACCUM\": $GRAD_ACCUM,
             \"TRAIN_STEPS\": $TRAIN_STEPS,
             \"RUN_UNIT_TESTS\": $RUN_UNIT_TESTS,
-            \"SEED\": $SEED
+            \"SEED\": $SEED,
+            \"OPTUNA\": \"$OPTUNA\",
+            \"N_TRIALS\": $N_TRIALS
         }"
         
         python3 -c "
@@ -263,6 +273,8 @@ OPTIONS:
     --lora-r N              LoRA rank (default: $LORA_R)
     --run-tests             Enable unit test gate
     --seed N                Random seed (default: $SEED)
+    --optuna                Enable Hyperparameter Optimization
+    --n-trials N            Number of HPO trials (default: 10)
 
 EXAMPLES:
     # Run with defaults (RTX 2080 Ti safe)
@@ -340,6 +352,14 @@ while [[ $# -gt 0 ]]; do
             SEED="$2"
             shift 2
             ;;
+        --optuna)
+            OPTUNA=true
+            shift
+            ;;
+        --n-trials)
+            N_TRIALS="$2"
+            shift 2
+            ;;
         --collect)
             PIPELINE_MODE="collect"
             shift
@@ -382,7 +402,10 @@ run_teacher_generate() {
         --teacher "$TEACHER_MODEL" \
         --round "$round_num" \
         --language "${LANGUAGE:-python}" \
-        --seed "$SEED" 1>&2
+        --seed "$SEED" 1>&2 || {
+            echo "[ERROR] Teacher generation failed" >&2
+            exit 1
+        }
     
     # Count generated samples
     if [ -f "$output_file" ]; then
@@ -424,7 +447,10 @@ run_validation() {
         --max-input "$MAX_INPUT_LENGTH" \
         --max-output "$MAX_OUTPUT_LENGTH" \
         --min-input "$MIN_INPUT_LENGTH" \
-        --min-output "$MIN_OUTPUT_LENGTH" 1>&2
+        --min-output "$MIN_OUTPUT_LENGTH" 1>&2 || {
+            echo "[ERROR] Validation failed" >&2
+            exit 1
+        }
     
     # Count validated samples
     if [ -f "$output_file" ]; then
@@ -455,7 +481,10 @@ run_unit_tests() {
     python3 "$SCRIPT_DIR/03_unit_test_gate.py" \
         --input "$input_file" \
         --output "$output_file" \
-        --timeout "$UNIT_TEST_TIMEOUT" 1>&2
+        --timeout "$UNIT_TEST_TIMEOUT" 1>&2 || {
+            echo "[ERROR] Unit test gate failed" >&2
+            exit 1
+        }
     
     log_success "Tested dataset saved to: $output_file"
     echo "$output_file"
@@ -507,24 +536,47 @@ run_training() {
     
     # Create output directory
     mkdir -p "$output_dir"
-    
-    # Run training
-    python3 "$SCRIPT_DIR/04_train_qlora.py" \
-        --data "$train_file" \
-        --val-data "$val_file" \
-        --output "$output_dir" \
-        --base-model "$BASE_MODEL" \
-        --seq-len "$SEQ_LEN" \
-        --batch-size "$BATCH_SIZE" \
-        --grad-accum "$GRAD_ACCUM" \
-        --train-steps "$TRAIN_STEPS" \
-        --save-steps "$SAVE_STEPS" \
-        --eval-steps "$EVAL_STEPS" \
-        --lora-r "$LORA_R" \
-        --lora-alpha "$LORA_ALPHA" \
-        --lora-dropout "$LORA_DROPOUT" \
-        --lr "$LR" \
-        --seed "$SEED" 1>&2
+       # Run training (use train_only.py if Optuna is enabled)
+    if [ "${OPTUNA:-false}" = "true" ]; then
+        log_info "Running with Optuna HPO ($N_TRIALS trials)"
+        python3 "$SCRIPT_DIR/train_only.py" \
+            --data "$train_file" \
+            --out-dir "$output_dir" \
+            --base-model "$BASE_MODEL" \
+            --steps "$TRAIN_STEPS" \
+            --seq-len "$SEQ_LEN" \
+            --batch-size "$BATCH_SIZE" \
+            --grad-accum "$GRAD_ACCUM" \
+            --lora-r "$LORA_R" \
+            --lr "$LR" \
+            --seed "$SEED" \
+            --val-ratio "$VAL_RATIO" \
+            --optuna \
+            --n-trials "$N_TRIALS" 1>&2 || {
+                echo "[ERROR] HPO Training failed" >&2
+                exit 1
+            }
+    else
+        python3 "$SCRIPT_DIR/04_train_qlora.py" \
+            --data "$train_file" \
+            --val-data "$val_file" \
+            --output "$output_dir" \
+            --base-model "$BASE_MODEL" \
+            --seq-len "$SEQ_LEN" \
+            --batch-size "$BATCH_SIZE" \
+            --grad-accum "$GRAD_ACCUM" \
+            --train-steps "$TRAIN_STEPS" \
+            --save-steps "$SAVE_STEPS" \
+            --eval-steps "$EVAL_STEPS" \
+            --lora-r "$LORA_R" \
+            --lora-alpha "$LORA_ALPHA" \
+            --lora-dropout "$LORA_DROPOUT" \
+            --lr "$LR" \
+            --seed "$SEED" 1>&2 || {
+                echo "[ERROR] Training failed" >&2
+                exit 1
+            }
+    fi
     
     # Update counters with training completion
     update_counters "{\"train_step\": $TRAIN_STEPS}"
@@ -561,7 +613,10 @@ run_evaluation() {
         --base-model "$BASE_MODEL" \
         --seq-len "$SEQ_LEN" \
         --temperature 0.1 \
-        --max-new-tokens 512 1>&2
+        --max-new-tokens 512 1>&2 || {
+            echo "[ERROR] Evaluation failed" >&2
+            exit 1
+        }
     
     # Extract and report metrics if available
     if [ -f "$output_file" ]; then
