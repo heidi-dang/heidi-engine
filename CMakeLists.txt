@@ -5,7 +5,11 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Find zlib
-find_package(ZLIB REQUIRED)
+find_package(ZLIB)
+
+if(ZLIB_FOUND)
+    add_definitions(-DHAS_ZLIB)
+endif()
 
 # Add heidi-kernel as a subdirectory
 add_subdirectory(submodules/heidi-kernel)
@@ -29,8 +33,11 @@ target_link_libraries(heidid
         heidi-kernel-job
         heidi-kernel-governor
         heidi-kernel-lib
-        ZLIB::ZLIB
 )
+
+if(ZLIB_FOUND)
+    target_link_libraries(heidid PRIVATE ZLIB::ZLIB)
+endif()
 
 # Optional: Build Python extension using CMake if desired, 
 # but we'll stick to a standalone binary for now as requested.

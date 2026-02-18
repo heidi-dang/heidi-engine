@@ -10,7 +10,9 @@
 #include <stdexcept>
 #include <thread>
 #include <mutex>
+#ifdef HAS_ZLIB
 #include <zlib.h>
+#endif
 #ifndef _WIN32
 #include <sys/resource.h>
 #endif
@@ -107,6 +109,7 @@ std::vector<bool> parallel_validate(const std::vector<std::string>& snippets, in
 
 // 5. Compressed Data Serializer
 std::string compress_data(const std::string& data) {
+#ifdef HAS_ZLIB
     if (data.empty()) return "";
     
     uLongf destLen = compressBound(data.size());
@@ -117,6 +120,9 @@ std::string compress_data(const std::string& data) {
     }
     
     return std::string((const char*)buffer.data(), destLen);
+#else
+    throw std::runtime_error("Compression not available (zlib missing)");
+#endif
 }
 
 // 6. GPU Memory Checker
@@ -172,6 +178,7 @@ std::vector<std::string> dedup_with_custom_hash(const std::vector<std::string>& 
 
 // 9. Batch Compressor for Logs
 std::vector<py::bytes> compress_logs(const std::vector<std::string>& logs) {
+#ifdef HAS_ZLIB
     std::vector<py::bytes> compressed;
     compressed.reserve(logs.size());
     for (const auto& log : logs) {
@@ -185,6 +192,9 @@ std::vector<py::bytes> compress_logs(const std::vector<std::string>& logs) {
         }
     }
     return compressed;
+#else
+    throw std::runtime_error("Batch compression not available (zlib missing)");
+#endif
 }
 
 // 10. Resource Limiter Wrapper

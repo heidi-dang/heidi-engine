@@ -21,6 +21,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Install zlib (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install zlib-msvc
+          echo "ZLIB_ROOT=C:\tools\zlib-msvc" >> $GITHUB_ENV
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
