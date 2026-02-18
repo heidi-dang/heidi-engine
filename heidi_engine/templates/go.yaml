@@ -1,0 +1,98 @@
+language: go
+templates:
+  - task_type: code_completion
+    instruction: "Complete the following Go function:"
+    template: |
+      Complete this Go function:
+
+      ```go
+      {code}
+      ```
+
+      Provide the complete implementation.
+
+  - task_type: bug_fixing
+    instruction: "Fix the bugs in this Go code:"
+    template: |
+      Find and fix all bugs in this Go code:
+
+      ```go
+      {code}
+      ```
+
+      Explain what was wrong and provide the corrected code.
+
+  - task_type: code_explanation
+    instruction: "Explain what this code does:"
+    template: |
+      Explain this Go code in detail:
+
+      ```go
+      {code}
+      ```
+
+      Provide a line-by-line explanation.
+
+  - task_type: refactoring
+    instruction: "Refactor this code for better quality:"
+    template: |
+      Refactor this Go code to be idiomatic and efficient:
+
+      ```go
+      {code}
+      ```
+
+      Provide the refactored version with explanations.
+
+  - task_type: unit_test_generation
+    instruction: "Write unit tests for this code:"
+    template: |
+      Write comprehensive unit tests using the standard `testing` package (table-driven tests) for:
+
+      ```go
+      {code}
+      ```
+
+  - task_type: code_review
+    instruction: "Review this code and suggest improvements:"
+    template: |
+      Perform a code review:
+
+      ```go
+      {code}
+      ```
+
+      Identify issues and suggest improvements based on Go best practices.
+
+  - task_type: documentation
+    instruction: "Add documentation to this code:"
+    template: |
+      Add code comments and GoDoc to:
+
+      ```go
+      {code}
+      ```
+
+  - task_type: algorithm_implementation
+    instruction: "Implement this algorithm:"
+    template: |
+      Implement the {algorithm} algorithm in Go:
+
+      {description}
+
+samples:
+  - "func CalculateSum(numbers []int) int {\n    // Calculate sum of a slice\n    // TODO: implement\n    return 0\n}"
+  - "func FindMax(lst []int) int {\n    max := 0\n    for _, i := range lst {\n        if i > max {\n            max = i\n        }\n    }\n    return max\n}"
+  - "type DataProcessor struct {\n    data []string\n}\n\nfunc (dp *DataProcessor) Add(item string) {\n    // Add item to data\n}"
+  - "func Fibonacci(n int) int {\n    if n <= 1 {\n        return n\n    }\n    // recursive call\n    return 0\n}"
+  - "func FilterEven(numbers []int) []int {\n    // Return only even numbers\n    return nil\n}"
+  - "func ParseNumber(s string) (int, error) {\n    // Convert string to number, handle errors\n    return 0, nil\n}"
+  - "func ReadFile(filename string) ([]byte, error) {\n    // Read and return file contents\n    return nil, nil\n}"
+  - "func HandleRequest(w http.ResponseWriter, r *http.Request) {\n    // Process API request\n}"
+  - "func ValidateEmail(email string) bool {\n    // Check if email is valid\n    return false\n}"
+  - "func UniqueStrings(arr []string) []string {\n    // Remove duplicates using map\n    return nil\n}"
+  - "func WorkerPool(jobs <-chan int, results chan<- int) {\n    // Process jobs from channel\n}"
+  - "func ReverseString(s string) string {\n    // Reverse string (handle runes correctly)\n    return \"\"\n}"
+  - "type Server struct {\n    Addr string\n}\n\nfunc (s *Server) Start() error {\n    // Start TCP server\n    return nil\n}"
+  - "func Contains(slice []string, val string) bool {\n    // Check if slice contains value\n    return false\n}"
+  - "func MinMax(arr []int) (int, int) {\n    // Return min and max values\n    return 0, 0\n}"

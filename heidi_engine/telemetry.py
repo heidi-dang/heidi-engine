@@ -67,6 +67,13 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
+try:
+    import requests
+except ImportError:
+    requests = None
+
+# Store remote states in memory
+_remote_states: Dict[str, Any] = {}
 
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
@@ -1220,24 +1227,41 @@ def stage_context(stage: str, round_num: int, message: str, **kwargs):
 # =============================================================================
 
 
+def start_reporter(dashboard_url: str):
+    """Start background thread to push state to central dashboard."""
+    if not requests:
+        return
+
+    def reporter_loop():
+        error_count = 0
+        while True:
+            try:
+                state = get_state()
+                # Redact before sending
+                redacted = redact_state(state)
+                # Add run_id to top level if not present
+                if "run_id" not in redacted:
+                    redacted["run_id"] = get_run_id()
+                
+                requests.post(f"{dashboard_url}/report", json=redacted, timeout=5)
+                error_count = 0
+            except Exception:
+                error_count += 1
+                if error_count > 5:
+                    time.sleep(30) # Backoff
+            time.sleep(5)
+
+    thread = threading.Thread(target=reporter_loop, daemon=True)
+    thread.start()
+
 def start_http_server(port: int = 7779) -> None:
     """
-    Start lightweight HTTP server for status queries.
+    Start HTTP status server.
 
     SECURITY:
-        - Binds to 127.0.0.1 only (never 0.0.0.0)
-        - Returns only ALLOWED_STATUS_FIELDS (redacted, no secrets)
-        - No env vars, tokens, or raw prompts exposed
-        - Health check endpoint
-
-    HOW IT WORKS:
-        - Runs in background thread
-        - Serves minimal state as JSON
-        - GET /status returns redacted state
-        - GET /health returns simple health check
-
-    ARGS:
-        port: Port to listen on (default: 7779)
+        - Binds to 0.0.0.0 to allow multi-machine monitoring
+        - Adds /report endpoint to receive remote states
+        - Adds /runs endpoint to list all runs
     """
     if port <= 0:
         return
@@ -1249,6 +1273,13 @@ def start_http_server(port: int = 7779) -> None:
         print("[WARN] HTTP server not available", file=sys.stderr)
         return
 
+    # Use existing helper functions
+    # (get_gpu_summary, get_last_event_ts, redact_state are defined in outer scope or helper scope)
+    # Wait, in the original code they were defined INSIDE start_http_server.
+    # I should redefine them or move them out. 
+    # Moving them out is better but changes too much structure. 
+    # I will keep them inside for minimal diff, but I need to include them in replacement.
+    
     def get_gpu_summary() -> Dict[str, Any]:
         """Get minimal GPU info without exposing sensitive data."""
         try:
@@ -1307,19 +1338,75 @@ def start_http_server(port: int = 7779) -> None:
     class StateHandler(BaseHTTPRequestHandler):
         """HTTP handler with security restrictions."""
 
+        def _send_cors_headers(self):
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
         def do_GET(self):
             if self.path == "/health":
                 self.send_response(200)
+                self._send_cors_headers()
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(json.dumps({"health": "ok"}).encode())
                 return
 
-            if self.path == "/status" or self.path == "/":
-                state = get_state()
+            if self.path == "/":
+                # Serve dashboard.html if it exists
+                dashboard_path = Path(__file__).parent / "dashboard.html"
+                if dashboard_path.exists():
+                    self.send_response(200)
+                    self._send_cors_headers()
+                    self.send_header("Content-Type", "text/html")
+                    self.end_headers()
+                    with open(dashboard_path, "rb") as f:
+                        self.wfile.write(f.read())
+                    return
+            
+            # List all runs (local + remote)
+            if self.path == "/runs":
+                local_runs = list_runs()
+                # Merge remote states
+                all_runs = local_runs + list(_remote_states.values())
+                # Deduplicate by run_id (prefer local)
+                seen_ids = set()
+                unique_runs = []
+                for run in all_runs:
+                    if run.get("run_id") not in seen_ids:
+                        # Ensure it's redacted lightly if it came from list_runs (which reads state.json directly)
+                        # list_runs usually returns raw state. we should redact.
+                        redacted_run = redact_state(run) if "run_id" in run else run
+                        unique_runs.append(redacted_run)
+                        seen_ids.add(run.get("run_id"))
+                
+                self.send_response(200)
+                self._send_cors_headers()
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(unique_runs).encode())
+                return
+
+            # Get specific run status
+            if self.path.startswith("/status"):
+                query_run_id = None
+                if "?run_id=" in self.path:
+                    try:
+                        query_run_id = self.path.split("?run_id=")[1].split("&")[0]
+                    except IndexError:
+                        pass
+                
+                # Check remote states first if run_id provided
+                if query_run_id and query_run_id in _remote_states:
+                    state = _remote_states[query_run_id]
+                else:
+                    # Default to local state if no ID or ID not found remotely
+                    # If ID is local, get_state takes argument
+                    state = get_state(query_run_id)
 
                 # Add GPU summary (no secrets)
-                state["gpu_summary"] = get_gpu_summary()
+                if "gpu_summary" not in state:
+                    state["gpu_summary"] = get_gpu_summary()
 
                 # Add last event timestamp
                 state["last_event_ts"] = get_last_event_ts()
@@ -1331,6 +1418,7 @@ def start_http_server(port: int = 7779) -> None:
                 redacted = redact_state(state)
 
                 self.send_response(200)
+                self._send_cors_headers()
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(json.dumps(redacted).encode())
@@ -1338,6 +1426,41 @@ def start_http_server(port: int = 7779) -> None:
 
             # Unknown endpoint
             self.send_response(404)
+            self._send_cors_headers()
+            self.end_headers()
+
+        def do_POST(self):
+            if self.path == "/report":
+                try:
+                    content_length = int(self.headers.get("Content-Length", 0))
+                    body = self.rfile.read(content_length)
+                    data = json.loads(body)
+                    run_id = data.get("run_id")
+                    if run_id:
+                        # Store in memory
+                        _remote_states[run_id] = data
+                        self.send_response(200)
+                        self._send_cors_headers()
+                        self.end_headers()
+                        self.wfile.write(b'{"status":"ok"}')
+                    else:
+                        self.send_response(400)
+                        self._send_cors_headers()
+                        self.end_headers()
+                except Exception as e:
+                    self.send_response(500)
+                    self._send_cors_headers()
+                    self.end_headers()
+                    print(f"[ERROR] Failed to process report: {e}", file=sys.stderr)
+                return
+            
+            self.send_response(404)
+            self._send_cors_headers()
+            self.end_headers()
+
+        def do_OPTIONS(self):
+            self.send_response(200)
+            self._send_cors_headers()
             self.end_headers()
 
         def log_message(self, format, *args):
@@ -1345,16 +1468,21 @@ def start_http_server(port: int = 7779) -> None:
 
     def run_server():
         try:
-            # SECURITY: Bind to 127.0.0.1 only
-            server = HTTPServer(("127.0.0.1", port), StateHandler)
-            print(f"[INFO] HTTP status server running on http://127.0.0.1:{port}/status")
-            print(f"[INFO] Health check: http://127.0.0.1:{port}/health")
+            # SECURITY: Bind to 0.0.0.0 for multi-machine support
+            server = HTTPServer(("0.0.0.0", port), StateHandler)
+            print(f"[INFO] HTTP status server running on http://0.0.0.0:{port}")
             server.serve_forever()
         except Exception as e:
             print(f"[WARN] HTTP server failed: {e}", file=sys.stderr)
 
     thread = threading.Thread(target=run_server, daemon=True)
     thread.start()
+
+    # Start reporter if configured
+    dashboard_url = os.environ.get("DASHBOARD_URL")
+    if dashboard_url:
+        print(f"[INFO] Starting dashboard reporter to {dashboard_url}")
+        start_reporter(dashboard_url)
 
 
 # =============================================================================

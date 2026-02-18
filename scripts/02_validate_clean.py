@@ -50,6 +50,21 @@ import sys
 from collections import Counter
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+# Add project root to sys.path to allow importing heidi_engine
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+try:
+    from heidi_engine.validation.semantic_validator import validate_semantic
+    HAS_SEMANTIC_VALIDATOR = True
+except ImportError:
+    HAS_SEMANTIC_VALIDATOR = False
+
+try:
+    from heidi_engine.security import verify_record
+    HAS_SECURITY_VALIDATOR = True
+except ImportError:
+    HAS_SECURITY_VALIDATOR = False
+
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
 # =============================================================================
@@ -364,7 +379,19 @@ def process_sample(
         if has_secrets:
             return None, f"secrets: {secrets}"
 
-    # Step 3: Length constraints
+    # Step 3: Provenance Verification
+    if HAS_SECURITY_VALIDATOR:
+        if not verify_record(sample):
+            return None, "provenance: invalid_signature"
+
+    # Step 4: Semantic validation
+    if HAS_SEMANTIC_VALIDATOR:
+        (s_valid, s_reason), _ = validate_semantic(sample)
+        if not s_valid:
+            sample["validation"] = {"passed": False, "reason": "semantic_validation_failed", "details": s_reason}
+            return None, f"semantic: {s_reason}"
+
+    # Step 4: Length constraints
     valid, reason = check_length_constraints(sample, max_input, max_output, min_input, min_output)
     if not valid:
         return None, f"length: {reason}"

@@ -1,0 +1,98 @@
+language: cpp
+templates:
+  - task_type: code_completion
+    instruction: "Complete the following C++ function:"
+    template: |
+      Complete this C++ function:
+
+      ```cpp
+      {code}
+      ```
+
+      Provide the complete implementation including necessary headers.
+
+  - task_type: bug_fixing
+    instruction: "Fix the bugs in this C++ code:"
+    template: |
+      Find and fix all bugs in this C++ code (memory leaks, undefined behavior, logic errors):
+
+      ```cpp
+      {code}
+      ```
+
+      Explain what was wrong and provide the corrected code.
+
+  - task_type: code_explanation
+    instruction: "Explain what this code does:"
+    template: |
+      Explain this C++ code in detail:
+
+      ```cpp
+      {code}
+      ```
+
+      Provide a line-by-line explanation.
+
+  - task_type: refactoring
+    instruction: "Refactor this code for better quality:"
+    template: |
+      Refactor this C++ code to use modern C++ features (C++17/20) and be memory safe:
+
+      ```cpp
+      {code}
+      ```
+
+      Provide the refactored version with explanations.
+
+  - task_type: unit_test_generation
+    instruction: "Write unit tests for this code:"
+    template: |
+      Write comprehensive unit tests using GoogleTest for:
+
+      ```cpp
+      {code}
+      ```
+
+  - task_type: code_review
+    instruction: "Review this code and suggest improvements:"
+    template: |
+      Perform a code review:
+
+      ```cpp
+      {code}
+      ```
+
+      Identify issues (e.g., memory management, const correctness) and suggest improvements.
+
+  - task_type: documentation
+    instruction: "Add documentation to this code:"
+    template: |
+      Add Doxygen comments to:
+
+      ```cpp
+      {code}
+      ```
+
+  - task_type: algorithm_implementation
+    instruction: "Implement this algorithm:"
+    template: |
+      Implement the {algorithm} algorithm in C++:
+
+      {description}
+
+samples:
+  - "int calculateSum(const std::vector<int>& numbers) {\n    // Calculate sum of a vector\n    // TODO: implement\n    return 0;\n}"
+  - "int findMax(const std::vector<int>& lst) {\n    int max = 0;\n    for (int i : lst) {\n        if (i > max) max = i;\n    }\n    return max;\n}"
+  - "class DataProcessor {\n    std::vector<std::string> data;\npublic:\n    void add(const std::string& item) {\n        // Add item to data\n    }\n};"
+  - "long long fibonacci(int n) {\n    if (n <= 1) return n;\n    // recursive call\n    return 0;\n}"
+  - "std::vector<int> filterEven(const std::vector<int>& numbers) {\n    // Return only even numbers\n    return {};\n}"
+  - "int parseNumber(const std::string& s) {\n    // Convert string to number, handle errors\n    return 0;\n}"
+  - "std::string readFile(const std::string& filename) {\n    // Read and return file contents\n    return \"\";\n}"
+  - "void handleRequest(const Request& req) {\n    // Process API request\n}"
+  - "bool validateEmail(const std::string& email) {\n    // Check if email is valid\n    return false;\n}"
+  - "class Vector3D {\n    double x, y, z;\npublic:\n    Vector3D(double x, double y, double z) : x(x), y(y), z(z) {}\n    // Add methods\n};"
+  - "template<typename T>\nvoid swap(T& a, T& b) {\n    // Swap values\n}"
+  - "std::unique_ptr<User> getUserById(int id) {\n    // Simulate DB fetch\n    return nullptr;\n}"
+  - "void sortVector(std::vector<int>& v) {\n    // Sort vector\n}"
+  - "bool isPalindrome(const std::string& s) {\n    // Check palindrome\n    return false;\n}"
+  - "std::string toUpper(const std::string& s) {\n    // Convert to uppercase\n    return \"\";\n}"

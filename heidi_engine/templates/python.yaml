@@ -1,0 +1,102 @@
+language: python
+templates:
+  - task_type: code_completion
+    instruction: "Complete the following Python function:"
+    template: |
+      Complete this function:
+
+      ```python
+      {code}
+      ```
+
+      Provide the complete implementation.
+
+  - task_type: bug_fixing
+    instruction: "Fix the bugs in this Python code:"
+    template: |
+      Find and fix all bugs in this code:
+
+      ```python
+      {code}
+      ```
+
+      Explain what was wrong and provide the corrected code.
+
+  - task_type: code_explanation
+    instruction: "Explain what this code does:"
+    template: |
+      Explain this code in detail:
+
+      ```python
+      {code}
+      ```
+
+      Provide a line-by-line explanation.
+
+  - task_type: refactoring
+    instruction: "Refactor this code for better quality:"
+    template: |
+      Refactor this code to be more efficient and readable:
+
+      ```python
+      {code}
+      ```
+
+      Provide the refactored version with explanations.
+
+  - task_type: unit_test_generation
+    instruction: "Write unit tests for this code:"
+    template: |
+      Write comprehensive unit tests using pytest for:
+
+      ```python
+      {code}
+      ```
+
+  - task_type: code_review
+    instruction: "Review this code and suggest improvements:"
+    template: |
+      Perform a code review:
+
+      ```python
+      {code}
+      ```
+
+      Identify issues and suggest improvements.
+
+  - task_type: documentation
+    instruction: "Add documentation to this code:"
+    template: |
+      Add docstrings and comments to:
+
+      ```python
+      {code}
+      ```
+
+      Include type hints where appropriate.
+
+  - task_type: algorithm_implementation
+    instruction: "Implement this algorithm:"
+    template: |
+      Implement the {algorithm} algorithm in Python:
+
+      {description}
+
+samples:
+  - "def calculate_sum(numbers):\n    '''Calculate sum of a list'''\n    # TODO: implement"
+  - "def find_max(lst):\n    for i in lst:\n        if i > max:\n            max = i\n    return max"
+  - "class DataProcessor:\n    def __init__(self):\n        self.data = []\n    \n    def add(self, item):\n        # Add item to data"
+  - "def fibonacci(n):\n    if n <= 1:\n        return n\n    else:\n        # return fibonacci"
+  - "def filter_even(numbers):\n    # Return only even numbers"
+  - "def parse_number(s):\n    # Convert string to number\n    # Handle errors"
+  - "def read_file(filename):\n    # Read and return file contents"
+  - "def handle_request(request):\n    # Process API request\n    return {'status': 'ok'}"
+  - "def validate_email(email):\n    # Check if email is valid\n    return False"
+  - "def sort_by_key(items, key):\n    # Sort items by key function"
+  - "def get_user_by_id(user_id):\n    # SQL query simulation\n    return db.query('SELECT * FROM users WHERE id=%s', user_id)"
+  - "def compress_string(s):\n    # Simple RLE compression\n    res = ''\n    return res"
+  - "def is_palindrome(s):\n    \"\"\"Check if string is palindrome\"\"\"\n    return s == s[::-1]"
+  - "def get_weather(city):\n    # Fetch weather data from API\n    pass"
+  - "class UserSession:\n    def __init__(self, token):\n        self.token = token\n        self.created_at = time.time()"
+  - "def rotate_list(l, n):\n    # Rotate list by n positions\n    return l[n:] + l[:n]"
+  - "def merge_dicts(d1, d2):\n    # Merge two dictionaries\n    return {**d1, **d2}"

@@ -190,6 +190,12 @@ print(run_id)
         RUN_ID="run_$(date +%Y%m%d_%H%M%S)"
     fi
     
+    # If RUN_ID is 'code-assistant', use it directly to signal agent mode
+    if [ "$RUN_ID" = "code-assistant" ]; then
+        echo "[INFO] Running in code-assistant mode"
+        export TEACHER_MODEL="code-assistant"
+    fi
+
     export RUN_ID
     echo "[INFO] Run ID: $RUN_ID"
 }
@@ -334,6 +340,10 @@ while [[ $# -gt 0 ]]; do
             SEED="$2"
             shift 2
             ;;
+        --collect)
+            PIPELINE_MODE="collect"
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
             show_help
@@ -347,10 +357,10 @@ done
 # =============================================================================
 
 log_step() {
-    echo ""
-    echo "=============================================================================="
-    echo "STEP: $1"
-    echo "=============================================================================="
+    echo "" >&2
+    echo "==============================================================================" >&2
+    echo "STEP: $1" >&2
+    echo "==============================================================================" >&2
 }
 
 run_teacher_generate() {
@@ -371,7 +381,8 @@ run_teacher_generate() {
         --output "$output_file" \
         --teacher "$TEACHER_MODEL" \
         --round "$round_num" \
-        --seed "$SEED"
+        --language "${LANGUAGE:-python}" \
+        --seed "$SEED" 1>&2
     
     # Count generated samples
     if [ -f "$output_file" ]; then
@@ -413,7 +424,7 @@ run_validation() {
         --max-input "$MAX_INPUT_LENGTH" \
         --max-output "$MAX_OUTPUT_LENGTH" \
         --min-input "$MIN_INPUT_LENGTH" \
-        --min-output "$MIN_OUTPUT_LENGTH"
+        --min-output "$MIN_OUTPUT_LENGTH" 1>&2
     
     # Count validated samples
     if [ -f "$output_file" ]; then
@@ -444,7 +455,7 @@ run_unit_tests() {
     python3 "$SCRIPT_DIR/03_unit_test_gate.py" \
         --input "$input_file" \
         --output "$output_file" \
-        --timeout "$UNIT_TEST_TIMEOUT"
+        --timeout "$UNIT_TEST_TIMEOUT" 1>&2
     
     log_success "Tested dataset saved to: $output_file"
     echo "$output_file"
@@ -467,7 +478,7 @@ split_train_val() {
     
     if [ "$val_count" -lt 1 ]; then
         val_count=1
-        train_count=$((total_count - 1))
+        train_count=$((total_lines - 1))
     fi
     
     # Split using head/tail
@@ -513,7 +524,7 @@ run_training() {
         --lora-alpha "$LORA_ALPHA" \
         --lora-dropout "$LORA_DROPOUT" \
         --lr "$LR" \
-        --seed "$SEED"
+        --seed "$SEED" 1>&2
     
     # Update counters with training completion
     update_counters "{\"train_step\": $TRAIN_STEPS}"
@@ -550,7 +561,7 @@ run_evaluation() {
         --base-model "$BASE_MODEL" \
         --seq-len "$SEQ_LEN" \
         --temperature 0.1 \
-        --max-new-tokens 512
+        --max-new-tokens 512 1>&2
     
     # Extract and report metrics if available
     if [ -f "$output_file" ]; then
@@ -733,14 +744,22 @@ main() {
         train_file=$(echo "$split_result" | head -1)
         val_file=$(echo "$split_result" | tail -1)
         
-        # Step 5: Train with QLoRA
-        adapter_dir=$(run_training "$train_file" "$val_file" "$round_num")
-        
-        # Step 6: Evaluate
-        eval_report=$(run_evaluation "$adapter_dir/final" "$val_file" "$round_num")
-        
-        # Step 7: Track best adapter
-        update_best_adapter "$round_num" "$adapter_dir" "$eval_report"
+        # Step 5/6/7: Train, evaluate, and track best adapter (skippable in collect mode)
+        if [ "${PIPELINE_MODE:-full}" = "collect" ]; then
+            log_info "PIPELINE_MODE=collect: skipping training and evaluation for round $round_num"
+            emit_event "stage_skip" "Skipping train/eval in collect mode" "train" "$round_num"
+            adapter_dir=""
+            eval_report=""
+        else
+            # Step 5: Train with QLoRA
+            adapter_dir=$(run_training "$train_file" "$val_file" "$round_num")
+
+            # Step 6: Evaluate
+            eval_report=$(run_evaluation "$adapter_dir/final" "$val_file" "$round_num")
+
+            # Step 7: Track best adapter
+            update_best_adapter "$round_num" "$adapter_dir" "$eval_report"
+        fi
         
         # Small delay between rounds
         sleep 2

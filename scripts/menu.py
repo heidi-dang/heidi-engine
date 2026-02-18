@@ -347,8 +347,15 @@ def start_pipeline(config: Dict[str, Any], background: bool = False) -> Optional
     RETURNS:
         PID if background=True, None otherwise
     """
-    # Generate run ID
-    run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    # Allow user to specify a run_id or use default
+    print(f"\nDefault Run ID: run_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+    print("Type 'code-assistant' for agent mode (no API key required).")
+    custom_run_id = input("Enter Run ID (or press Enter for default): ").strip()
+
+    if custom_run_id:
+        run_id = custom_run_id
+    else:
+        run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     # Save config
     save_config(config)

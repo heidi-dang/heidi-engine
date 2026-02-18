@@ -20,7 +20,7 @@ TUNABLE PARAMETERS (via environment variables):
     - SEQ_LEN: Max sequence length (default: 2048)
     - BATCH_SIZE: Per-device batch size (default: 1)
     - GRAD_ACCUM: Gradient accumulation steps (default: 8)
-    - TRAIN_STEPS: Total training steps (default: 500)
+    - TRAIN_STEPS: Total training steps (default: 10 - 'Premium' short-run)
     - SAVE_STEPS: Save checkpoint every N steps (default: 100)
     - LR: Learning rate (default: 2e-4)
     - LORA_R: LoRA rank (default: 64)
@@ -53,6 +53,15 @@ import logging
 import os
 import sys
 from typing import Any, Dict, List, Optional
+
+# Add project root to sys.path to allow importing heidi_engine
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+try:
+    from heidi_engine.security import verify_record
+    HAS_SECURITY_VALIDATOR = True
+except ImportError:
+    HAS_SECURITY_VALIDATOR = False
 
 # Configure logging
 logging.basicConfig(
@@ -129,8 +138,8 @@ Examples:
     parser.add_argument(
         "--train-steps",
         type=int,
-        default=int(os.environ.get("TRAIN_STEPS", 500)),
-        help="Total training steps (default: 500)",
+        default=int(os.environ.get("TRAIN_STEPS", 10)),
+        help="Total training steps (default: 10)",
     )
     parser.add_argument(
         "--save-steps",
@@ -153,8 +162,8 @@ Examples:
     parser.add_argument(
         "--lora-r",
         type=int,
-        default=int(os.environ.get("LORA_R", 64)),
-        help="LoRA rank (default: 64)",
+        default=int(os.environ.get("LORA_R", 32)),
+        help="LoRA rank (default: 32)",
     )
     parser.add_argument(
         "--lora-alpha",
@@ -194,8 +203,8 @@ Examples:
     parser.add_argument(
         "--lr",
         type=float,
-        default=float(os.environ.get("LR", 2e-4)),
-        help="Learning rate (default: 2e-4)",
+        default=float(os.environ.get("LR", 1e-4)),
+        help="Learning rate (default: 1e-4)",
     )
     parser.add_argument(
         "--lr-scheduler",
@@ -252,6 +261,14 @@ def load_training_data(data_path: str) -> List[Dict[str, Any]]:
 
             try:
                 sample = json.loads(line)
+                
+                # [SECURITY] Mandatory Provenance Verification
+                if HAS_SECURITY_VALIDATOR:
+                    if not verify_record(sample):
+                        logger.error(f"SECURITY BREACH: Invalid signature for sample {sample.get('id', 'unknown')}")
+                        logger.error("Training aborted to prevent consumption of unverified data.")
+                        sys.exit(1)
+                
                 samples.append(sample)
             except json.JSONDecodeError as e:
                 logger.warning(f"Failed to parse JSON line: {e}")
@@ -472,7 +489,7 @@ def setup_trainer(
         eval_steps=args.eval_steps if val_data else None,
         # Logging
         logging_steps=args.logging_steps,
-        logging_dir=f"{args.output}/logs",
+        # logging_dir has been replaced by environmental TENSORBOARD_LOGGING_DIR
         # Optimization
         optim=(
             "paged_adamw_32bit"

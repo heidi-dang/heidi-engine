@@ -40,28 +40,28 @@ set -euo pipefail
 export AUTOTRAIN_DIR="${AUTOTRAIN_DIR:-$HOME/.local/heidi-engine}"
 
 export ROUNDS="${ROUNDS:-3}"                          # Number of training rounds
-export SAMPLES_PER_ROUND="${SAMPLES_PER_ROUND:-50}"    # Samples to generate per round
+export SAMPLES_PER_ROUND="${SAMPLES_PER_ROUND:-200}"    # Samples to generate per round
 export BASE_MODEL="${BASE_MODEL:-microsoft/phi-2}"    # Base model to fine-tune
 export TEACHER_MODEL="${TEACHER_MODEL:-gpt-4o-mini}"  # Teacher model for generation
-export VAL_RATIO="${VAL_RATIO:-0.1}"                  # Validation split ratio
+export VAL_RATIO="${VAL_RATIO:-0.05}"                  # Validation split ratio (5%)
 export OUT_DIR="${OUT_DIR:-$AUTOTRAIN_DIR}"            # Output directory
 
 # Training hyperparameters - VRAM-safe defaults
 export SEQ_LEN="${SEQ_LEN:-2048}"
 export BATCH_SIZE="${BATCH_SIZE:-1}"
 export GRAD_ACCUM="${GRAD_ACCUM:-8}"
-export TRAIN_STEPS="${TRAIN_STEPS:-500}"
+export TRAIN_STEPS="${TRAIN_STEPS:-10}"  # Default set to 10 for 'Premium' focus
 export SAVE_STEPS="${SAVE_STEPS:-100}"
 export EVAL_STEPS="${EVAL_STEPS:-50}"
-export LR="${LR:-2e-4}"
-export LORA_R="${LORA_R:-64}"
+export LR="${LR:-1e-4}"
+export LORA_R="${LORA_R:-32}"
 export LORA_ALPHA="${LORA_ALPHA:-128}"
 export LORA_DROPOUT="${LORA_DROPOUT:-0.1}"
 export QUANTIZATION_BITS="${QUANTIZATION_BITS:-4}"
 
 # Dataset limits
 export MAX_INPUT_LENGTH="${MAX_INPUT_LENGTH:-1800}"   # Max input tokens (leave room for output)
-export MAX_OUTPUT_LENGTH="${MAX_OUTPUT_LENGTH:-2048}" # Max output tokens
+export MAX_OUTPUT_LENGTH="${MAX_OUTPUT_LENGTH:-4596}" # Max output tokens
 export MIN_INPUT_LENGTH="${MIN_INPUT_LENGTH:-10}"    # Min input tokens
 export MIN_OUTPUT_LENGTH="${MIN_OUTPUT_LENGTH:-20}"   # Min output tokens
 
@@ -76,6 +76,10 @@ export UNIT_TEST_TIMEOUT="${UNIT_TEST_TIMEOUT:-30}"    # Timeout per test in sec
 # Pipeline mode: "full" or "collect"
 # In collect mode, pipeline runs generate+validate only and waits for train request
 export PIPELINE_MODE="${PIPELINE_MODE:-full}"
+
+# API and Budget limits
+export MAX_REQUESTS="${MAX_REQUESTS:-1000}"           # Global API budget across rounds/repos
+export SLEEP_BETWEEN_REQUESTS="${SLEEP_BETWEEN_REQUESTS:-0}" # Seconds to wait between API calls
 
 # Random seed for reproducibility
 export SEED="${SEED:-42}"

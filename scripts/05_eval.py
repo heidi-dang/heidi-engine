@@ -161,20 +161,28 @@ def setup_model_with_adapter(adapter_path: str, base_model: str, trust_remote_co
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Load base model (use 8-bit for faster inference if available)
+    # Load base model (use quantization for faster inference if available)
     try:
+        from transformers import BitsAndBytesConfig
+        import torch
+        
+        quant_config = BitsAndBytesConfig(
+            load_in_8bit=True,
+            llm_int8_threshold=6.0,
+        )
         model = AutoModelForCausalLM.from_pretrained(
             base_model,
-            load_in_8bit=True,
+            quantization_config=quant_config,
             device_map="auto",
             trust_remote_code=trust_remote_code,
         )
-    except ImportError:
-        # Fallback to regular loading
+    except Exception as e:
+        print(f"[WARN] Failed to load with 8-bit quantization: {e}. Falling back to float16/float32.")
         model = AutoModelForCausalLM.from_pretrained(
             base_model,
             device_map="auto",
             trust_remote_code=trust_remote_code,
+            torch_dtype="auto"
         )
 
     # Load LoRA adapter
@@ -205,10 +213,9 @@ Output:"""
     inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
     # Generate
-    with model.disable_adapter():  # Disable adapter if needed, or keep enabled
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
+    outputs = model.generate(
+        **inputs,
+        max_new_tokens=max_new_tokens,
             temperature=temperature,
             top_p=top_p,
             do_sample=temperature > 0,

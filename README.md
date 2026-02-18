@@ -1,259 +1,157 @@
-# Heidi Engine
+# Heidi Engine - Autonomous Coding Agent
 
-An end-to-end automated pipeline for training a coding agent using QLoRA (Quantized LoRA). This pipeline generates synthetic training data, validates it, fine-tunes a base model, and evaluates the results - all in a fully automated loop.
+Heidi Engine is a research project for building an autonomous coding agent through iterative self-improvement (Teacher-Student distillation).
 
-## 60-Second Quick Start
+## 🚀 Quick Start
+
+### 1. Installation
 
 ```bash
-# 1. Clone and install
+# Clone the repository
 git clone https://github.com/heidi-dang/heidi-engine.git
 cd heidi-engine
-python3 -m venv .venv && source .venv/bin/activate
+
+# Install dependencies
 pip install -e .
-
-# 2. Run the dashboard
-autotrain-dashboard
-
-# 3. (Optional) Start HTTP status server
-autotrain-serve --port 7779
-# Visit http://127.0.0.1:7779/status
-
-# 4. Run a minimal training loop
-./scripts/loop.sh --rounds 1 --samples 10 --train-steps 50
 ```
 
-## Features
+### 2. Data Collection (The Loop)
 
-- **Synthetic-first dataset generation** - No real code used, fully public-safe
-- **Automatic validation & cleaning** - Schema validation, deduplication, secret scrubbing
-- **Optional unit test gate** - Verify generated code is syntactically valid
-- **QLoRA fine-tuning** - Memory-efficient training with 4-bit quantization
-- **Comprehensive evaluation** - JSON parse rate, format compliance, quality metrics
-- **Automatic best model selection** - Tracks metrics across rounds
-- **VRAM-safe defaults** - Works on RTX 2080 Ti (11GB)
-- **Real-time dashboard** - Live monitoring with Rich TUI
-- **HTTP status endpoint** - Localhost-only REST API for status queries
+Use `loop_repos.sh` to scrape GitHub repositories, generate synthetic training data, and validate it.
 
-## CLI Commands
+**New Powerful Features:**
 
-| Command | Description |
-|---------|-------------|
-| `autotrain-dashboard` | Launch real-time TUI dashboard |
-| `autotrain-serve` | Start HTTP status server (127.0.0.1 only) |
-| `heidi-telemetry` | Telemetry CLI commands |
-| `python scripts/menu.py` | Interactive menu controller |
+*   **Stack Presets**: Easily target your tech stack.
+    *   `--stack python`: Python projects (`.py`, `.ipynb`)
+    *   `--stack cpp`: C++ projects (`.cpp`, `.h`, etc.)
+    *   `--stack vite`: Modern frontend (`.ts`, `.tsx`, `.vue`, `.svelte`)
+    *   `--stack web`: General web (`.js`, `.ts`)
+*   **Smart Filtering**: automatically skips "homework/assignments", checks licenses (MIT/Apache 2.0), and filters by file size.
+*   **Golden Repos**: Inject high-quality curated repos (e.g., Flask, React, PyTorch) with `--golden`.
+*   **Resume Mode**: Resume interrupted runs with `--resume`.
+*   **Global Deduplication**: Merge all data at the end with `--dedupe`.
 
-## Training
+**Example Command:**
 
 ```bash
-# Run with default settings (RTX 2080 Ti safe)
-./scripts/loop.sh
-
-# Custom configuration
-./scripts/loop.sh --rounds 3 --samples 50 --base-model microsoft/phi-2
-
-# Minimal test run
-./scripts/loop.sh --rounds 1 --samples 10 --train-steps 50
+# Collect high-quality Python data from 100 repos
+./scripts/loop_repos.sh \
+  --stack python \
+  --max 100 \
+  --rounds 1 \
+  --samples 1000 \
+  --resume \
+  --golden \
+  --dedupe
 ```
 
-## Requirements
-
-### Hardware
-- NVIDIA GPU with CUDA support
-- Minimum 12GB VRAM (RTX 2080 Ti compatible)
-- Recommended 16GB+ for larger models
-
-### Software
-```bash
-# Python dependencies
-pip install python-dotenv rich pyyaml
-
-# Core ML libraries (install in order)
-pip install transformers accelerate bitsandbytes
-
-# Training and evaluation
-pip install peft trl datasets
-
-# Optional: for teacher model API calls
-pip install openai
-
-# For evaluation (optional)
-pip install json5
-```
-
-## Environment Variables
-
-All parameters can be set via environment variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ROUNDS` | 3 | Number of training rounds |
-| `SAMPLES_PER_ROUND` | 50 | Samples per round |
-| `BASE_MODEL` | microsoft/phi-2 | Base model |
-| `TEACHER_MODEL` | gpt-4o-mini | Teacher model |
-| `VAL_RATIO` | 0.1 | Validation split |
-| `OUT_DIR` | ./autotrain | Output directory |
-| `SEQ_LEN` | 2048 | Sequence length |
-| `BATCH_SIZE` | 1 | Batch size |
-| `GRAD_ACCUM` | 8 | Gradient accumulation |
-| `TRAIN_STEPS` | 500 | Training steps |
-| `LORA_R` | 64 | LoRA rank |
-| `LR` | 2e-4 | Learning rate |
-| `RUN_UNIT_TESTS` | 0 | Enable unit test gate |
-| `SEED` | 42 | Random seed |
-
-## VRAM Optimization
-
-### RTX 2080 Ti (11GB) - Default Settings
-```bash
-export SEQ_LEN=2048
-export BATCH_SIZE=1
-export GRAD_ACCUM=8
-export LORA_R=64
-export QUANTIZATION_BITS=4
-```
-
-### RTX 3060 (6GB) - Reduced
-```bash
-export SEQ_LEN=1024
-export BATCH_SIZE=1
-export GRAD_ACCUM=16
-export LORA_R=32
-```
-
-### RTX 3090/4090 (24GB) - Higher Settings
-```bash
-export SEQ_LEN=4096
-export BATCH_SIZE=2
-export GRAD_ACCUM=4
-export LORA_R=128
-```
-
-## Pipeline Stages
-
-1. **Teacher Generation** - Generate synthetic data using teacher model
-2. **Validation** - Clean, deduplicate, scrub secrets
-3. **Unit Test Gate** - Verify code validity (optional)
-4. **Training** - QLoRA fine-tuning
-5. **Evaluation** - Measure quality metrics
-6. **Loop** - Repeat with best model
-
-## Output Structure
-
-```
-autotrain/
-├── runs/<run_id>/
-│   ├── state.json          # Current run state
-│   ├── events.jsonl        # Event stream (for dashboard)
-│   └── config.json         # Configuration snapshot
-├── data/
-│   ├── raw_round_1.jsonl      # Generated data
-│   ├── clean_round_1.jsonl    # Validated data
-│   └── train/val splits
-├── out_lora_round_1/
-│   ├── final/                 # Trained adapter
-│   └── checkpoints/
-├── eval/
-│   └── report_round_1.json    # Metrics
-├── best_adapter -> round_X/   # Best model
-├── config.yaml               # Configuration file
-└── pipeline.pid              # Running pipeline PID
-```
-
-## Real-Time Dashboard
-
-Monitor your training progress in real-time:
+**Push to Hub:**
+You can also automatically push the final dataset to Hugging Face:
 
 ```bash
-# Install dashboard dependency
-pip install rich
-
-# Start a training run (in background)
-./scripts/loop.sh &
-
-# In another terminal, start the dashboard
-python -m autotrain.dashboard
+./scripts/loop_repos.sh --stack python --max 100 --push-to-hub my-org/my-dataset
 ```
 
-### Dashboard Features
-- Live counters: samples generated, validated, trained, etc.
-- Teacher API usage: requests, tokens, rate limits, cost
-- Training metrics: loss, steps, VRAM usage
-- Event log with timestamps
-- Multiple views (Overview, Teacher, Trainer, Events)
+### 3. Training
 
-### Keyboard Shortcuts
-| Key | Action |
-|-----|--------|
-| `q` | Quit |
-| `r` | Refresh |
-| `1-5` | Switch views |
+You can train in the loop (using `--full` in `loop_repos.sh`) or use the **dedicated training script** for more control.
 
-See [Dashboard Documentation](docs/dashboard.md) for details.
-
-## Interactive Menu Controller
-
-Control the pipeline without editing files:
+**Standalone Training:**
 
 ```bash
-# Start interactive menu
-python scripts/menu.py
+# Train on the deduplicated dataset from step 2
+./scripts/train_only.py \
+  --data ./autotrain_repos/merged_dataset.jsonl \
+  --base-model microsoft/phi-2 \
+  --steps 1000 \
+  --out-dir ./my_model_output
 ```
 
-### Menu Options
-1. Start New Run - Configure and start training
-2. Resume Last Run - Continue interrupted run
-3. Stop Pipeline - Graceful stop at stage boundary
-4. Pause Pipeline - Pause at safe point
-5. Resume Pipeline - Continue from pause
-6. Configure Parameters - Interactive setup
-7. View Dashboard - Launch dashboard
-8. Exit
+### 4. Monitoring (New!)
 
-See [Dashboard Documentation](docs/dashboard.md) for details.
+A premium, real-time web dashboard is available to track your progress.
 
-## API Keys
+1. **Start the server** (if not running):
+   ```bash
+   python3 -m heidi_engine.telemetry init --server
+   ```
+2. **Open Dashboard**:
+   **[http://127.0.0.1:7779/](http://127.0.0.1:7779/)**
 
-For teacher model generation, set your API key:
+Features:
+*   Real-time counters (generated, validated, failed)
+*   Live training metrics (loss, steps)
+*   GPU VRAM monitoring
+*   API cost estimation
+*   Dark Mode UI
 
-```bash
-export OPENAI_API_KEY=your-key-here
-```
+*   Dark Mode UI
 
-The pipeline also supports other OpenAI-compatible APIs by modifying `01_teacher_generate.py`.
+### 5. Multi-Machine Monitoring (New!)
 
-## Safety & Privacy
+Monitor multiple training machines from a single dashboard.
 
-- **Synthetic data only** - No real code or proprietary data used
-- **Fail-closed secret detection** - Any potential secret triggers sample drop
-- **No secrets committed** - All outputs go to `./autotrain/` (gitignored)
-- **Public-safe outputs** - Datasets can be shared publicly
+1.  **On the Dashboard Machine**:
+    Start the server:
+    ```bash
+    python3 -m heidi_engine.telemetry init --server
+    ```
+    Open **[http://127.0.0.1:7779/](http://127.0.0.1:7779/)**.
 
-## Documentation
+2.  **On Worker Machines**:
+    Run `loop_repos.sh` with `--monitor`:
+    ```bash
+    ./scripts/loop_repos.sh --stack python --monitor http://<dashboard-ip>:7779
+    ```
 
-- [Dashboard & Menu Controller](docs/dashboard.md) - Real-time monitoring and control
-- [Dataset Card](docs/dataset_card.md) - Dataset documentation
-- [Fine-tuning guide](.local/ml/fine_tuning_guide.md) - Local LoRA / QLoRA setup and workflows
-- [License Policy](docs/license_policy.md) - Legal and licensing info
-- [Troubleshooting](docs/troubleshooting.md) - Common issues and fixes
+3.  **View All Runs**:
+    Use the dropdown menu in the dashboard header to switch between active runs.
 
-## License
+### 6. Multi-Language Support
 
-See [LICENSE](LICENSE) for details. This project uses permissive licensing for generated artifacts.
+The engine now supports generating data for multiple programming languages.
 
-## Roadmap
+*   **Supported Languages**: Python, JavaScript, Go, C++.
+*   **Templates**: customizable YAML files in `heidi_engine/templates/`.
+*   **Usage**:
+    ```bash
+    # Generate Python data (default)
+    ./scripts/loop_repos.sh --stack python
+    
+    # Generate JavaScript data
+    ./scripts/loop_repos.sh --stack web
+    
+    # Generate Go data
+    ./scripts/loop_repos.sh --stack go
+    
+    # Generate C++ data
+    ./scripts/loop_repos.sh --stack cpp
+    ```
 
-**Next big feature**: Auto profile recommender feeding dashboard + server - automatically recommend optimal training profiles based on hardware detection and continuously feed recommendations to the dashboard and HTTP status endpoints.
+## 📂 Project Structure
 
-## Citation
+*   `heidi_engine/`: Core Python package.
+*   `scripts/`: Automation scripts.
+    *   `loop_repos.sh`: Main data collection entry point.
+    *   `train_only.py`: Dedicated QLoRA training script.
+    *   `global_dedupe.py`: Data aggregation and deduplication tool.
+    *   `01_teacher_generate.py`: Synthetic data generation.
+    *   `04_train_qlora.py`: Low-level training script.
 
-If you use this pipeline in your research, please cite:
+## 🛠️ Advanced Usage
 
-```bibtex
-@software{heidi_engine,
-  title={Heidi Engine - AutoTraining Pipeline},
-  author={Heidi AI Team},
-  year={2024},
-  url={https://github.com/heidi-dang/heidi-engine}
-}
-```
+### Environment Variables
+
+*   `OPENAI_API_KEY`: Required for the teacher model (GPT-4o).
+*   `HF_TOKEN`: Required for pushing to Hugging Face Hub.
+*   `SAMPLES_PER_ROUND`: Default samples to generate (default: 50).
+
+### Customizing the Loop
+
+You can tweak `scripts/loop_repos.sh` to change:
+*   `VAL_RATIO`: Validation split (default: 0.05)
+*   `SLEEP_BETWEEN_REQUESTS`: Rate limiting (default: 0)
+
+## 📄 License
+
+MIT License.
