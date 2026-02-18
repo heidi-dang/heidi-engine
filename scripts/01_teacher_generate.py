@@ -37,9 +37,10 @@ import os
 import random
 import re
 import sys
+import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 # Add project root to sys.path to allow importing heidi_engine
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -140,10 +141,10 @@ Examples:
 def load_templates(language: str) -> bool:
     """Load prompt templates and samples from YAML file."""
     global PROMPT_TEMPLATES, SYNTHETIC_CODE_SAMPLES
-    
+
     # Default to python if language not found
     template_path = Path(PROJECT_ROOT) / "heidi_engine" / "templates" / f"{language}.yaml"
-    
+
     if not template_path.exists():
         print(f"[WARN] Template for {language} not found at {template_path}, falling back to python", file=sys.stderr)
         template_path = Path(PROJECT_ROOT) / "heidi_engine" / "templates" / "python.yaml"
@@ -177,7 +178,7 @@ def generate_prompt(template: Dict[str, str], code_sample: str = "", algo_info: 
     """
     # Add a subtle comment to ensure uniqueness
     salt = f"# Context ID: {hashlib.md5(str(random.random()).encode()).hexdigest()[:6]}"
-    
+
     if "{code}" in template["template"]:
         prompt = template["template"].format(code=code_sample)
     elif "{algorithm}" in template["template"]:
@@ -188,7 +189,7 @@ def generate_prompt(template: Dict[str, str], code_sample: str = "", algo_info: 
         prompt = template["template"].format(algorithm=name, description=desc)
     else:
         prompt = template["template"]
-    
+
     # Inject randomness into the prompt to increase entropy
     return f"{prompt}\n\n{salt}"
 
@@ -260,13 +261,13 @@ def generate_synthetic_response(prompt: str, language: str = "python") -> str:
     # Use a hash of the prompt to select different structures
     h = hashlib.sha256(prompt.encode()).hexdigest()
     variant_idx = int(h[:4], 16) % 5
-    
+
     # Try to extract a function name
     func_name = "solution"
     match = re.search(r'(?:def|func|function|void|int)\s+(\w+)\s*\(', prompt)
     if match:
         func_name = match.group(1)
-    
+
     # Language-specific syntax
     if language == "python":
         code_block = f"def {func_name}(*args):\n    # ID: {h[:8]}\n    return '{h[:8]}'"
@@ -287,7 +288,7 @@ def generate_synthetic_response(prompt: str, language: str = "python") -> str:
         f"Here's the algorithm implementation as requested (Internal Seed: {h[50:60]}):\n\n```{language}\n{code_block}\n```",
         f"Task complete. Example usage for {func_name} (Verified with {h[:8]}):\n\n```{language}\n// Automated test for {func_name}\n{code_block}\n```"
     ]
-    
+
     return responses[variant_idx]
 
 

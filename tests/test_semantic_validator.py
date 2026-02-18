@@ -1,11 +1,12 @@
-import sys
 import os
+import sys
 import unittest
 
 # Add project root to sys.path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from heidi_engine.validation.semantic_validator import validate_semantic
+
 
 class TestSemanticValidator(unittest.TestCase):
     def test_placeholder_rejection(self):

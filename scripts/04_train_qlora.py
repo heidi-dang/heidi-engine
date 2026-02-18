@@ -261,14 +261,14 @@ def load_training_data(data_path: str) -> List[Dict[str, Any]]:
 
             try:
                 sample = json.loads(line)
-                
+
                 # [SECURITY] Mandatory Provenance Verification
                 if HAS_SECURITY_VALIDATOR:
                     if not verify_record(sample):
                         logger.error(f"SECURITY BREACH: Invalid signature for sample {sample.get('id', 'unknown')}")
                         logger.error("Training aborted to prevent consumption of unverified data.")
                         sys.exit(1)
-                
+
                 samples.append(sample)
             except json.JSONDecodeError as e:
                 logger.warning(f"Failed to parse JSON line: {e}")

@@ -1,9 +1,11 @@
-import subprocess
-import tempfile
 import os
 import shutil
+import subprocess
 import sys
+import tempfile
+
 from pygments.lexers import guess_lexer
+
 
 def guess_language(code: str) -> str:
     """Guess programming language from snippet."""
@@ -48,11 +50,11 @@ def _validate_python(code: str) -> bool:
 def _validate_cpp(code: str) -> bool:
     if not shutil.which("g++"):
         return True # Skip if compiler not found
-    
+
     with tempfile.NamedTemporaryFile(suffix=".cpp", mode="w", delete=False) as f:
         f.write(code)
         cpp_path = f.name
-        
+
     exe_path = cpp_path + ".exe"
     try:
         # Try to compile only (no link) to be faster and safer
@@ -69,7 +71,7 @@ def _validate_cpp(code: str) -> bool:
 def _validate_go(code: str) -> bool:
     if not shutil.which("go"):
         return True
-        
+
     with tempfile.NamedTemporaryFile(suffix=".go", mode="w", delete=False) as f:
         # Unpack code into main package if needed, or just write it
         if "package " not in code:
@@ -79,7 +81,7 @@ def _validate_go(code: str) -> bool:
         go_path = f.name
 
     try:
-        # go vet is good but might require module setup. 
+        # go vet is good but might require module setup.
         # 'go tool compile' is lower level.
         # Let's try simple formatting which does syntax check
         subprocess.run(["gofmt", "-e", go_path], check=True, capture_output=True)
@@ -93,11 +95,11 @@ def _validate_go(code: str) -> bool:
 def _validate_javascript(code: str) -> bool:
     if not shutil.which("node"):
         return True
-        
+
     with tempfile.NamedTemporaryFile(suffix=".js", mode="w", delete=False) as f:
         f.write(code)
         js_path = f.name
-        
+
     try:
         # node --check (syntax check only)
         subprocess.run(["node", "--check", js_path], check=True, capture_output=True)

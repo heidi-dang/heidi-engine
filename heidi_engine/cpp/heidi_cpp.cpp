@@ -10,8 +10,12 @@
 #include <stdexcept>
 #include <thread>
 #include <mutex>
+#ifdef HAS_ZLIB
 #include <zlib.h>
+#endif
+#ifndef _WIN32
 #include <sys/resource.h>
+#endif
 #include <heidi-kernel/resource_governor.h>
 
 #ifdef HAS_CUDA
@@ -105,16 +109,20 @@ std::vector<bool> parallel_validate(const std::vector<std::string>& snippets, in
 
 // 5. Compressed Data Serializer
 std::string compress_data(const std::string& data) {
+#ifdef HAS_ZLIB
     if (data.empty()) return "";
     
-    uLongf destLen = compressBound(data.size());
+    uLongf destLen = compressBound(static_cast<uLong>(data.size()));
     std::vector<Bytef> buffer(destLen);
     
-    if (compress(buffer.data(), &destLen, (const Bytef*)data.data(), data.size()) != Z_OK) {
+    if (compress(buffer.data(), &destLen, (const Bytef*)data.data(), static_cast<uLong>(data.size())) != Z_OK) {
         throw std::runtime_error("zlib compression failed");
     }
     
     return std::string((const char*)buffer.data(), destLen);
+#else
+    throw std::runtime_error("Compression not available (zlib missing)");
+#endif
 }
 
 // 6. GPU Memory Checker
@@ -170,10 +178,11 @@ std::vector<std::string> dedup_with_custom_hash(const std::vector<std::string>& 
 
 // 9. Batch Compressor for Logs
 std::vector<py::bytes> compress_logs(const std::vector<std::string>& logs) {
+#ifdef HAS_ZLIB
     std::vector<py::bytes> compressed;
     compressed.reserve(logs.size());
     for (const auto& log : logs) {
-        uLongf source_len = log.size();
+        uLongf source_len = static_cast<uLongf>(log.size());
         uLongf dest_len = compressBound(source_len);
         std::vector<Bytef> buf(dest_len);
         if (compress(buf.data(), &dest_len, reinterpret_cast<const Bytef*>(log.data()), source_len) == Z_OK) {
@@ -183,19 +192,24 @@ std::vector<py::bytes> compress_logs(const std::vector<std::string>& logs) {
         }
     }
     return compressed;
+#else
+    throw std::runtime_error("Batch compression not available (zlib missing)");
+#endif
 }
 
 // 10. Resource Limiter Wrapper
 void run_with_limits(const std::function<void()>& func, int max_threads, size_t max_memory_mb) {
     // Note: Setting caps in a shared library can affect the whole process.
+#ifndef _WIN32
     // Memory limit (Address Space)
     if (max_memory_mb > 0) {
         struct rlimit lim;
         if (getrlimit(RLIMIT_AS, &lim) == 0) {
-            lim.rlim_cur = max_memory_mb * 1024 * 1024;
+            lim.rlim_cur = static_cast<rlim_t>(max_memory_mb) * 1024 * 1024;
             setrlimit(RLIMIT_AS, &lim);
         }
     }
+#endif
     // Note: max_threads enforcement would typically be done via OpenMP or pool control.
     // We'll execute the function as a wrapper.
     func();
