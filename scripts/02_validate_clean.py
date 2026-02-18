@@ -164,6 +164,9 @@ Examples:
     )
     parser.add_argument("--no-dedupe", action="store_true", help="Skip deduplication step")
     parser.add_argument(
+        "--skip-provenance", action="store_true", help="Skip provenance signature verification"
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=int(os.environ.get("SEED", 42)),
@@ -356,6 +359,7 @@ def process_sample(
     min_input: int,
     min_output: int,
     strict_secrets: bool = True,
+    skip_provenance: bool = False,
 ) -> Tuple[Optional[Dict[str, Any]], str]:
     """
     Process a single sample through all validation steps.
@@ -380,7 +384,7 @@ def process_sample(
             return None, f"secrets: {secrets}"
 
     # Step 3: Provenance Verification
-    if HAS_SECURITY_VALIDATOR:
+    if HAS_SECURITY_VALIDATOR and not skip_provenance:
         if not verify_record(sample):
             return None, "provenance: invalid_signature"
 
@@ -464,6 +468,7 @@ def main():
             min_input=args.min_input,
             min_output=args.min_output,
             strict_secrets=True,
+            skip_provenance=args.skip_provenance,
         )
 
         if processed is not None:
