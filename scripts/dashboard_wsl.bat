@@ -3,7 +3,7 @@ setlocal EnableExtensions
 
 REM ===== Optional overrides =====
 REM set HEIDI_WSL_DISTRO=Ubuntu-24.04
-REM set HEIDI_WSL_REPO=~/work/heidi-engine
+REM set HEIDI_WSL_REPO=~/work/heidi-engine        
 REM ==============================
 
 if "%HEIDI_WSL_REPO%"=="" set "HEIDI_WSL_REPO=~/work/heidi-engine"
