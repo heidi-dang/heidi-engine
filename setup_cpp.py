@@ -1,4 +1,5 @@
 import os
+import sys
 import subprocess
 from setuptools import setup, Extension
 from pybind11.setup_helpers import Pybind11Extension, build_ext
@@ -12,8 +13,13 @@ include_dirs = [
     os.path.abspath("submodules/heidi-kernel/include"),
 ]
 library_dirs = []
-libraries = ["z"] # Always link zlib
+libraries = []
 macros = []
+
+# Conditionally link zlib (common on Unix, needs special handling on Windows)
+if sys.platform != "win32":
+    libraries.append("z")
+    macros.append(("HAS_ZLIB", "1"))
 
 if cuda_home and os.path.exists(os.path.join(cuda_home, "include/cuda_runtime.h")):
     include_dirs.append(os.path.join(cuda_home, "include"))

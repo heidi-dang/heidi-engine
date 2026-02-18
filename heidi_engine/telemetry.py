@@ -106,6 +106,88 @@ EVENT_LOG_MAX_SIZE_MB = int(os.environ.get("EVENT_LOG_MAX_SIZE_MB", "100"))
 # Number of rotated log files to keep
 EVENT_LOG_RETENTION = int(os.environ.get("EVENT_LOG_RETENTION", "5"))
 
+
+def get_gpu_info() -> Dict[str, Any]:
+    """
+    Get GPU information using nvidia-smi.
+
+    HOW IT WORKS:
+        - Runs nvidia-smi command
+        - Parses output for VRAM usage and utilization
+        - Returns a dictionary with both telemetry and dashboard compatible keys
+
+    RETURNS:
+        Dictionary with GPU info (available=False if no GPU found)
+    """
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.used,memory.total,utilization.gpu",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+
+        if result.returncode == 0:
+            parts = result.stdout.strip().split(",")
+            if len(parts) >= 2:
+                used = int(parts[0].strip())
+                total = int(parts[1].strip())
+                util = int(parts[2].strip()) if len(parts) > 2 else 0
+
+                return {
+                    "available": True,
+                    # Telemetry keys
+                    "vram_used_mb": used,
+                    "vram_total_mb": total,
+                    "util_pct": util,
+                    # Dashboard keys
+                    "memory_used_mb": used,
+                    "memory_total_mb": total,
+                    "memory_used_pct": (used / total * 100) if total > 0 else 0,
+                    "utilization_pct": util,
+                }
+    except Exception:
+        pass
+
+    return {"available": False}
+
+
+def get_last_event_ts() -> Optional[str]:
+    """Get timestamp of last event."""
+    try:
+        events_file = get_events_path()
+        if events_file.exists() and events_file.stat().st_size > 0:
+            with open(events_file, "rb") as f:
+                f.seek(-500, 2)  # Read last 500 bytes
+                lines = f.read().decode().strip().split("\n")
+                if lines:
+                    last_line = lines[-1]
+                    event = json.loads(last_line)
+                    return event.get("ts")
+    except Exception:
+        pass
+    return None
+
+
+def redact_state(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Redact state to only allowed fields."""
+    redacted = {}
+    for key in ALLOWED_STATUS_FIELDS:
+        if key in state:
+            value = state[key]
+            # Sanitize any nested secrets
+            if isinstance(value, dict):
+                value = {k: sanitize_for_log(v, 100) for k, v in value.items()}
+            redacted[key] = value
+    return redacted
+
+
 # =============================================================================
 # EVENT SCHEMA VERSION (FROZEN - DO NOT CHANGE)
 # =============================================================================
@@ -1333,66 +1415,7 @@ def start_http_server(port: int = 7779) -> None:
         return
 
     # Use existing helper functions
-    # (get_gpu_summary, get_last_event_ts, redact_state are defined in outer scope or helper scope)
-    # Wait, in the original code they were defined INSIDE start_http_server.
-    # I should redefine them or move them out. 
-    # Moving them out is better but changes too much structure. 
-    # I will keep them inside for minimal diff, but I need to include them in replacement.
-    
-    def get_gpu_summary() -> Dict[str, Any]:
-        """Get minimal GPU info without exposing sensitive data."""
-        try:
-            import subprocess
-
-            result = subprocess.run(
-                [
-                    "nvidia-smi",
-                    "--query-gpu=memory.used,memory.total,utilization.gpu",
-                    "--format=csv,noheader,nounits",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                parts = result.stdout.strip().split(",")
-                if len(parts) >= 2:
-                    return {
-                        "vram_used_mb": int(parts[0].strip()),
-                        "vram_total_mb": int(parts[1].strip()),
-                        "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
-                    }
-        except Exception:
-            pass
-        return {"available": False}
-
-    def get_last_event_ts() -> Optional[str]:
-        """Get timestamp of last event."""
-        try:
-            events_file = get_events_path()
-            if events_file.exists() and events_file.stat().st_size > 0:
-                with open(events_file, "rb") as f:
-                    f.seek(-500, 2)  # Read last 500 bytes
-                    lines = f.read().decode().strip().split("\n")
-                    if lines:
-                        last_line = lines[-1]
-                        event = json.loads(last_line)
-                        return event.get("ts")
-        except Exception:
-            pass
-        return None
-
-    def redact_state(state: Dict[str, Any]) -> Dict[str, Any]:
-        """Redact state to only allowed fields."""
-        redacted = {}
-        for key in ALLOWED_STATUS_FIELDS:
-            if key in state:
-                value = state[key]
-                # Sanitize any nested secrets
-                if isinstance(value, dict):
-                    value = {k: sanitize_for_log(v, 100) for k, v in value.items()}
-                redacted[key] = value
-        return redacted
+    # (get_gpu_info, get_last_event_ts, redact_state are defined in outer scope)
 
     class StateHandler(BaseHTTPRequestHandler):
         """HTTP handler with security restrictions."""
@@ -1465,7 +1488,7 @@ def start_http_server(port: int = 7779) -> None:
 
                 # Add GPU summary (no secrets)
                 if "gpu_summary" not in state:
-                    state["gpu_summary"] = get_gpu_summary()
+                    state["gpu_summary"] = get_gpu_info()
 
                 # Add last event timestamp
                 state["last_event_ts"] = get_last_event_ts()
