@@ -33,7 +33,7 @@ ext_modules = [
         library_dirs=library_dirs,
         libraries=libraries,
         define_macros=macros,
-        cxx_std=11,
+        cxx_std=23,
     ),
 ]
 
