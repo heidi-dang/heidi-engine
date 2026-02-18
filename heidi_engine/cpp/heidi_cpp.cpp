@@ -10,8 +10,15 @@
 #include <stdexcept>
 #include <thread>
 #include <mutex>
+
+#ifdef HAS_ZLIB
 #include <zlib.h>
+#endif
+
+#ifdef HAS_SYS_RESOURCE
 #include <sys/resource.h>
+#endif
+
 #include <heidi-kernel/resource_governor.h>
 
 #ifdef HAS_CUDA
@@ -107,6 +114,7 @@ std::vector<bool> parallel_validate(const std::vector<std::string>& snippets, in
 std::string compress_data(const std::string& data) {
     if (data.empty()) return "";
     
+#ifdef HAS_ZLIB
     uLongf destLen = compressBound(data.size());
     std::vector<Bytef> buffer(destLen);
     
@@ -115,6 +123,9 @@ std::string compress_data(const std::string& data) {
     }
     
     return std::string((const char*)buffer.data(), destLen);
+#else
+    return data; // No-op fallback
+#endif
 }
 
 // 6. GPU Memory Checker
@@ -173,6 +184,7 @@ std::vector<py::bytes> compress_logs(const std::vector<std::string>& logs) {
     std::vector<py::bytes> compressed;
     compressed.reserve(logs.size());
     for (const auto& log : logs) {
+#ifdef HAS_ZLIB
         uLongf source_len = log.size();
         uLongf dest_len = compressBound(source_len);
         std::vector<Bytef> buf(dest_len);
@@ -181,6 +193,9 @@ std::vector<py::bytes> compress_logs(const std::vector<std::string>& logs) {
         } else {
             compressed.emplace_back(""); // Or throw
         }
+#else
+        compressed.emplace_back(log); // No-op fallback
+#endif
     }
     return compressed;
 }
@@ -188,14 +203,16 @@ std::vector<py::bytes> compress_logs(const std::vector<std::string>& logs) {
 // 10. Resource Limiter Wrapper
 void run_with_limits(const std::function<void()>& func, int max_threads, size_t max_memory_mb) {
     // Note: Setting caps in a shared library can affect the whole process.
+#ifdef HAS_SYS_RESOURCE
     // Memory limit (Address Space)
     if (max_memory_mb > 0) {
         struct rlimit lim;
         if (getrlimit(RLIMIT_AS, &lim) == 0) {
-            lim.rlim_cur = max_memory_mb * 1024 * 1024;
+            lim.rlim_cur = (rlim_t)(max_memory_mb * 1024 * 1024);
             setrlimit(RLIMIT_AS, &lim);
         }
     }
+#endif
     // Note: max_threads enforcement would typically be done via OpenMP or pool control.
     // We'll execute the function as a wrapper.
     func();

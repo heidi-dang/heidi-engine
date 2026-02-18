@@ -119,7 +119,7 @@ set_seed() {
     export SEED="$seed"
     
     # Set Python random seed
-    python3 -c "import random; random.seed(${seed})" 2>/dev/null || true
+    python3 -c "import random; import sys; random.seed(int(sys.argv[1]))" "$seed" 2>/dev/null || true
     
     # Set environment for reproducibility
     export PYTHONHASHSEED="$seed"
