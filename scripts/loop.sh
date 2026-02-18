@@ -122,17 +122,19 @@ emit_event() {
         
         python3 -c "
 import heidi_engine.telemetry as tm
+import sys
+import json
 tm.emit_event(
-    event_type='$event_type',
-    message=\"$message\",
-    stage='$stage',
-    round_num=$round,
-    counters_delta=$counters_arg,
-    usage_delta=$usage_arg,
-    model='$TEACHER_MODEL'
+    event_type=sys.argv[1],
+    message=sys.argv[2],
+    stage=sys.argv[3],
+    round_num=int(sys.argv[4]),
+    counters_delta=json.loads(sys.argv[5]) if sys.argv[5] != 'None' else None,
+    usage_delta=json.loads(sys.argv[6]) if sys.argv[6] != 'None' else None,
+    model=sys.argv[7]
 )
 tm.flush_events()
-" 2>/dev/null || true
+" "$event_type" "$message" "$stage" "$round" "$counters_arg" "$usage_arg" "$TEACHER_MODEL" 2>/dev/null || true
     fi
 }
 
@@ -186,13 +188,15 @@ init_telemetry() {
         python3 -c "
 import heidi_engine.telemetry as tm
 import os
-os.environ['AUTOTRAIN_DIR'] = '$OUT_DIR'
+import sys
+import json
+os.environ['AUTOTRAIN_DIR'] = sys.argv[1]
 run_id = tm.init_telemetry(
     run_id=os.environ.get('RUN_ID', None),
-    config=$config_json
+    config=json.loads(sys.argv[2])
 )
 print(run_id)
-" 2>/dev/null || echo "$RUN_ID"
+" "$OUT_DIR" "$config_json" 2>/dev/null || echo "$RUN_ID"
     fi
     
     # Always set RUN_ID if not set
@@ -219,8 +223,9 @@ set_status() {
     if [ "$TELEMETRY_AVAILABLE" = true ]; then
         python3 -c "
 import heidi_engine.telemetry as tm
-tm.set_status('$status', '$stage', $round)
-" 2>/dev/null || true
+import sys
+tm.set_status(sys.argv[1], sys.argv[2], int(sys.argv[3]))
+" "$status" "$stage" "$round" 2>/dev/null || true
     fi
 }
 
@@ -231,8 +236,10 @@ update_counters() {
     if [ "$TELEMETRY_AVAILABLE" = true ] && [ -n "$delta" ]; then
         python3 -c "
 import heidi_engine.telemetry as tm
-tm.update_counters($delta)
-" 2>/dev/null || true
+import sys
+import json
+tm.update_counters(json.loads(sys.argv[1]))
+" "$delta" 2>/dev/null || true
     fi
 }
 
@@ -243,8 +250,10 @@ update_usage() {
     if [ "$TELEMETRY_AVAILABLE" = true ] && [ -n "$delta" ]; then
         python3 -c "
 import heidi_engine.telemetry as tm
-tm.update_usage($delta, '$TEACHER_MODEL')
-" 2>/dev/null || true
+import sys
+import json
+tm.update_usage(json.loads(sys.argv[1]), sys.argv[2])
+" "$delta" "$TEACHER_MODEL" 2>/dev/null || true
     fi
 }
 
@@ -648,16 +657,16 @@ extract_metric() {
 import json
 import sys
 try:
-    with open('$report_file') as f:
+    with open(sys.argv[1]) as f:
         data = json.load(f)
-    keys = '$metric_path'.split('.')
+    keys = sys.argv[2].split('.')
     val = data
     for k in keys:
         val = val.get(k, {})
     print(val if val is not None else 0)
 except Exception as e:
     print(0)
-" 2>/dev/null || echo "0"
+" "$report_file" "$metric_path" 2>/dev/null || echo "0"
 }
 
 update_best_adapter() {
@@ -682,7 +691,7 @@ update_best_adapter() {
     fi
     
     # Compare (higher is better)
-    local is_better=$(python3 -c "print($metric > $best_metric)")
+    local is_better=$(python3 -c "import sys; print(float(sys.argv[1]) > float(sys.argv[2]))" "$metric" "$best_metric")
     
     if [ "$is_better" = "True" ]; then
         log_success "New best adapter! Metric: $metric (previous: $best_metric)"
