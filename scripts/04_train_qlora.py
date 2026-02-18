@@ -239,43 +239,44 @@ Examples:
     return parser.parse_args()
 
 
-def load_training_data(data_path: str) -> List[Dict[str, Any]]:
+def load_training_data(data_path: str) -> Any:
     """
     Load training data from JSONL file.
 
     HOW IT WORKS:
-        - Reads JSONL with instruction/input/output format
+        - Uses datasets.load_dataset for memory-mapped loading
         - Converts to instruction-following format for training
 
     TUNABLE:
         - Modify format_instruction() for different prompt formats
         - Add more fields to the output format
     """
-    samples = []
+    from datasets import load_dataset
 
-    with open(data_path, "r") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
+    logger.info(f"Loading dataset from {data_path}...")
+    try:
+        dataset = load_dataset("json", data_files={"train": data_path}, split="train")
+    except Exception as e:
+        logger.error(f"Failed to load dataset: {e}")
+        sys.exit(1)
 
-            try:
-                sample = json.loads(line)
-                
-                # [SECURITY] Mandatory Provenance Verification
-                if HAS_SECURITY_VALIDATOR:
-                    if not verify_record(sample):
-                        logger.error(f"SECURITY BREACH: Invalid signature for sample {sample.get('id', 'unknown')}")
-                        logger.error("Training aborted to prevent consumption of unverified data.")
-                        sys.exit(1)
-                
-                samples.append(sample)
-            except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse JSON line: {e}")
-                continue
+    # [SECURITY] Mandatory Provenance Verification
+    if HAS_SECURITY_VALIDATOR:
+        logger.info("Verifying data provenance...")
 
-    logger.info(f"Loaded {len(samples)} training samples")
-    return samples
+        def verify(sample):
+            if not verify_record(sample):
+                logger.error(
+                    f"SECURITY BREACH: Invalid signature for sample {sample.get('id', 'unknown')}"
+                )
+                logger.error("Training aborted to prevent consumption of unverified data.")
+                sys.exit(1)
+            return sample
+
+        dataset = dataset.map(verify, desc="Verifying security signatures")
+
+    logger.info(f"Loaded {len(dataset)} training samples")
+    return dataset
 
 
 def format_instruction(sample: Dict[str, Any]) -> str:
@@ -434,33 +435,52 @@ def setup_trainer(
 
     # Prepare datasets
     # TUNABLE: Use different dataset format if needed
-    from datasets import Dataset
 
-    def format_for_training(sample):
-        """Format sample for training."""
-        text = format_instruction(sample)
-        return {"text": text}
+    def format_for_training_batched(batch):
+        """Format a batch of samples for training."""
+        num_samples = len(next(iter(batch.values())))
+        return {
+            "text": [
+                format_instruction({k: batch[k][i] for k in batch}) for i in range(num_samples)
+            ]
+        }
 
     # Create datasets (pre-tokenize with truncation/padding to avoid batching errors)
-    train_dataset = Dataset.from_list([format_for_training(s) for s in train_data])
+    train_dataset = train_data.map(
+        format_for_training_batched,
+        batched=True,
+        remove_columns=train_data.column_names,
+        desc="Formatting train data",
+    )
     train_dataset = train_dataset.map(
         lambda batch: tokenizer(
             batch["text"], truncation=True, padding="longest", max_length=args.seq_len
         ),
         batched=True,
+        desc="Tokenizing train data",
     )
     # copy input_ids to labels for causal LM training
-    train_dataset = train_dataset.map(lambda batch: {"labels": batch["input_ids"]}, batched=True)
+    train_dataset = train_dataset.map(
+        lambda batch: {"labels": batch["input_ids"]}, batched=True, desc="Adding labels"
+    )
 
     if val_data:
-        val_dataset = Dataset.from_list([format_for_training(s) for s in val_data])
+        val_dataset = val_data.map(
+            format_for_training_batched,
+            batched=True,
+            remove_columns=val_data.column_names,
+            desc="Formatting val data",
+        )
         val_dataset = val_dataset.map(
             lambda batch: tokenizer(
                 batch["text"], truncation=True, padding="longest", max_length=args.seq_len
             ),
             batched=True,
+            desc="Tokenizing val data",
         )
-        val_dataset = val_dataset.map(lambda batch: {"labels": batch["input_ids"]}, batched=True)
+        val_dataset = val_dataset.map(
+            lambda batch: {"labels": batch["input_ids"]}, batched=True, desc="Adding labels"
+        )
     else:
         val_dataset = None
 
