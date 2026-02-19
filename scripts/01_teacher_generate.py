@@ -37,6 +37,7 @@ import os
 import random
 import re
 import sys
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from pathlib import Path
@@ -133,6 +134,23 @@ Examples:
     parser.add_argument(
         "--round", type=int, default=1, help="Current round number (for ID generation)"
     )
+    parser.add_argument(
+        "--provider",
+        type=str,
+        default=os.environ.get("HEIDI_PROVIDER", ""),
+        help="Provider name (openai, openrouter, gemini, azure)",
+    )
+    parser.add_argument(
+        "--metrics-path",
+        type=str,
+        default=str(Path.home() / ".local" / "heidi_engine" / "metrics" / "provider_requests.jsonl"),
+        help="Path to save provider metrics (default: ~/.local/heidi_engine/metrics/provider_requests.jsonl)",
+    )
+    parser.add_argument(
+        "--no-provider-metrics",
+        action="store_true",
+        help="Disable provider metrics collection",
+    )
 
     return parser.parse_args()
 
@@ -195,58 +213,73 @@ def generate_prompt(template: Dict[str, str], code_sample: str = "", algo_info: 
 
 
 def call_teacher_model(
-    prompt: str, model: str, api_key: str, max_tokens: int = 4596, language: str = "python"
+    prompt: str, model: str, api_key: str, max_tokens: int = 4596, language: str = "python", provider_name: str = ""
 ) -> Optional[str]:
     """
     Call the teacher model API to generate a response.
     """
-    # Check if we have an API key or if model is 'code-assistant'
+    if provider_name:
+        from heidi_engine.providers import registry, ProviderError
+        try:
+            provider = registry.get_provider(provider_name)
+            return provider.generate(prompt, max_tokens=max_tokens, temperature=0.8)
+        except ProviderError as e:
+            print(f"[FATAL] Provider error: {e}", file=sys.stderr)
+            sys.exit(1) # Fail-closed
+
+    # Legacy fallback behavior
     if model == "code-assistant" or not api_key:
         if model == "code-assistant":
             print("[INFO] Using code-assistant mode for generation", file=sys.stderr)
         else:
             print("[WARN] No API key provided, using synthetic fallback", file=sys.stderr)
-        return generate_synthetic_response(prompt, language)
+        
+        start_time = time.time()
+        output = generate_synthetic_response(prompt, language)
+        latency_ms = int((time.time() - start_time) * 1000)
+        
+        from heidi_engine.providers import registry
+        # We can at least log metrics for the synthetic provider if enabled
+        registry.list_providers() # Ensure init
+        # Create a mock metrics call for the "synthetic" path
+        record = {
+            "ts": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "provider_id": "synthetic",
+            "model": model,
+            "latency_ms": latency_ms,
+            "input_tokens": None,
+            "output_tokens": None,
+            "status": "ok"
+        }
+        if registry.metrics_enabled:
+            metrics_path = Path(registry.metrics_path) if registry.metrics_path else Path.home() / ".local" / "heidi_engine" / "metrics" / "provider_requests.jsonl"
+            try:
+                metrics_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(metrics_path, "a") as f:
+                    f.write(json.dumps(record) + "\n")
+            except:
+                pass
 
+        return output
+
+    # Legacy OpenAI implementation (retained for compatibility if no provider specified)
     try:
-        # Import openai - install with: pip install openai
         import openai
-
-        # Use Manus-preconfigured OpenAI client if available
-        try:
-            from openai import OpenAI
-            client = OpenAI()
-        except ImportError:
-            openai.api_key = api_key
-
-        if 'client' in locals():
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": f"You are a helpful coding assistant that generates high-quality, well-documented {language} code."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.8,
-                max_tokens=max_tokens,
-            )
-            return response.choices[0].message.content
-        else:
-            response = openai.ChatCompletion.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": f"You are a helpful coding assistant that generates high-quality, well-documented {language} code."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.8,
-                max_tokens=max_tokens,
-            )
-            return response.choices[0].message.content
-
-    except ImportError:
-        print("[WARN] openai package not installed, using synthetic fallback", file=sys.stderr)
-        return generate_synthetic_response(prompt, language)
+        # ... (rest of legacy code)
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": f"You are a helpful coding assistant that generates high-quality, well-documented {language} code."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.8,
+            max_tokens=max_tokens,
+        )
+        return response.choices[0].message.content
     except Exception as e:
-        print(f"[WARN] API call failed: {e}", file=sys.stderr)
+        print(f"[WARN] Legacy API call failed: {e}", file=sys.stderr)
         return generate_synthetic_response(prompt, language)
 
 
@@ -299,6 +332,7 @@ def generate_sample(
     api_key: str,
     max_output: int,
     language: str,
+    **kwargs,
 ) -> Dict[str, Any]:
     """
     Generate a single training sample.
@@ -315,7 +349,7 @@ def generate_sample(
     prompt = generate_prompt(template, code_sample, algo_info)
 
     # Get response from teacher
-    output = call_teacher_model(prompt, teacher_model, api_key, max_output, language)
+    output = call_teacher_model(prompt, teacher_model, api_key, max_output, language, provider_name=kwargs.get("provider", ""))
 
     if output is None:
         output = generate_synthetic_response(prompt, language)
@@ -343,7 +377,7 @@ def generate_sample(
 
 
 def generate_dataset(
-    num_samples: int, round_num: int, teacher_model: str, api_key: str, max_output: int, seed: int, language: str
+    num_samples: int, round_num: int, teacher_model: str, api_key: str, max_output: int, seed: int, language: str, provider: str = ""
 ) -> List[Dict[str, Any]]:
     """
     Generate the complete dataset for a round.
@@ -373,6 +407,7 @@ def generate_dataset(
             api_key=api_key,
             max_output=max_output,
             language=language,
+            provider=provider,
         )
 
         # Validate code if validator is available
@@ -441,6 +476,10 @@ def main():
         print(f"[ERROR] Failed to load templates for {args.language}", file=sys.stderr)
         return 1
 
+    # Configure metrics
+    from heidi_engine.providers import registry
+    registry.set_metrics_config(not args.no_provider_metrics, args.metrics_path)
+
     # Generate dataset
     samples = generate_dataset(
         num_samples=args.samples,
@@ -450,6 +489,7 @@ def main():
         max_output=int(os.environ.get("MAX_OUTPUT_LENGTH", 4596)),
         seed=args.seed,
         language=args.language,
+        provider=args.provider,
     )
 
     # Save to file

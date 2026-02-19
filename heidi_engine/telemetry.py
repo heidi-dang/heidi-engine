@@ -1446,6 +1446,44 @@ def start_http_server(port: int = 7779) -> None:
                 self.wfile.write(json.dumps(unique_runs).encode())
                 return
 
+            # List available providers
+            if self.path == "/providers":
+                from heidi_engine.providers import registry
+                providers = registry.list_providers()
+                self.send_response(200)
+                self._send_cors_headers()
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(providers).encode())
+                return
+
+            # Get latest provider metrics
+            if self.path.startswith("/provider-metrics/latest"):
+                from urllib.parse import urlparse, parse_qs
+                query = parse_qs(urlparse(self.path).query)
+                n = int(query.get("n", [50])[0])
+                
+                # Default path
+                metrics_path = Path.home() / ".local" / "heidi_engine" / "metrics" / "provider_requests.jsonl"
+                
+                metrics = []
+                if metrics_path.exists():
+                    try:
+                        # Use a simple tail implementation for efficiency
+                        import collections
+                        with open(metrics_path, "r") as f:
+                            metrics = list(collections.deque(f, n))
+                        metrics = [json.loads(line) for line in metrics]
+                    except Exception as e:
+                        metrics = [{"error": str(e)}]
+                
+                self.send_response(200)
+                self._send_cors_headers()
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(metrics).encode())
+                return
+
             # Get specific run status
             if self.path.startswith("/status"):
                 query_run_id = None

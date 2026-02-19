@@ -308,6 +308,7 @@ OPTIONS:
     --n-trials N            Number of HPO trials (default: 10)
     --collect               Run in collect mode (generate/validate only, skip training)
     --full                  Run in full mode (include training)
+    --provider PROVIDER     Provider name (openai, openrouter, gemini, azure)
 
 EXAMPLES:
     # Run with defaults (RTX 2080 Ti safe)
@@ -400,6 +401,11 @@ while [[ $# -gt 0 ]]; do
         --full)
             PIPELINE_MODE="full"
             shift
+            ;;
+        --provider)
+            HEIDI_PROVIDER="$2"
+            export HEIDI_PROVIDER
+            shift 2
             ;;
         *)
             echo "Unknown option: $1"
@@ -615,7 +621,8 @@ run_teacher_generate() {
         --teacher "$TEACHER_MODEL" \
         --round "$round_num" \
         --language "${LANGUAGE:-python}" \
-        --seed "$SEED" 1>&2 || {
+        --seed "$SEED" \
+        ${HEIDI_PROVIDER:+--provider "$HEIDI_PROVIDER"} 1>&2 || {
             echo "[ERROR] Teacher generation failed" >&2
             exit 1
         }

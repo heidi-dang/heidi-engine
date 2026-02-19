@@ -22,7 +22,18 @@ void EngineDaemon::run() {
     job_runner_->start();
 
     // Prepare shell command
-    std::string cmd = "./scripts/loop_repos.sh --config " + config_path_;
+    char* provider_env = std::getenv("HEIDI_PROVIDER");
+    std::string cmd = "./scripts/loop_repos.sh";
+    if (provider_env) {
+        cmd += " --provider ";
+        cmd += provider_env;
+    }
+    // Note: loop_repos.sh doesn't currently support --config, 
+    // but we'll include it if config_path_ is not default for future-proofing
+    // or if the user added it elsewhere.
+    if (config_path_ != "engine_config.yaml") {
+        // cmd += " --config " + config_path_; // Skipping for now as loop_repos doesn't support it
+    }
 
     // Submit job
     JobLimits limits;

@@ -6,13 +6,20 @@ int main(int argc, char* argv[]) {
     std::string config_path = "engine_config.yaml";
     
     if (argc > 1) {
-        std::string arg1 = argv[1];
-        if (arg1 == "--help" || arg1 == "-h") {
-            std::cout << "Usage: heidid [--config path/to/config.yaml]" << std::endl;
-            return 0;
-        }
-        if (argc > 2 && arg1 == "--config") {
-            config_path = argv[2];
+        for (int i = 1; i < argc; ++i) {
+            std::string arg = argv[i];
+            if (arg == "--help" || arg == "-h") {
+                std::cout << "Usage: heidid [--config path/to/config.yaml] [--provider provider_name]" << std::endl;
+                return 0;
+            }
+            if (i + 1 < argc && arg == "--config") {
+                config_path = argv[i + 1];
+                i++;
+            } else if (i + 1 < argc && arg == "--provider") {
+                std::string provider = argv[i + 1];
+                setenv("HEIDI_PROVIDER", provider.c_str(), 1);
+                i++;
+            }
         }
     }
 

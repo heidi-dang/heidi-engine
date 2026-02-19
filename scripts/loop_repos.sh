@@ -72,6 +72,7 @@ Options:
   --assistant          Run in assistant mode (uses code-assistant RUN_ID)
   --optuna             Enable Hyperparameter Optimization for training
   --n-trials N         Number of HPO trials (default: 10)
+  --provider PROVIDER  Provider name (openai, openrouter, gemini, azure)
   --help               Show this help
 
 Examples:
@@ -142,6 +143,8 @@ while [[ $# -gt 0 ]]; do
             OPTUNA=true; shift;;
         --n-trials)
             check_arg "$1" "$2"; N_TRIALS="$2"; shift 2;;
+        --provider)
+            check_arg "$1" "$2"; export HEIDI_PROVIDER="$2"; shift 2;;
         --help|-h)
             print_usage; exit 0;;
         *)
@@ -468,6 +471,7 @@ while true; do
     if bash "$SCRIPT_DIR/loop.sh" --rounds "$ROUNDS" --samples "$SAMPLES" \
         $( [ "$PIPELINE_MODE" = "collect" ] && echo --collect ) \
         $( [ "$OPTUNA" = true ] && echo --optuna ) \
+        $( [ -n "${HEIDI_PROVIDER:-}" ] && echo "--provider $HEIDI_PROVIDER" ) \
         --n-trials "$N_TRIALS"; then
          touch "$OUT_DIR/.done"
     else
