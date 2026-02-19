@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  telemetry:
+    build: .
+    image: heidi-engine:latest
+    container_name: heidi-telemetry
+    command: python3 -m heidi_engine.telemetry init --server
+    ports:
+      - "7779:7779"
+    volumes:
+      - ./autotrain_data:/home/ubuntu/.local/heidi_engine
+    restart: unless-stopped
+    networks:
+      - heidi-net
+
+  worker:
+    build: .
+    image: heidi-engine:latest
+    depends_on:
+      - telemetry
+    environment:
+      - DASHBOARD_HOST=http://telemetry:7779
+      - AUTOTRAIN_DIR=/home/ubuntu/.local/heidi_engine
+    volumes:
+      - ./autotrain_data/worker_1:/home/ubuntu/.local/heidi_engine
+    command: ./scripts/loop_repos.sh --stack python --monitor http://telemetry:7779
+    networks:
+      - heidi-net
+
+networks:
+  heidi-net:
+    driver: bridge

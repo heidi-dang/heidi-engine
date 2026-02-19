@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Heidi AutoTrain Dashboard</title>
+    <style>
+        :root {
+            --bg-color: #0d1117;
+            --card-bg: #161b22;
+            --text-color: #c9d1d9;
+            --accent-color: #58a6ff;
+            --success-color: #238636;
+            --warning-color: #d29922;
+            --error-color: #f85149;
+            --border-color: #30363d;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .header {
+            width: 100%;
+            max-width: 1200px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 20px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 1.5rem;
+            color: var(--accent-color);
+        }
+
+        .status-badge {
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 0.8rem;
+        }
+
+        .status-running {
+            background-color: var(--success-color);
+            color: white;
+        }
+
+        .status-paused {
+            background-color: var(--warning-color);
+            color: black;
+        }
+
+        .status-stopped {
+            background-color: var(--border-color);
+            color: white;
+        }
+
+        .status-error {
+            background-color: var(--error-color);
+            color: white;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .card h2 {
+            margin-top: 0;
+            font-size: 1.1rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px;
+            color: var(--accent-color);
+        }
+
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+        }
+
+        .metric-label {
+            color: #8b949e;
+        }
+
+        .metric-value {
+            font-weight: bold;
+            font-family: monospace;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background-color: var(--border-color);
+            border-radius: 3px;
+            margin-top: 5px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background-color: var(--success-color);
+            width: 0%;
+            transition: width 0.5s ease;
+        }
+
+        .footer {
+            margin-top: 40px;
+            font-size: 0.8rem;
+            color: #8b949e;
+            text-align: center;
+        }
+
+        /* Spinner */
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            border-left-color: var(--accent-color);
+            animation: spin 1s linear infinite;
+            display: none;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="header">
+        <div>
+            <h1>Heidi AutoTrain Dashboard</h1>
+            <div style="font-size: 0.8rem; color: #8b949e; margin-top: 5px;">
+                Run ID: <span id="run-id">Loading...</span>
+            </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 15px;">
+            <select id="run-selector"
+                style="padding: 5px; background: var(--bg-color); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px;">
+                <option value="">Auto-detect (Latest)</option>
+            </select>
+            <div style="text-align: right;">
+                <span id="status-badge" class="status-badge status-stopped">Unknown</span>
+                <div id="last-updated" style="font-size: 0.7rem; margin-top: 5px; color: #8b949e;"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Overview Card -->
+        <div class="card">
+            <h2>Overview</h2>
+            <div class="metric-row">
+                <span class="metric-label">Stage</span>
+                <span class="metric-value" id="current-stage">-</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">Round</span>
+                <span class="metric-value" id="current-round">-</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">Started At</span>
+                <span class="metric-value" id="started-at">-</span>
+            </div>
+        </div>
+
+        <!-- Pipeline Counters -->
+        <div class="card">
+            <h2>Pipeline Progress</h2>
+            <div class="metric-row">
+                <span class="metric-label">Teacher Generated</span>
+                <span class="metric-value" id="teacher-generated">0</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">Teacher Failed</span>
+                <span class="metric-value" id="teacher-failed" style="color: var(--error-color);">0</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">Validated OK</span>
+                <span class="metric-value" id="validated-ok" style="color: var(--success-color);">0</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">Rejected (Schema)</span>
+                <span class="metric-value" id="rejected-schema">0</span>
+            </div>
+        </div>
+
+        <!-- API Usage -->
+        <div class="card">
+            <h2>API Usage (Teacher)</h2>
+            <div class="metric-row">
+                <span class="metric-label">Requests Sent</span>
+                <span class="metric-value" id="requests-sent">0</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">Total Tokens</span>
+                <span class="metric-value" id="total-tokens">0</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">Est. Cost</span>
+                <span class="metric-value" id="est-cost">$0.00</span>
+            </div>
+        </div>
+
+        <!-- Training Metrics -->
+        <div class="card">
+            <h2>Training Metrics</h2>
+            <div class="metric-row">
+                <span class="metric-label">Step</span>
+                <span class="metric-value" id="train-step">0</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">Loss</span>
+                <span class="metric-value" id="train-loss">-</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">Eval Format Rate</span>
+                <span class="metric-value" id="eval-format-rate">-</span>
+            </div>
+        </div>
+
+        <!-- GPU Status -->
+        <div class="card">
+            <h2>GPU Status</h2>
+            <div class="metric-row">
+                <span class="metric-label">VRAM Usage</span>
+                <span class="metric-value" id="gpu-vram">N/A</span>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="gpu-bar" style="width: 0%;"></div>
+            </div>
+            <div class="metric-row" style="margin-top: 5px;">
+                <span class="metric-label">Util %</span>
+                <span class="metric-value" id="gpu-util">0%</span>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="footer">
+        Auto-refreshing every 2s • <a href="/status" target="_blank" style="color: var(--accent-color);">Raw JSON
+            Status</a>
+    </div>
+
+    <script>
+        let currentRunId = null;
+
+        async function fetchRuns() {
+            try {
+                const response = await fetch('/runs');
+                if (response.ok) {
+                    const runs = await response.json();
+                    const selector = document.getElementById('run-selector');
+                    const currentVal = selector.value;
+
+                    // Keep "Auto" option
+                    selector.innerHTML = '<option value="">Auto-detect (Latest)</option>';
+
+                    runs.forEach(run => {
+                        const opt = document.createElement('option');
+                        opt.value = run.run_id;
+                        opt.textContent = `${run.run_id} (${run.status})`;
+                        if (run.run_id === currentRunId) {
+                            opt.selected = true;
+                        }
+                        selector.appendChild(opt);
+                    });
+
+                    // Restore selection if it wasn't valid (e.g. newly added run)
+                    if (currentVal && Array.from(selector.options).some(o => o.value === currentVal)) {
+                        selector.value = currentVal;
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to fetch runs list", e);
+            }
+        }
+
+        async function updateDashboard() {
+            try {
+                const selector = document.getElementById('run-selector');
+                const selectedRun = selector.value;
+
+                let url = '/status';
+                if (selectedRun) {
+                    url += `?run_id=${selectedRun}`;
+                }
+
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('Network response was not ok');
+                const data = await response.json();
+
+                // Track current ID to keep selection valid
+                currentRunId = data.run_id;
+
+                // Update Header
+                document.getElementById('run-id').textContent = data.run_id || 'Unknown';
+                const statusBadge = document.getElementById('status-badge');
+                statusBadge.textContent = data.status || 'Unknown';
+                statusBadge.className = `status-badge status-${(data.status || 'unknown').toLowerCase()}`;
+                document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
+
+                // Update Overview
+                document.getElementById('current-stage').textContent = data.current_stage || '-';
+                document.getElementById('current-round').textContent = data.current_round || '0';
+                document.getElementById('started-at').textContent = data.started_at ? new Date(data.started_at).toLocaleString() : '-';
+
+                // Counters
+                const counters = data.counters || {};
+                document.getElementById('teacher-generated').textContent = counters.teacher_generated || 0;
+                document.getElementById('teacher-failed').textContent = counters.teacher_failed || 0;
+                document.getElementById('validated-ok').textContent = counters.validated_ok || 0;
+                document.getElementById('rejected-schema').textContent = counters.rejected_schema || 0;
+
+                // API Usage
+                const usage = data.usage || {};
+                document.getElementById('requests-sent').textContent = usage.requests_sent || 0;
+                const totalTokens = (usage.input_tokens || 0) + (usage.output_tokens || 0);
+                document.getElementById('total-tokens').textContent = totalTokens.toLocaleString();
+                document.getElementById('est-cost').textContent = '$' + (usage.estimated_cost_usd || 0).toFixed(4);
+
+                // Training
+                document.getElementById('train-step').textContent = counters.train_step || 0;
+                document.getElementById('train-loss').textContent = counters.train_loss ? counters.train_loss.toFixed(4) : '-';
+                document.getElementById('eval-format-rate').textContent = counters.eval_format_rate ? (counters.eval_format_rate * 100).toFixed(1) + '%' : '-';
+
+                // GPU
+                const gpu = data.gpu_summary || {};
+                if (gpu.vram_total_mb) {
+                    document.getElementById('gpu-vram').textContent = `${gpu.vram_used_mb} / ${gpu.vram_total_mb} MB`;
+                    const pct = (gpu.vram_used_mb / gpu.vram_total_mb) * 100;
+                    document.getElementById('gpu-bar').style.width = `${pct}%`;
+                    document.getElementById('gpu-util').textContent = `${gpu.util_pct || 0}%`;
+                } else {
+                    document.getElementById('gpu-vram').textContent = 'N/A';
+                    document.getElementById('gpu-bar').style.width = '0%';
+                }
+
+            } catch (error) {
+                console.error('Error fetching status:', error);
+                document.getElementById('status-badge').textContent = 'Connection Error';
+                document.getElementById('status-badge').className = 'status-badge status-error';
+            }
+        }
+
+        // Initial load
+        fetchRuns();
+        updateDashboard();
+
+        // Poll every 2 seconds
+        setInterval(updateDashboard, 2000);
+        // Refresh runs list every 5 seconds
+        setInterval(fetchRuns, 5000);
+
+        // Update immediately on selection change
+        document.getElementById('run-selector').addEventListener('change', updateDashboard);
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,100 @@
+language: javascript
+templates:
+  - task_type: code_completion
+    instruction: "Complete the following JavaScript function:"
+    template: |
+      Complete this function:
+
+      ```javascript
+      {code}
+      ```
+
+      Provide the complete implementation.
+
+  - task_type: bug_fixing
+    instruction: "Fix the bugs in this JavaScript code:"
+    template: |
+      Find and fix all bugs in this code:
+
+      ```javascript
+      {code}
+      ```
+
+      Explain what was wrong and provide the corrected code.
+
+  - task_type: code_explanation
+    instruction: "Explain what this code does:"
+    template: |
+      Explain this JavaScript code in detail:
+
+      ```javascript
+      {code}
+      ```
+
+      Provide a line-by-line explanation.
+
+  - task_type: refactoring
+    instruction: "Refactor this code for better quality:"
+    template: |
+      Refactor this JavaScript code to be more efficient and readable (ES6+ features preferred):
+
+      ```javascript
+      {code}
+      ```
+
+      Provide the refactored version with explanations.
+
+  - task_type: unit_test_generation
+    instruction: "Write unit tests for this code:"
+    template: |
+      Write comprehensive unit tests using Jest for:
+
+      ```javascript
+      {code}
+      ```
+
+  - task_type: code_review
+    instruction: "Review this code and suggest improvements:"
+    template: |
+      Perform a code review:
+
+      ```javascript
+      {code}
+      ```
+
+      Identify issues and suggest improvements.
+
+  - task_type: documentation
+    instruction: "Add documentation to this code:"
+    template: |
+      Add JSDoc comments to:
+
+      ```javascript
+      {code}
+      ```
+
+      Include @param and @return tags where appropriate.
+
+  - task_type: algorithm_implementation
+    instruction: "Implement this algorithm:"
+    template: |
+      Implement the {algorithm} algorithm in JavaScript:
+
+      {description}
+
+samples:
+  - "function calculateSum(numbers) {\n    // Calculate sum of a list\n    // TODO: implement\n}"
+  - "function findMax(arr) {\n    let max = 0;\n    for (let i of arr) {\n        if (i > max) max = i;\n    }\n    return max;\n}"
+  - "class DataProcessor {\n    constructor() {\n        this.data = [];\n    }\n    add(item) {\n        // Add item to data\n    }\n}"
+  - "const fibonacci = (n) => {\n    if (n <= 1) return n;\n    // recursive call\n};"
+  - "function filterEven(numbers) {\n    // Return only even numbers\n}"
+  - "async function fetchUserData(userId) {\n    // Fetch user from API\n    const res = await fetch(`/api/users/${userId}`);\n    return res.json();\n}"
+  - "function parseQueryString(qs) {\n    // Parse query string to object\n    return {};\n}"
+  - "function validateEmail(email) {\n    // Check if email is valid using regex\n    return false;\n}"
+  - "function uniqueArray(arr) {\n    // Remove duplicates\n    return [...new Set(arr)];\n}"
+  - "const debounce = (func, wait) => {\n    // Implement debounce\n};"
+  - "function formatDate(date) {\n    // Return YYYY-MM-DD\n    return date.toISOString().split('T')[0];\n}"
+  - "function deepClone(obj) {\n    // Return deep clone of object\n    return JSON.parse(JSON.stringify(obj));\n}"
+  - "class EventEmitter {\n    constructor() {\n        this.events = {};\n    }\n    on(event, listener) {\n        // Subscribe\n    }\n    emit(event, ...args) {\n        // Publish\n    }\n}"
+  - "function toCamelCase(str) {\n    // Convert kebab-case or snake_case to camelCase\n    return str;\n}"
+  - "function flattenArray(arr) {\n    // Flatten nested array\n    return arr.flat(Infinity);\n}"

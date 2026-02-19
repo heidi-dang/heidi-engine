@@ -1,0 +1,20 @@
++ set -e
++ DEFAULT_PROVIDER=copilot
++ DEFAULT_MODEL=gpt-5-mini
++ DEFAULT_OUT_DIR=./autotrain_repos
++ DEFAULT_SAMPLES=50
++ echo ----------------------------------------------------
++ echo '  Heidi Engine: Interactive Setup & Launch'
++ echo ----------------------------------------------------
++ read -p 'Enter Rig Name [default: manual_rig]: ' RIG_NAME
++ RIG_NAME=manual_rig
++ read -s -p 'Enter GitHub PAT (for repo discovery/cloning): ' GITHUB_PAT
++ echo
++ read -p 'Select Provider [default: copilot]: ' HEIDI_PROVIDER
++ HEIDI_PROVIDER=copilot
++ read -p 'Select Teacher Model [default: gpt-5-mini]: ' TEACHER_MODEL
++ TEACHER_MODEL=gpt-5-mini
++ read -p 'Samples per Round [default: 50]: ' SAMPLES_PER_ROUND
++ SAMPLES_PER_ROUND=50
++ [[ 50 =~ ^[0-9]+$ ]]
++ read -p 'Collect Data Only? (y/n) [default: y]: ' COLLECT_ONLY

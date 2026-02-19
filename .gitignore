@@ -1,0 +1,124 @@
+# =============================================================================
+# .gitignore - Heidi AutoTrain Pipeline
+# =============================================================================
+# 
+# This file ensures sensitive data and large model outputs are not committed.
+# Edit this file if you need to add additional project-specific patterns.
+#
+
+# -----------------------------------------------------------------------------
+# DATA & OUTPUTS
+# -----------------------------------------------------------------------------
+# Training outputs - these can be large and are regenerated
+# Local ML runtime — keep docs & scripts tracked; only ignore runtime artifacts
+.local/ml/data/**
+.local/ml/runs/**
+~/.local/autotrain/**
+/data/
+/eval/
+out_lora_*/
+out_lora*/
+*.jsonl
+!data/.gitkeep
+!.local/ml/data/raw_sample.jsonl
+
+# autotrain/ package is TRACKED (source code)
+# Runtime artifacts inside autotrain/ are IGNORED
+autotrain/data/
+autotrain/eval/
+autotrain/logs/
+autotrain/out_lora_*/
+autotrain/*.json
+!autotrain/config.yaml
+
+# Checkpoints
+checkpoint-*/
+*.safetensors
+
+# -----------------------------------------------------------------------------
+# CACHE & TEMP
+# -----------------------------------------------------------------------------
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+*.egg
+
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# -----------------------------------------------------------------------------
+# SECRETS & KEYS
+# -----------------------------------------------------------------------------
+# Never commit API keys or secrets
+.env
+.env.local
+*.pem
+*.key
+credentials.json
+
+# -----------------------------------------------------------------------------
+# MODELS (Large files - usually not committed)
+# -----------------------------------------------------------------------------
+models/
+*.bin
+*.pt
+*.pth
+*.onnx
+*.h5
+
+# HuggingFace cache (can be large)
+.cache/
+hf_cache/
+transformers_cache/
+
+# -----------------------------------------------------------------------------
+# LOGS
+# -----------------------------------------------------------------------------
+*.log
+logs/
+wandb/
+tensorboard/
+
+# -----------------------------------------------------------------------------
+# TEMP FILES
+# -----------------------------------------------------------------------------
+tmp/
+temp/
+*.tmp
+autotrain_repos/
+heidi_repos/
+build/
+dist/
+*.o
+*.a
+*.so
+model_training_output/
+.local/worklog/
+.local/heidi_engine/
+
+# Copilot CLI/downloaded binary (large)
+copilot-cli-bin
+copilot*
