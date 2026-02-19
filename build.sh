@@ -1,4 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
+
 # build.sh - Main build script for Heidi Engine
 # Builds C++ daemon, Python extension, and installs dependencies
 # Usage: ./build.sh [OPTIONS]

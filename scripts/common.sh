@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+set -euo pipefail
+
 # =============================================================================
 # common.sh - Shared configuration, utilities, and VRAM-safe defaults
 # =============================================================================
@@ -29,8 +31,6 @@
 #   SEQ_LEN=1024, BATCH_SIZE=1, GRAD_ACCUM=16, LORA_R=32
 #
 # =============================================================================
-
-set -euo pipefail
 
 # -----------------------------------------------------------------------------
 # DEFAULT ENVIRONMENT VARIABLES - Can be overridden by env vars or args
