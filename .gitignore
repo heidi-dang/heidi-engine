@@ -50,6 +50,7 @@ __pycache__/
 venv/
 env/
 .venv/
+.venv3/
 ENV/
 env.bak/
 venv.bak/

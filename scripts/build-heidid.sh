@@ -1,4 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
+
 # build-heidid.sh - Cross-platform build script for heidid C++ daemon
 # Usage: ./scripts/build-heidid.sh [OPTIONS]
 # Options:

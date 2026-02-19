@@ -4,6 +4,108 @@ set -euo pipefail
 die(){ echo "ERROR: $*" >&2; exit 1; }
 need_cmd(){ command -v "$1" >/dev/null 2>&1 || die "Missing command: $1"; }
 timestamp(){ date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+
+# -------- tiny progress UI (no extra deps) --------
+progress_bar() {
+  # usage: progress_bar CURRENT TOTAL "label"
+  local cur="$1" total="$2" label="${3:-}" width=28
+  (( total > 0 )) || total=1
+  (( cur < 0 )) && cur=0
+  (( cur > total )) && cur=$total
+  local pct=$(awk "BEGIN {printf \"%.1f\", ($cur / $total) * 100}")
+  local filled=$(awk "BEGIN {printf \"%d\", $pct * $width / 100}")
+  local empty=$(( width - filled ))
+  printf "\r│ Progress: %d/%d (%s%%) │ %s" \
+    "$cur" "$total" "$pct" "$label"
+}
+
+progress_done(){ printf " │ Complete\n"; }
+
+# -------- Background Watchdog --------
+start_watchdog() {
+  local state_file="$1"
+  local timeout_min="${HEIDI_WATCHDOG_MIN:-10}"
+  local log_file="/tmp/heidi_run.log"
+  local parent_pid=$$
+
+  (
+    echo "[WATCHDOG] Started (timeout=${timeout_min}m, parent=${parent_pid})" >&2
+    while true; do
+      sleep 60
+      [[ -f "$state_file" ]] || continue
+
+      local now; now=$(date +%s)
+      local last_ts; last_ts=$(python3 -c "import json,os,datetime; f='$state_file'; d=json.load(open(f)) if os.path.exists(f) else {}; ts=d.get('last_update', ''); print(int(datetime.datetime.strptime(ts, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc).timestamp()) if ts else 0)" 2>/dev/null || echo 0)
+
+      if (( last_ts > 0 && (now - last_ts) > (timeout_min * 60) )); then
+        echo -e "\n\n[WATCHDOG] !!! NO PROGRESS FOR ${timeout_min} MINUTES !!!" >&2
+        echo "[WATCHDOG] Last update was at: $(date -d "@$last_ts" -u +"%Y-%m-%dT%H:%M:%SZ")" >&2
+        echo "[WATCHDOG] Dumping diagnostics..." >&2
+        echo "--- State ---" >&2
+        cat "$state_file" >&2
+        echo "--- Active Processes ---" >&2
+        ps aux | grep -E 'run_enhanced|git clone|gh copilot|python3' | grep -v grep >&2
+        echo "--- Last 20 log lines ---" >&2
+        [[ -f "$log_file" ]] && tail -n 20 "$log_file" >&2
+
+        if [[ "${HEIDI_FAIL_MODE:-open}" == "closed" ]]; then
+          echo "[WATCHDOG] FAIL_MODE=closed. Terminating parent $parent_pid" >&2
+          kill -9 "$parent_pid" 2>/dev/null || true
+          exit 1
+        else
+          echo "[WATCHDOG] FAIL_MODE=open. Moving on (simulated by updating last_update)..." >&2
+          # Force an update so we don't trigger again immediately
+          local new_ts; new_ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          python3 - "$state_file" "$new_ts" <<'PY'
+import sys, json, os, fcntl
+f, ts = sys.argv[1:3]
+if os.path.exists(f):
+    with open(f, "r+") as j:
+        try:
+            fcntl.flock(j, fcntl.LOCK_EX)
+            d = json.load(j)
+            d["last_update"] = ts
+            j.seek(0); json.dump(d, j, indent=2); j.truncate()
+        except: pass
+        finally:
+            fcntl.flock(j, fcntl.LOCK_UN)
+PY
+        fi
+      fi
+    done
+  ) &
+  WATCHDOG_PID=$!
+  trap 'kill $WATCHDOG_PID 2>/dev/null || true' EXIT
+}
+
+# -------- Helper: Timeout + Retries --------
+# Usage: call_with_timeout_retry LABEL COMMAND...
+call_with_timeout_retry() {
+  local label="$1"; shift
+  local max_retries="${HEIDI_MAX_RETRIES:-3}"
+  local timeout_sec="${HEIDI_CALL_TIMEOUT_SEC:-60}"
+  local attempt=0
+  local exit_code=0
+
+  while (( attempt < max_retries )); do
+    attempt=$(( attempt + 1 ))
+    if timeout "${timeout_sec}s" "$@"; then
+      return 0
+    else
+      exit_code=$?
+      if (( exit_code == 124 )); then
+        echo "[$label] Timed out after ${timeout_sec}s (attempt $attempt/$max_retries)" >&2
+      else
+        echo "[$label] Failed with exit code $exit_code (attempt $attempt/$max_retries)" >&2
+      fi
+      sleep $(( attempt * 2 ))
+    fi
+  done
+
+  echo "[$label] All $max_retries attempts failed." >&2
+  return "$exit_code"
+}
+
 SCRIPT_DIR_INTERNAL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR_INTERNAL/.." && pwd)"
 
@@ -158,37 +260,29 @@ import rich
 PY
 }
 
-install_gh_cli_if_missing() {
-  if command -v gh >/dev/null 2>&1; then return 0; fi
-  curl -fsSL --compressed https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-    | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg >/dev/null
-  sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-    | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
-  sudo apt-get update -y
-  sudo apt-get install -y gh
-}
-
-install_copilot_ext() {
-  # New GH CLI often ships Copilot as a built-in command (not an extension).
-  if gh copilot --help >/dev/null 2>&1; then
-    echo "[copilot] built-in command detected; skipping extension install"
-    return 0
+check_copilot_availability() {
+  # Ensure gh CLI is present
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "[copilot] gh CLI not found" >&2
+    return 1
   fi
 
-  # If user has an alias named copilot, remove it (optional) — but don't force.
-  if gh alias list 2>/dev/null | awk '{print $1}' | grep -qx "copilot"; then
-    echo "[copilot] warning: gh alias 'copilot' exists and may shadow the command. Remove with: gh alias delete copilot" >&2
+  # Delete conflicting alias if present (safe attempt)
+  gh alias delete copilot >/dev/null 2>&1 || true
+
+  # Check for built-in gh copilot
+  if ! gh copilot --help >/dev/null 2>&1; then
+    echo "[copilot] gh copilot built-in command NOT detected" >&2
+    return 1
   fi
 
-  # Old setups: Copilot is an extension
-  if gh extension list 2>/dev/null | awk '{print $1}' | grep -qx "gh-copilot"; then
-    echo "[copilot] extension already installed"
-    return 0
+  # Check authentication status
+  if ! gh auth status >/dev/null 2>&1; then
+    echo "[copilot] gh auth status is NOT OK" >&2
+    return 1
   fi
 
-  echo "[copilot] installing extension github/gh-copilot ..."
-  gh extension install github/gh-copilot
+  return 0
 }
 
 detect_repo_hints() {
@@ -277,26 +371,28 @@ call_ai_api() {
   local max_tokens=4000
 
   # Use OpenAI API if OPENAI_API_KEY is set
-  if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+  if [[ "${HEIDI_USE_OPENAI:-1}" -eq 1 && -n "${OPENAI_API_KEY:-}" ]]; then
     local resp
-    resp="$(curl -fsSL --connect-timeout 30 --max-time 120 \
+    if resp=$(call_with_timeout_retry "openai" curl -fsSL \
       -X POST "https://api.openai.com/v1/chat/completions" \
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer ${OPENAI_API_KEY}" \
       -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":$(
         python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$prompt"
-      )}],\"temperature\":$temperature,\"max_tokens\":$max_tokens}" 2>&1)" || return 1
+      )}],\"temperature\":$temperature,\"max_tokens\":$max_tokens}" 2>&1); then
 
-    if echo "$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('choices') else 1)" 2>/dev/null; then
-      local content
-      content="$(echo "$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('choices',[{}])[0].get('message',{}).get('content',''))" 2>/dev/null)"
-      if [[ -n "$content" ]]; then
-        echo "$content"
-        return 0
+      if echo "$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('choices') else 1)" 2>/dev/null; then
+        local content
+        content="$(echo "$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('choices',[{}])[0].get('message',{}).get('content',''))" 2>/dev/null)"
+        if [[ -n "$content" ]]; then
+          echo "$content"
+          return 0
+        fi
       fi
+      echo "call_ai_api: OpenAI API response invalid - ${resp:0:200}" >&2
+    else
+      echo "call_ai_api: OpenAI API call failed" >&2
     fi
-    echo "call_ai_api: OpenAI API failed - ${resp:0:200}" >&2
-    return 1
   fi
 
   # Use Azure OpenAI if configured
@@ -304,79 +400,74 @@ call_ai_api() {
     local azure_endpoint="${AZURE_OPENAI_ENDPOINT}"
     local azure_deployment="${AZURE_OPENAI_DEPLOYMENT:-gpt-4.1}"
     local resp
-    resp="$(curl -fsSL --connect-timeout 30 --max-time 120 \
+    if resp=$(call_with_timeout_retry "azure" curl -fsSL \
       -X POST "${azure_endpoint}openai/deployments/${azure_deployment}/chat/completions?api-version=2024-02-15-preview" \
       -H "Content-Type: application/json" \
       -H "api-key: ${AZURE_OPENAI_API_KEY}" \
       -d "{\"messages\":[{\"role\":\"user\",\"content\":$(
         python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$prompt"
-      )}],\"temperature\":$temperature,\"max_tokens\":$max_tokens}" 2>&1)" || return 1
+      )}],\"temperature\":$temperature,\"max_tokens\":$max_tokens}" 2>&1); then
 
-    if echo "$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('choices') else 1)" 2>/dev/null; then
-      local content
-      content="$(echo "$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('choices',[{}])[0].get('message',{}).get('content',''))" 2>/dev/null)"
-      if [[ -n "$content" ]]; then
-        echo "$content"
-        return 0
+      if echo "$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('choices') else 1)" 2>/dev/null; then
+        local content
+        content="$(echo "$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('choices',[{}])[0].get('message',{}).get('content',''))" 2>/dev/null)"
+        if [[ -n "$content" ]]; then
+          echo "$content"
+          return 0
+        fi
       fi
+      echo "call_ai_api: Azure API response invalid - ${resp:0:200}" >&2
+    else
+      echo "call_ai_api: Azure API call failed" >&2
     fi
-    echo "call_ai_api: Azure API failed - ${resp:0:200}" >&2
-    return 1
   fi
 
   # Fallback: Use Python Copilot SDK Wrapper if available
   local sdk_wrapper="/home/heidi/heidi-training/copilot_sdk_wrapper.py"
-  if [[ -f "$sdk_wrapper" ]]; then
+  if [[ "${HEIDI_USE_COPILOT:-1}" -eq 1 && -f "$sdk_wrapper" ]]; then
     local resp
     export COPILOT_MODEL="$model"
-    resp="$(python3 "$sdk_wrapper" "$prompt" 2>&1)" || true
-    
-    # Check if we got a valid JSON response with content
-    if echo "$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('choices') else 1)" 2>/dev/null; then
-       local content
-       content="$(echo "$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('choices',[{}])[0].get('message',{}).get('content',''))" 2>/dev/null)"
-       if [[ -n "$content" ]]; then
-         echo "$content"
-         return 0
-       fi
+    if resp=$(call_with_timeout_retry "sdk_wrapper" python3 "$sdk_wrapper" "$prompt" 2>&1); then
+      # Check if we got a valid JSON response with content
+      if echo "$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('choices') else 1)" 2>/dev/null; then
+         local content
+         content="$(echo "$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('choices',[{}])[0].get('message',{}).get('content',''))" 2>/dev/null)"
+         if [[ -n "$content" ]]; then
+           echo "$content"
+           return 0
+         fi
+      fi
     fi
-    # Only logging error if SDK was attempted and failed significantly
-    # echo "call_ai_api: SDK wrapper failed - ${resp:0:200}" >&2
   fi
 
   # Fallback: Use GitHub PAT with copilot-api.github.com
-  if [[ -z "$api_key" ]]; then
-    echo "call_ai_api: no API key" >&2
-    return 1
-  fi
+  if [[ "${HEIDI_USE_COPILOT:-1}" -eq 1 && -n "$api_key" ]]; then
+    local copilot_url="https://copilot-api.github.com/v1/chat/completions"
+    local resp
+    if resp=$(call_with_timeout_retry "copilot_api" curl -fsSL \
+      -X POST "$copilot_url" \
+      -H "Authorization: Bearer $api_key" \
+      -H "Content-Type: application/json" \
+      -H "Accept: application/json" \
+      -H "x-initiator: user" \
+      -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":$(
+        python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$prompt"
+      )}],\"temperature\":$temperature,\"max_tokens\":$max_tokens}" 2>&1); then
 
-  local copilot_url="https://copilot-api.github.com/v1/chat/completions"
-  local resp
-  resp="$(curl -fsSL --connect-timeout 30 --max-time 120 \
-    -X POST "$copilot_url" \
-    -H "Authorization: Bearer $api_key" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json" \
-    -H "x-initiator: user" \
-    -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":$(
-      python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$prompt"
-    )}],\"temperature\":$temperature,\"max_tokens\":$max_tokens}" 2>&1)" 
-
-  if [[ -z "$resp" ]]; then
-    echo "call_ai_api: empty response" >&2
-    return 1
-  fi
-
-  if echo "$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('choices') else 1)" 2>/dev/null; then
-    local content
-    content="$(echo "$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('choices',[{}])[0].get('message',{}).get('content',''))" 2>/dev/null)"
-    if [[ -n "$content" ]]; then
-      echo "$content"
-      return 0
+      if [[ -n "$resp" ]]; then
+        if echo "$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('choices') else 1)" 2>/dev/null; then
+          local content
+          content="$(echo "$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('choices',[{}])[0].get('message',{}).get('content',''))" 2>/dev/null)"
+          if [[ -n "$content" ]]; then
+            echo "$content"
+            return 0
+          fi
+        fi
+      fi
     fi
   fi
 
-  echo "call_ai_api: API call failed - ${resp:0:200}" >&2
+  echo "call_ai_api: AI API unavailable or all fallbacks failed" >&2
   return 1
 }
 
@@ -384,11 +475,9 @@ call_ai_api() {
 gh_search_page() {
   local token="$1" q="$2" sort="$3" page="$4"
 
-  local attempt
-  for attempt in 1 2 3 4 5; do
-    local resp
-    resp="$(GH_TOKEN="$token" gh api -X GET search/repositories \
-      -f q="$q" -f sort="$sort" -f order=desc -f per_page=100 -f page="$page" 2>&1)" || true
+  local resp
+  if resp=$(call_with_timeout_retry "gh_api_search" bash -c "GH_TOKEN='$token' gh api -X GET search/repositories \
+    -f q='$q' -f sort='$sort' -f order=desc -f per_page=100 -f page='$page'"); then
 
     if echo "$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('total_count') else 1)" 2>/dev/null; then
       echo "$resp"
@@ -398,12 +487,9 @@ gh_search_page() {
     if echo "$resp" | grep -q "rate limit"; then
       echo "Rate limited. Sleeping 30s..." >&2
       sleep 30
-      continue
+      return 1 # retry will handle it if we wrap it differently, but call_with_timeout_retry doesn't know about rate limits
     fi
-
-    echo "GitHub search failed (attempt=$attempt): ${resp:0:100}" >&2
-    sleep 3
-  done
+  fi
 
   return 1
 }
@@ -428,9 +514,12 @@ build_repo_pool() {
 
   : > "$out_file.pool"
   log_event "discovery" "  [$bucket_name] Searching GitHub 'stars'..."
+  progress_bar 0 1 "pool [$bucket_name]: searching"
   gh_search_page "$token" "$q_base" "stars" 1 | jq -r '.items[].full_name' >> "$out_file.pool" || true
   
+  progress_bar 1 1 "pool [$bucket_name]: shuffling"
   sort -u "$out_file.pool" | shuf -n "$n" > "$out_file"
+  progress_done
   rm -f "$out_file.pool"
 }
 
@@ -538,7 +627,9 @@ EOF
   # Use HTTP API for code generation (gh copilot fallback)
   if resp="$(call_ai_api "$prompt" "$model_to_use" 2>&1)"; then
     :
-  elif ! resp="$(gh copilot -p "$prompt" --model "$model_to_use" --allow-all 2>&1)"; then
+  elif [[ "${HEIDI_USE_COPILOT:-1}" -eq 1 ]] && resp="$(call_with_timeout_retry "gh_copilot" gh copilot -p "$prompt" --model "$model_to_use" --allow-all 2>&1)"; then
+    :
+  else
     printf "%s\n" "$resp" > "$raw_out"
     echo "copilot error: $repo_full" >&2
     update_state_count "teacher_failed"
@@ -631,8 +722,17 @@ main() {
     shift
   done
 
+  # Support HEIDI_ENHANCE=0 to skip the whole thing
+  if [[ "${HEIDI_ENHANCE:-1}" -eq 0 ]]; then
+    echo "HEIDI_ENHANCE=0, exiting."
+    exit 0
+  fi
+
   # Initialize paths and output directories after argument parsing
   init_paths "$N"
+
+  # Start watchdog
+  start_watchdog "$out/state.json"
 
   need_cmd sudo
   need_cmd sha256sum
@@ -659,18 +759,19 @@ main() {
   # echo "[3/8] Install GitHub CLI if missing..."
   # install_gh_cli_if_missing
 
-  echo "[4/8] Authenticate GitHub CLI (OAuth) for Copilot..."
-  if gh auth status >/dev/null 2>&1; then
-    echo "  ✓ GitHub CLI already authenticated"
-  elif [[ -n "$GITHUB_PAT" ]]; then
-    echo "$GITHUB_PAT" | gh auth login --with-token 2>/dev/null || echo "[WARN] GitHub CLI authentication failed. Please run 'gh auth login' manually." >&2
-  else
-    echo "[WARN] GitHub CLI not authenticated. Please run 'gh auth login' manually." >&2
-  fi
+  echo "[3/8] Configure Git for resilience..."
+  git config --global http.lowSpeedLimit 0
+  git config --global http.lowSpeedTime 999999
+  git config --global http.postBuffer 524288000
 
-  echo "[5/8] Install Copilot extension..."
-  install_copilot_ext
-  gh copilot --help >/dev/null 2>&1 || die "gh copilot not working. Check Copilot entitlement."
+  echo "[4/8] Check GitHub CLI and Copilot..."
+  if check_copilot_availability; then
+    echo "  ✓ GitHub CLI and Copilot ready"
+    export HEIDI_USE_COPILOT=${HEIDI_USE_COPILOT:-1}
+  else
+    echo "  ! Copilot not available or not authenticated. Fail-open: skipping Copilot enhance."
+    export HEIDI_USE_COPILOT=0
+  fi
 
   local base="$HOME/heidi_repos"
   safe_mkdir "$base"
@@ -704,6 +805,7 @@ main() {
   wait "$pid_py" "$pid_cpp" "$pid_gh"
 
   local total_repos; total_repos=$(cat repos_python.txt repos_cpp.txt repos_github.txt | sort -u | wc -l)
+  export N_TOTAL_REPOS="$total_repos"
   log_event "discovery" "Found $total_repos unique repos in pools."
   # If the discovered pool is smaller than the requested target, adjust
   # the runtime `target_repos` so dashboard and progress counters reflect reality.
@@ -760,10 +862,10 @@ PY
   
   # Function to process a single repo: clone -> run copilot bucket -> cleanup
   # This allows us to start generating as soon as the FIRST repo is cloned.
-  export -f die need_cmd timestamp prompt_hidden safe_mkdir detect_repo_hints bucket_repo_ok json_is_valid write_jsonl extract_first_json_obj run_copilot_bucket setup_proxy log_event update_state_count update_state_stage call_ai_api
+  export -f die need_cmd timestamp prompt_hidden safe_mkdir detect_repo_hints bucket_repo_ok json_is_valid write_jsonl extract_first_json_obj run_copilot_bucket setup_proxy log_event update_state_count update_state_stage call_ai_api call_with_timeout_retry
   export GIT_HTTP_EXTRA_HEADER="AUTHORIZATION: basic $(printf "x-access-token:%s" "$PAT" | base64 -w0)"
   export GIT_TERMINAL_PROMPT=0
-  export out rig PAT TEACHER_MODEL N AUTOTRAIN_DIR NO_AI
+  export out rig PAT TEACHER_MODEL N AUTOTRAIN_DIR NO_AI HEIDI_MAX_RETRIES HEIDI_CALL_TIMEOUT_SEC HEIDI_USE_COPILOT HEIDI_USE_OPENAI N_TOTAL_REPOS
 
   # We use a helper function to wrap the logic for a single repo
   pipeline_worker() {
@@ -778,15 +880,20 @@ PY
     if [[ ! -d "$target/.git" ]]; then
       log_event "generating" "Cloning $repo_full..."
       # Use the proxy if configured
-      git ${GIT_CONF_PROXY:-} clone --depth 1 --filter=blob:none --no-tags --single-branch \
-        "https://github.com/$repo_full.git" "$target" >/dev/null 2>&1 || { 
+      # We preserve git --progress output as requested
+      if ! call_with_timeout_retry "git_clone" git ${GIT_CONF_PROXY:-} clone --progress --depth 1 --filter=blob:none --no-tags --single-branch \
+        "https://github.com/$repo_full.git" "$target"; then
           log_event "generating" "Clone failed for $repo_full"
           echo "[fail] clone $repo_full" >&2; 
           return 1; 
-        }
+      fi
       log_event "generating" "Clone success: $repo_full"
       # increment cloned repo counter so dashboard can show progress
       update_state_count "repos_cloned"
+
+      # Report progress for cloning stage
+      local cloned_count; cloned_count=$(python3 -c "import json,os; f='$out/state.json'; d=json.load(open(f)) if os.path.exists(f) else {}; print(d.get('counters', {}).get('repos_cloned', 0))" 2>/dev/null || echo 0)
+      progress_bar "$cloned_count" "${N_TOTAL_REPOS:-150}" "cloning: $repo_full"
     fi
 
     # 2. Process

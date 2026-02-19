@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+set -euo pipefail
+
 # =============================================================================
 # scripts/night_run.sh - One-command Night Runner (Sleep Mode)
 # =============================================================================
@@ -35,8 +37,6 @@
 #     5. Pipeline proceeds to training while you sleep
 #
 # =============================================================================
-
-set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"

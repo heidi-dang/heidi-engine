@@ -1,12 +1,12 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
+
 # =============================================================================
 # Heidi Engine - Interactive Start Script
 # =============================================================================
 # This script sets up the environment and launches both the Heidi Daemon 
 # and the Real-Time Terminal Dashboard.
 # =============================================================================
-
-set -e
 
 # Default values
 DEFAULT_PROVIDER="copilot"
