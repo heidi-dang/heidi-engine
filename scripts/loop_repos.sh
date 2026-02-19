@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -e
+set -u
+set -o pipefail
 
 # loop_repos.sh - Run the pipeline across multiple repositories
 #
@@ -149,6 +151,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Source common configurations if available
+if [ -f "$SCRIPT_DIR/common.sh" ]; then
+    source "$SCRIPT_DIR/common.sh"
+    apply_git_optimizations
+fi
+
 # Auto-discovery for Docker/Multi-machine
 if [ -z "${DASHBOARD_URL:-}" ] && [ -n "${DASHBOARD_HOST:-}" ]; then
     export DASHBOARD_URL="$DASHBOARD_HOST"
@@ -229,6 +237,32 @@ if [ -n "$REPOS_FILE" ]; then
         repos+=("$line_trimmed")
     done < "$REPOS_FILE"
 fi
+
+# -------- tiny progress UI (no extra deps) --------
+# Displays a single-line progress indicator
+progress_bar() {
+  if [[ "${HEIDI_PROGRESS:-1}" -eq 0 ]]; then return 0; fi
+
+  local cur="$1" total="$2" repo="${3:-}" stage="${4:-}" start_time="${5:-$(date +%s)}"
+  local now; now=$(date +%s)
+  local elapsed=$(( now - start_time ))
+
+  (( total > 0 )) || total=1
+  (( cur < 0 )) && cur=0
+  (( cur > total )) && cur=$total
+
+  local pct=$(( cur * 100 / total ))
+
+  # Detect if stdout is a TTY for \r usage
+  if [[ -t 2 ]]; then
+    printf "\r[PROG] %d/%d (%d%%) | %s | %s | %ds    " "$cur" "$total" "$pct" "$repo" "$stage" "$elapsed" >&2
+  else
+    # Non-interactive: print plain log line every 5% or if finished
+    if (( cur % (total / 20 + 1) == 0 )) || (( cur == total )); then
+      echo "[PROG] $cur/$total ($pct%) | $repo | $stage | ${elapsed}s" >&2
+    fi
+  fi
+}
 
 # Function to fetch next batch of repos from GitHub
 fetch_repos() {
@@ -331,7 +365,14 @@ fi
 # Main processing loop
 idx=0
 processed=0
+start_time=$(date +%s)
+
+# Start global watchdog
+start_watchdog "Initial pool creation" "/tmp/heidi_run.log"
+
 while true; do
+    heartbeat
+    progress_bar "$processed" "$repos_count" "${repo:-}" "running" "$start_time"
     # If until and no more repos fetched, fetch more
     if [ $UNTIL_SAMPLES -gt 0 ] && [ $processed -ge ${#repos[@]} ] && [ -n "$GH_QUERY" ]; then
         if ! fetch_repos; then
@@ -368,12 +409,24 @@ while true; do
     echo "\n--- ($idx) Processing: $repo -> $target_dir ---"
 
     if [[ "$repo" =~ ^https?:// ]] || [[ "$repo" =~ \.git$ ]]; then
-        # clone shallow
+        # Resilient Cloning: partial + shallow + progress
         if [ -d "$target_dir/.git" ]; then
             echo "Repository already cloned: $target_dir (pulling latest)"
+            # For existing clones, we try to pull but don't fail if it doesn't work
             git -C "$target_dir" pull --quiet || true
         else
-            git clone --depth 1 "$repo" "$target_dir" || { echo "Clone failed: $repo" >&2; continue; }
+            echo "Cloning repository: $repo"
+            heartbeat
+            progress_bar "$processed" "$repos_count" "$repo" "cloning" "$start_time"
+            # Switch to partial + shallow clone by default
+            # --filter=blob:none avoids downloading blobs until needed
+            # --depth=1 keeps history minimal
+            # --no-tags avoids extra overhead
+            with_heartbeat git clone --filter=blob:none --depth=1 --no-tags --progress "$repo" "$target_dir" || {
+              echo "[ERROR] Clone failed for $repo" >&2
+              # Fail-open: continue to next repo
+              continue
+            }
         fi
     else
         # assume local path
@@ -485,6 +538,8 @@ while true; do
         echo "[INFO] Target not met; continuing to next repo..."
     fi
 done
+progress_bar "$processed" "$repos_count" "done" "finished" "$start_time"
+echo "" >&2
 
 if [ $UNTIL_SAMPLES -gt 0 ] && [ -z "$GH_QUERY" ]; then
     echo "[WARN] --until-samples used without --gh-query; cannot fetch more repos dynamically."
@@ -515,4 +570,5 @@ if [ "$DO_DEDUPE" = true ] || [ -n "${PUSH_TO_HUB:-}" ]; then
     fi
 fi
 
+stop_watchdog
 echo "All done. Outputs available under: $OUT_BASE"
