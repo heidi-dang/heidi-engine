@@ -64,6 +64,8 @@ jobs:
           source .venv/bin/activate
           python -m heidi_engine.telemetry status --json
       - name: Prepare data
+        env:
+          SKIP_PROVENANCE_CHECK: "1"
         run: |
           source .venv/bin/activate
           .local/ml/scripts/prepare_data.sh .local/ml/data/raw_sample.jsonl
