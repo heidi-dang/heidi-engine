@@ -151,4 +151,24 @@ python scripts/05_eval.py --preds .local/ml/runs/run-1/final/preds.jsonl
 
 ---
 
+## Environment variables
+
+### SKIP_PROVENANCE_CHECK
+
+The data pipeline includes provenance verification (cryptographic signatures) to ensure training data hasn't been tampered with. This is **enabled by default** (fail-closed).
+
+For **CI/testing only**, you can disable provenance checks:
+
+```bash
+export SKIP_PROVENANCE_CHECK=1
+```
+
+**Never enable this in production** — it exists only to allow CI smoke tests to run with unsigned sample data.
+
+When enabled, a warning is logged at startup:
+- `02_validate_clean.py`: Python `warnings.warn()`
+- `04_train_qlora.py`: logger.warning()
+
+---
+
 If you want, I can: add CI checks for the data pipeline, wire a `make` target, or add a short tutorial notebook showing a full local round.

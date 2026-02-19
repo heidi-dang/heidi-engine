@@ -69,6 +69,13 @@ except ImportError:
 
 SKIP_PROVENANCE = os.environ.get("SKIP_PROVENANCE_CHECK", "").lower() in ("1", "true", "yes")
 
+if SKIP_PROVENANCE:
+    import warnings
+
+    warnings.warn(
+        "SKIP_PROVENANCE_CHECK=1: Provenance verification is DISABLED. This is insecure for production use."
+    )
+
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
 # =============================================================================

@@ -30,6 +30,9 @@ jobs:
         run: |
           python -m pip install -U pybind11
           python setup_cpp.py build_ext --inplace
+      - name: Skip C++ extension (macOS/Windows)
+        if: runner.os != 'Linux'
+        run: echo "Skipping C++ extension build on ${{ runner.os }} - will run subset of tests"
       - name: Run tests
         run: pytest -v
 

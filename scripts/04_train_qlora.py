@@ -66,6 +66,11 @@ except ImportError:
 
 SKIP_PROVENANCE = os.environ.get("SKIP_PROVENANCE_CHECK", "").lower() in ("1", "true", "yes")
 
+if SKIP_PROVENANCE:
+    logger.warning(
+        "SKIP_PROVENANCE_CHECK=1: Provenance verification is DISABLED. This is insecure for production use."
+    )
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
