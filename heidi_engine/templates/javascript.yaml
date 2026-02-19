@@ -83,7 +83,7 @@ templates:
       {description}
 
 samples:
-  - "function calculateSum(numbers) {\n    // Calculate sum of a list\n    // TODO: implement\n}"
+  - "function calculateSum(numbers) {\n    // Calculate sum of a list\n    return numbers.reduce((a, b) => a + b, 0);\n}"
   - "function findMax(arr) {\n    let max = 0;\n    for (let i of arr) {\n        if (i > max) max = i;\n    }\n    return max;\n}"
   - "class DataProcessor {\n    constructor() {\n        this.data = [];\n    }\n    add(item) {\n        // Add item to data\n    }\n}"
   - "const fibonacci = (n) => {\n    if (n <= 1) return n;\n    // recursive call\n};"

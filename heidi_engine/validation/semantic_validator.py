@@ -13,7 +13,6 @@ DEFAULT_PLACEHOLDERS = [
     "pass",
     "process_data(data)",
     "Your implementation here",
-    "def calculate_sum(numbers):", # Specific to one of the synthetic seeds
 ]
 
 def validate_semantic(record: dict, placeholders: List[str] = None) -> Tuple[tuple[bool, str], dict]:
