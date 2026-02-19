@@ -62,6 +62,7 @@ import re
 import stat
 import sys
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
@@ -1284,6 +1285,36 @@ def stage_context(stage: str, round_num: int, message: str, **kwargs):
 # =============================================================================
 
 
+def get_last_event_ts() -> Optional[str]:
+    """Get timestamp of last event."""
+    try:
+        events_file = get_events_path()
+        if events_file.exists() and events_file.stat().st_size > 0:
+            with open(events_file, "rb") as f:
+                f.seek(-500, 2)  # Read last 500 bytes
+                lines = f.read().decode().strip().split("\n")
+                if lines:
+                    last_line = lines[-1]
+                    event = json.loads(last_line)
+                    return event.get("ts")
+    except Exception:
+        pass
+    return None
+
+
+def redact_state(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Redact state to only allowed fields."""
+    redacted = {}
+    for key in ALLOWED_STATUS_FIELDS:
+        if key in state:
+            value = state[key]
+            # Sanitize any nested secrets
+            if isinstance(value, dict):
+                value = {k: sanitize_for_log(v, 100) for k, v in value.items()}
+            redacted[key] = value
+    return redacted
+
+
 def start_reporter(dashboard_url: str):
     """Start background thread to push state to central dashboard."""
     if not requests:
@@ -1335,11 +1366,7 @@ def start_http_server(port: int = 7779) -> None:
         return
 
     # Use existing helper functions
-    # (get_gpu_summary, get_last_event_ts, redact_state are defined in outer scope or helper scope)
-    # Wait, in the original code they were defined INSIDE start_http_server.
-    # I should redefine them or move them out.
-    # Moving them out is better but changes too much structure.
-    # I will keep them inside for minimal diff, but I need to include them in replacement.
+    # (get_gpu_summary, get_last_event_ts, redact_state are defined in outer scope)
 
     def get_gpu_summary() -> Dict[str, Any]:
         """Get minimal GPU info without exposing sensitive data."""
@@ -1367,34 +1394,6 @@ def start_http_server(port: int = 7779) -> None:
         except Exception:
             pass
         return {"available": False}
-
-    def get_last_event_ts() -> Optional[str]:
-        """Get timestamp of last event."""
-        try:
-            events_file = get_events_path()
-            if events_file.exists() and events_file.stat().st_size > 0:
-                with open(events_file, "rb") as f:
-                    f.seek(-500, 2)  # Read last 500 bytes
-                    lines = f.read().decode().strip().split("\n")
-                    if lines:
-                        last_line = lines[-1]
-                        event = json.loads(last_line)
-                        return event.get("ts")
-        except Exception:
-            pass
-        return None
-
-    def redact_state(state: Dict[str, Any]) -> Dict[str, Any]:
-        """Redact state to only allowed fields."""
-        redacted = {}
-        for key in ALLOWED_STATUS_FIELDS:
-            if key in state:
-                value = state[key]
-                # Sanitize any nested secrets
-                if isinstance(value, dict):
-                    value = {k: sanitize_for_log(v, 100) for k, v in value.items()}
-                redacted[key] = value
-        return redacted
 
     class StateHandler(BaseHTTPRequestHandler):
         """HTTP handler with security restrictions."""

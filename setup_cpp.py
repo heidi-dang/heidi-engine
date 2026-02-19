@@ -1,7 +1,7 @@
 import os
-import subprocess
-from setuptools import setup, Extension
+
 from pybind11.setup_helpers import Pybind11Extension, build_ext
+from setuptools import setup
 
 # Check for CUDA
 cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH")
