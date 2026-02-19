@@ -12,7 +12,7 @@ set -o pipefail
 #     pipeline for building an autonomous coding agent.
 #
 # INTEGRATION:
-#     This script integrates with autotrain/telemetry.py for:
+#     This script integrates with heidi_engine/telemetry.py for:
 #     - Real-time event emission (see --emit option)
 #     - State management (run_id, counters, usage)
 #     - Graceful stop/pause/resume support
@@ -28,7 +28,7 @@ set -o pipefail
 #     BASE_MODEL          Base model to fine-tune (default: microsoft/phi-2)
 #     TEACHER_MODEL       Teacher model for generation (default: gpt-4o-mini)
 #     VAL_RATIO           Validation split ratio (default: 0.1)
-#     OUT_DIR             Output directory (default: ./autotrain)
+#     OUT_DIR             Output directory (default: ~/.local/heidi_engine)
 #     SEQ_LEN             Sequence length (default: 2048)
 #     BATCH_SIZE          Batch size (default: 1)
 #     GRAD_ACCUM          Gradient accumulation steps (default: 8)
@@ -48,7 +48,7 @@ set -o pipefail
 #     Rate-limiting: 5 min between train attempts.
 #
 # CONFIG FILE:
-#     Configuration can also be saved to autotrain/config.yaml
+#     Configuration can also be saved to $OUT_DIR/config.yaml
 #     Run ./scripts/menu.py to configure interactively
 #
 # HPO:
@@ -61,13 +61,13 @@ set -o pipefail
 #     - Resume: Clears pause_requested, continues from last stage
 #
 # DASHBOARD:
-#     Run 'python -m autotrain.dashboard' in another terminal to see live progress
+#     Run 'autotrain-dashboard' in another terminal to see live progress
 #
 # VRAM-SAFE DEFAULTS (RTX 2080 Ti - 11GB):
 #     SEQ_LEN=2048, BATCH_SIZE=1, GRAD_ACCUM=8, LORA_R=64
 #
 # OUTPUT STRUCTURE:
-#     autotrain/
+#     heidi_engine/
 #     ├── runs/<run_id>/
 #     │   ├── state.json          # Current run state (counters, status)
 #     │   ├── events.jsonl        # Event stream for dashboard
@@ -115,6 +115,8 @@ TELEMETRY_AVAILABLE=false
 if [ "$HEIDI_TELEMETRY" -eq 1 ] 2>/dev/null; then
     if python3 -c "import heidi_engine.telemetry" 2>/dev/null; then
         TELEMETRY_AVAILABLE=true
+    else
+        log_warn "HEIDI_TELEMETRY=1 but heidi_engine.telemetry module not found; disabling telemetry."
     fi
 fi
 
