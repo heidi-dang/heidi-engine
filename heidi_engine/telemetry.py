@@ -67,6 +67,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
+
 try:
     import requests
 except ImportError:
@@ -643,7 +644,7 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     HOW IT WORKS:
         - Reads state.json file
         - Returns empty state if file doesn't exist
-    
+
     ARGS:
         run_id: Run to read (defaults to current run)
 
@@ -674,44 +675,44 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
 def resolve_status(state: Dict[str, Any]) -> str:
     """
     Resolve run status from on-disk metadata.
-    
+
     STATUS VALUES:
         - idle: No active run, or run_id present but no events
         - running: Worker active / stop not requested / still processing
         - stopped: stop_requested=true or pipeline complete
         - error: last_error present or health degraded
-    
+
     HOW IT WORKS:
         - Checks stop_requested flag
         - Checks status field
         - Checks for error indicators
-    
+
     ARGS:
         state: State dictionary from state.json
-    
+
     RETURNS:
         Status string: idle, running, stopped, error
     """
     # Explicit stop requested
     if state.get("stop_requested", False):
         return "stopped"
-    
+
     # Check explicit status first
     status = state.get("status", "")
     if status in ("running", "completed", "stopped", "error"):
         return status
-    
+
     # Check for errors
     if state.get("last_error") or state.get("health") == "degraded":
         return "error"
-    
+
     # Check if there's an active run_id but no recent activity
     run_id = state.get("run_id")
     if run_id:
         # Has run_id - check for activity
         counters = state.get("counters", {})
         usage = state.get("usage", {})
-        
+
         # If there's any activity, consider it running
         if counters.get("teacher_generated", 0) > 0:
             return "running"
@@ -719,10 +720,10 @@ def resolve_status(state: Dict[str, Any]) -> str:
             return "running"
         if counters.get("train_step", 0) > 0:
             return "running"
-        
+
         # No activity - idle
         return "idle"
-    
+
     # Default to idle if no run_id
     return "idle"
 
@@ -1292,7 +1293,7 @@ def start_reporter(dashboard_url: str):
         error_count = 0
         telemetry_pass = os.environ.get("TELEMETRY_PASS")
         auth = ("admin", telemetry_pass) if telemetry_pass else None
-        
+
         while True:
             try:
                 state = get_state()
@@ -1301,24 +1302,25 @@ def start_reporter(dashboard_url: str):
                 # Add run_id to top level if not present
                 if "run_id" not in redacted:
                     redacted["run_id"] = get_run_id()
-                
+
                 requests.post(f"{dashboard_url}/report", json=redacted, timeout=5, auth=auth)
                 error_count = 0
             except Exception:
                 error_count += 1
                 if error_count > 5:
-                    time.sleep(30) # Backoff
+                    time.sleep(30)  # Backoff
             time.sleep(5)
 
     thread = threading.Thread(target=reporter_loop, daemon=True)
     thread.start()
+
 
 def start_http_server(port: int = 7779) -> None:
     """
     Start HTTP status server.
 
     SECURITY:
-        - Binds to 0.0.0.0 to allow multi-machine monitoring
+        - Binds to 127.0.0.1 only (localhost-only) for security
         - Adds /report endpoint to receive remote states
         - Adds /runs endpoint to list all runs
     """
@@ -1335,10 +1337,10 @@ def start_http_server(port: int = 7779) -> None:
     # Use existing helper functions
     # (get_gpu_summary, get_last_event_ts, redact_state are defined in outer scope or helper scope)
     # Wait, in the original code they were defined INSIDE start_http_server.
-    # I should redefine them or move them out. 
-    # Moving them out is better but changes too much structure. 
+    # I should redefine them or move them out.
+    # Moving them out is better but changes too much structure.
     # I will keep them inside for minimal diff, but I need to include them in replacement.
-    
+
     def get_gpu_summary() -> Dict[str, Any]:
         """Get minimal GPU info without exposing sensitive data."""
         try:
@@ -1422,7 +1424,7 @@ def start_http_server(port: int = 7779) -> None:
                     with open(dashboard_path, "rb") as f:
                         self.wfile.write(f.read())
                     return
-            
+
             # List all runs (local + remote)
             if self.path == "/runs":
                 local_runs = list_runs()
@@ -1438,7 +1440,7 @@ def start_http_server(port: int = 7779) -> None:
                         redacted_run = redact_state(run) if "run_id" in run else run
                         unique_runs.append(redacted_run)
                         seen_ids.add(run.get("run_id"))
-                
+
                 self.send_response(200)
                 self._send_cors_headers()
                 self.send_header("Content-Type", "application/json")
@@ -1454,7 +1456,7 @@ def start_http_server(port: int = 7779) -> None:
                         query_run_id = self.path.split("?run_id=")[1].split("&")[0]
                     except IndexError:
                         pass
-                
+
                 # Check remote states first if run_id provided
                 if query_run_id and query_run_id in _remote_states:
                     state = _remote_states[query_run_id]
@@ -1512,7 +1514,7 @@ def start_http_server(port: int = 7779) -> None:
                     self.end_headers()
                     print(f"[ERROR] Failed to process report: {e}", file=sys.stderr)
                 return
-            
+
             self.send_response(404)
             self._send_cors_headers()
             self.end_headers()
@@ -1528,7 +1530,7 @@ def start_http_server(port: int = 7779) -> None:
     def run_server():
         try:
             # SECURITY: Bind to 0.0.0.0 for multi-machine support
-            server = HTTPServer(("0.0.0.0", port), StateHandler)
+            server = HTTPServer(("127.0.0.1", port), StateHandler)
             print(f"[INFO] HTTP status server running on http://0.0.0.0:{port}")
             server.serve_forever()
         except Exception as e:
@@ -1628,7 +1630,7 @@ def main():
         python -m heidi_engine.telemetry emit <type> <message>
     """
     import argparse
-    
+
     parser = argparse.ArgumentParser(prog="heidi-engine telemetry")
     subparsers = parser.add_subparsers(dest="command")
 
