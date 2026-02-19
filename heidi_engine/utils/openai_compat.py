@@ -7,6 +7,7 @@ try:
 
     HAS_OPENAI_V1 = True
 except (ImportError, AttributeError):
+    OpenAI = None
     try:
         import openai
 
