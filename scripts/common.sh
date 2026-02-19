@@ -134,7 +134,7 @@ set_seed() {
 check_dependencies() {
     local missing=()
     
-    for cmd in python3 jq; do
+    for cmd in python3 jq bc; do
         if ! command -v "$cmd" &>/dev/null; then
             missing+=("$cmd")
         fi
