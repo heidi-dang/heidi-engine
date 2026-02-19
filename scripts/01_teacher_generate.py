@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-01_teacher_generate.py - Teacher Dataset Generation Script
+01_teacher_generate.py - Teacher Dataset Generation Script (Optimized)
 ================================================================================
 
 PURPOSE:
@@ -10,7 +10,7 @@ PURPOSE:
 
 HOW IT WORKS:
     1. Defines prompt templates for various coding tasks (refactor, debug, etc.)
-    2. Calls teacher model API to generate responses
+    2. Calls teacher model API concurrently to generate responses
     3. Saves raw output to JSONL for downstream processing
 
 TUNABLE PARAMETERS (via environment variables):
@@ -18,6 +18,9 @@ TUNABLE PARAMETERS (via environment variables):
     - TEACHER_MODEL: Model to use for generation (default: gpt-4o-mini)
     - MAX_OUTPUT_LENGTH: Max tokens in generated output (default: 2048)
     - SEED: Random seed for reproducibility (default: 42)
+    - HEIDI_CONCURRENCY: Max concurrent API requests (default: 8)
+    - HEIDI_REQ_TIMEOUT_S: Timeout per request in seconds (default: 60)
+    - HEIDI_MAX_RETRIES: Max retries for API calls (default: 3)
 
 OUTPUT FORMAT (JSONL):
     {"id": "round_N_idx", "instruction": "...", "input": "...", "output": "...", "metadata": {...}}
@@ -31,12 +34,14 @@ SAFETY:
 """
 
 import argparse
+import asyncio
 import hashlib
 import json
 import os
 import random
 import re
 import sys
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from pathlib import Path
@@ -70,7 +75,6 @@ ALGORITHMS = [
 # Prompt templates for generating diverse coding tasks
 # Each template produces a specific type of coding task
 # Templates are now loaded from YAML via load_templates()
-
 
 def parse_args() -> argparse.Namespace:
     """
@@ -194,62 +198,6 @@ def generate_prompt(template: Dict[str, str], code_sample: str = "", algo_info: 
 
 
 
-def call_teacher_model(
-    prompt: str, model: str, api_key: str, max_tokens: int = 4596, language: str = "python"
-) -> Optional[str]:
-    """
-    Call the teacher model API to generate a response.
-    """
-    # Check if we have an API key or if model is 'code-assistant'
-    if model == "code-assistant" or not api_key:
-        if model == "code-assistant":
-            print("[INFO] Using code-assistant mode for generation", file=sys.stderr)
-        else:
-            print("[WARN] No API key provided, using synthetic fallback", file=sys.stderr)
-        return generate_synthetic_response(prompt, language)
-
-    try:
-        # Import openai - install with: pip install openai
-        import openai
-
-        # Use Manus-preconfigured OpenAI client if available
-        try:
-            from openai import OpenAI
-            client = OpenAI()
-        except ImportError:
-            openai.api_key = api_key
-
-        if 'client' in locals():
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": f"You are a helpful coding assistant that generates high-quality, well-documented {language} code."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.8,
-                max_tokens=max_tokens,
-            )
-            return response.choices[0].message.content
-        else:
-            response = openai.ChatCompletion.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": f"You are a helpful coding assistant that generates high-quality, well-documented {language} code."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.8,
-                max_tokens=max_tokens,
-            )
-            return response.choices[0].message.content
-
-    except ImportError:
-        print("[WARN] openai package not installed, using synthetic fallback", file=sys.stderr)
-        return generate_synthetic_response(prompt, language)
-    except Exception as e:
-        print(f"[WARN] API call failed: {e}", file=sys.stderr)
-        return generate_synthetic_response(prompt, language)
-
-
 def generate_synthetic_response(prompt: str, language: str = "python") -> str:
     """
     Generate a highly dynamic synthetic response to ensure near-100% uniqueness.
@@ -291,66 +239,121 @@ def generate_synthetic_response(prompt: str, language: str = "python") -> str:
     return responses[variant_idx]
 
 
-def generate_sample(
+async def call_teacher_model_async(
+    prompt: str, model: str, client: Optional[Any], max_tokens: int = 4596, language: str = "python"
+) -> str:
+    """
+    Call the teacher model API concurrently to generate a response.
+    """
+    # Check if we have an API key or if model is 'code-assistant'
+    if model == "code-assistant" or not client:
+        if model == "code-assistant":
+            print("[INFO] Using code-assistant mode for generation", file=sys.stderr)
+        else:
+            # We only print this once in generate_dataset_async
+            pass
+        return generate_synthetic_response(prompt, language)
+
+    timeout = float(os.environ.get("HEIDI_REQ_TIMEOUT_S", 60))
+    max_retries = int(os.environ.get("HEIDI_MAX_RETRIES", 3))
+
+    for attempt in range(max_retries + 1):
+        try:
+            response = await asyncio.wait_for(
+                client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": f"You are a helpful coding assistant that generates high-quality, well-documented {language} code."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.8,
+                    max_tokens=max_tokens,
+                ),
+                timeout=timeout
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            if attempt < max_retries:
+                wait_time = (2 ** attempt) + random.random()
+                print(f"[WARN] API call failed (attempt {attempt+1}/{max_retries+1}): {e}. Retrying in {wait_time:.2f}s...", file=sys.stderr)
+                await asyncio.sleep(wait_time)
+            else:
+                print(f"[ERROR] API call failed after {max_retries+1} attempts: {e}", file=sys.stderr)
+                return generate_synthetic_response(prompt, language)
+
+    return generate_synthetic_response(prompt, language)
+
+
+async def generate_sample_async(
     idx: int,
     round_num: int,
     template: Dict[str, str],
     teacher_model: str,
-    api_key: str,
+    client: Optional[Any],
     max_output: int,
     language: str,
+    semaphore: asyncio.Semaphore
 ) -> Dict[str, Any]:
     """
-    Generate a single training sample.
+    Generate a single training sample asynchronously.
     """
-    # Select random code sample or algorithm
-    algo_info = None
-    if template["task_type"] in ["algorithm_implementation"]:
-        algo_info = random.choice(ALGORITHMS)
-        code_sample = f"Algorithm: {algo_info[0]}\nDescription: {algo_info[1]}"
-    else:
-        code_sample = random.choice(SYNTHETIC_CODE_SAMPLES)
+    async with semaphore:
+        # Select random code sample or algorithm
+        algo_info = None
+        if template["task_type"] in ["algorithm_implementation"]:
+            algo_info = random.choice(ALGORITHMS)
+            code_sample = f"Algorithm: {algo_info[0]}\nDescription: {algo_info[1]}"
+        else:
+            code_sample = random.choice(SYNTHETIC_CODE_SAMPLES)
 
-    # Generate prompt with unique salt
-    prompt = generate_prompt(template, code_sample, algo_info)
+        # Generate prompt with unique salt
+        prompt = generate_prompt(template, code_sample, algo_info)
 
-    # Get response from teacher
-    output = call_teacher_model(prompt, teacher_model, api_key, max_output, language)
+        # Get response from teacher
+        output = await call_teacher_model_async(prompt, teacher_model, client, max_output, language)
 
-    if output is None:
-        output = generate_synthetic_response(prompt, language)
+        # Construct sample
+        sample = {
+            "id": f"round_{round_num}_{idx:04d}",
+            "instruction": template["instruction"],
+            "input": prompt,
+            "output": output,
+            "metadata": {
+                "task_type": template["task_type"],
+                "round": round_num,
+                "timestamp": datetime.now().isoformat(),
+                "teacher_model": teacher_model,
+                "language": language,
+            },
+        }
 
-    # Construct sample
-    sample = {
-        "id": f"round_{round_num}_{idx:04d}",
-        "instruction": template["instruction"],
-        "input": prompt,
-        "output": output,
-        "metadata": {
-            "task_type": template["task_type"],
-            "round": round_num,
-            "timestamp": datetime.now().isoformat(),
-            "teacher_model": teacher_model,
-            "language": language,
-        },
-    }
+        # Add provenance signature
+        if HAS_SECURITY:
+            sample["metadata"]["signature"] = sign_record(sample)
 
-    # Add provenance signature
-    if HAS_SECURITY:
-        sample["metadata"]["signature"] = sign_record(sample)
-
-    return sample
+        return sample
 
 
-def generate_dataset(
+async def generate_dataset_async(
     num_samples: int, round_num: int, teacher_model: str, api_key: str, max_output: int, seed: int, language: str
 ) -> List[Dict[str, Any]]:
     """
-    Generate the complete dataset for a round.
+    Generate the complete dataset for a round concurrently.
     """
     random.seed(seed + round_num)
 
-    samples = []
+    concurrency = int(os.environ.get("HEIDI_CONCURRENCY", 8))
+    semaphore = asyncio.Semaphore(concurrency)
+
+    client = None
+    if api_key and teacher_model != "code-assistant":
+        try:
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(api_key=api_key)
+        except ImportError:
+            print("[WARN] openai package not installed, using synthetic fallback", file=sys.stderr)
+    elif teacher_model != "code-assistant":
+         print("[WARN] No API key provided, using synthetic fallback", file=sys.stderr)
 
     # Try to import validator
     try:
@@ -360,54 +363,57 @@ def generate_dataset(
         HAS_VALIDATOR = False
         print("[WARN] Validator not found, skipping code validation", file=sys.stderr)
 
+    samples = []
+    failed_count = 0
+
+    current_idx = 0
     while len(samples) < num_samples:
-        # Select template (could weight this for different distributions)
-        template = random.choice(PROMPT_TEMPLATES)
+        needed = num_samples - len(samples)
+        tasks = []
+        for _ in range(needed):
+            template = random.choice(PROMPT_TEMPLATES)
+            tasks.append(generate_sample_async(
+                current_idx, round_num, template, teacher_model, client, max_output, language, semaphore
+            ))
+            current_idx += 1
 
-        # Generate sample
-        sample = generate_sample(
-            idx=len(samples),
-            round_num=round_num,
-            template=template,
-            teacher_model=teacher_model,
-            api_key=api_key,
-            max_output=max_output,
-            language=language,
-        )
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Validate code if validator is available
-        if HAS_VALIDATOR:
-            # Extract code block from output for validation
-            # Look for ```language ... ``` blocks
-            code_match = re.search(f"```{language}(.*?)```", sample["output"], re.DOTALL)
-            if code_match:
-                code_to_check = code_match.group(1)
-                if not validate_code(language, code_to_check):
-                    print(f"  [SKIP] Validation failed for sample {len(samples)} ({language})", file=sys.stderr)
-                    continue
+        for res in batch_results:
+            if isinstance(res, Exception):
+                print(f"[ERROR] Task failed: {res}", file=sys.stderr)
+                failed_count += 1
+                continue
 
-        samples.append(sample)
+            # Validation
+            if HAS_VALIDATOR:
+                # Extract code block from output for validation
+                code_match = re.search(rf"```{language}(.*?)```", res["output"], re.DOTALL)
+                if code_match:
+                    code_to_check = code_match.group(1)
+                    if not validate_code(language, code_to_check):
+                        print(f"  [SKIP] Validation failed for sample {len(samples)} ({language})", file=sys.stderr)
+                        continue
 
-        # Rate limiting sleep if needed
-        sleep_time = float(os.environ.get("SLEEP_BETWEEN_REQUESTS", 0))
-        if sleep_time > 0:
-            time.sleep(sleep_time)
+            samples.append(res)
+            if len(samples) >= num_samples:
+                break
 
         # Progress indicator
-        if (len(samples)) % 10 == 0:
+        if len(samples) < num_samples:
+            print(f"  Progress: {len(samples)}/{num_samples} samples (retrying for remaining...)", file=sys.stderr)
+        else:
             print(f"  Generated {len(samples)}/{num_samples} samples", file=sys.stderr)
 
-    return samples
+    if client:
+        await client.close()
 
+    return samples[:num_samples]
 
 
 def save_jsonl(samples: List[Dict[str, Any]], output_path: str) -> None:
     """
     Save samples to JSONL file.
-
-    HOW IT WORKS:
-        - Writes one JSON object per line
-        - Creates parent directories if needed
     """
     dirname = os.path.dirname(output_path)
     if dirname:
@@ -420,13 +426,9 @@ def save_jsonl(samples: List[Dict[str, Any]], output_path: str) -> None:
     print(f"[OK] Saved {len(samples)} samples to {output_path}")
 
 
-def main():
+async def async_main():
     """
-    Main entry point for dataset generation.
-
-    TUNABLE:
-        - All parameters can be adjusted via CLI args or env vars
-        - See parse_args() for full list of options
+    Async main entry point.
     """
     args = parse_args()
 
@@ -442,7 +444,7 @@ def main():
         return 1
 
     # Generate dataset
-    samples = generate_dataset(
+    samples = await generate_dataset_async(
         num_samples=args.samples,
         round_num=args.round,
         teacher_model=args.teacher,
@@ -457,6 +459,10 @@ def main():
 
     print("[OK] Dataset generation complete!")
     return 0
+
+
+def main():
+    return asyncio.run(async_main())
 
 
 if __name__ == "__main__":
