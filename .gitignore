@@ -109,3 +109,16 @@ tmp/
 temp/
 *.tmp
 autotrain_repos/
+heidi_repos/
+build/
+dist/
+*.o
+*.a
+*.so
+model_training_output/
+.local/worklog/
+.local/heidi_engine/
+
+# Copilot CLI/downloaded binary (large)
+copilot-cli-bin
+copilot*
