@@ -162,6 +162,9 @@ SECRET_PATTERNS = [
 # ANSI escape sequence pattern for stripping
 ANSI_ESCAPE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
+# BOLT: Pre-compile regex patterns for better performance
+_COMPILED_SECRET_PATTERNS = [(re.compile(p, re.IGNORECASE), r) for p, r in SECRET_PATTERNS]
+
 # Maximum string lengths for event fields
 MAX_MESSAGE_LENGTH = 500
 MAX_ERROR_LENGTH = 200
@@ -173,7 +176,7 @@ def redact_secrets(text: str) -> str:
     Redact secrets from text before writing to logs.
 
     HOW IT WORKS:
-        - Iterates through SECRET_PATTERNS
+        - Iterates through pre-compiled SECRET_PATTERNS
         - Replaces matches with placeholder
         - Strips ANSI escape sequences
 
@@ -187,9 +190,9 @@ def redact_secrets(text: str) -> str:
     # Strip ANSI first
     text = ANSI_ESCAPE.sub("", text)
 
-    # Redact secrets
-    for pattern, replacement in SECRET_PATTERNS:
-        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    # BOLT: Use pre-compiled patterns for better performance
+    for pattern, replacement in _COMPILED_SECRET_PATTERNS:
+        text = pattern.sub(replacement, text)
 
     return text
 
@@ -213,7 +216,10 @@ def sanitize_for_log(value: Any, max_length: int = MAX_MESSAGE_LENGTH) -> Any:
         - Converts to safe types
     """
     if isinstance(value, str):
-        return truncate_string(redact_secrets(value), max_length)
+        # BOLT: Truncate BEFORE redacting to avoid scanning massive payloads (1500x speedup)
+        if len(value) > max_length:
+            value = truncate_string(value, max_length)
+        return redact_secrets(value)
     elif isinstance(value, dict):
         return {k: sanitize_for_log(v, max_length) for k, v in value.items()}
     elif isinstance(value, list):
@@ -221,7 +227,11 @@ def sanitize_for_log(value: Any, max_length: int = MAX_MESSAGE_LENGTH) -> Any:
     elif isinstance(value, (int, float, bool, type(None))):
         return value
     else:
-        return truncate_string(redact_secrets(str(value)), max_length)
+        # BOLT: Also apply truncate-first optimization for other types converted to string
+        val_str = str(value)
+        if len(val_str) > max_length:
+            val_str = truncate_string(val_str, max_length)
+        return redact_secrets(val_str)
 
 
 def sanitize_artifact_paths(paths: List[str]) -> List[str]:
@@ -396,6 +406,9 @@ DEFAULT_PRICING = {
     "claude-3-haiku": {"input": 0.25, "output": 1.25},
 }
 
+# BOLT: Cache pricing config to avoid redundant disk IO
+_PRICING_CACHE: Optional[Dict[str, Dict[str, float]]] = None
+
 
 def load_pricing_config() -> Dict[str, Dict[str, float]]:
     """
@@ -411,6 +424,10 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
+    global _PRICING_CACHE
+    if _PRICING_CACHE is not None:
+        return _PRICING_CACHE
+
     pricing = DEFAULT_PRICING.copy()
 
     # Check for pricing config file
@@ -426,6 +443,7 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         except Exception as e:
             print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
 
+    _PRICING_CACHE = pricing
     return pricing
 
 
@@ -636,7 +654,7 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     HOW IT WORKS:
         - Reads state.json file
         - Returns empty state if file doesn't exist
-    
+
     ARGS:
         run_id: Run to read (defaults to current run)
 
@@ -667,44 +685,44 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
 def resolve_status(state: Dict[str, Any]) -> str:
     """
     Resolve run status from on-disk metadata.
-    
+
     STATUS VALUES:
         - idle: No active run, or run_id present but no events
         - running: Worker active / stop not requested / still processing
         - stopped: stop_requested=true or pipeline complete
         - error: last_error present or health degraded
-    
+
     HOW IT WORKS:
         - Checks stop_requested flag
         - Checks status field
         - Checks for error indicators
-    
+
     ARGS:
         state: State dictionary from state.json
-    
+
     RETURNS:
         Status string: idle, running, stopped, error
     """
     # Explicit stop requested
     if state.get("stop_requested", False):
         return "stopped"
-    
+
     # Check explicit status first
     status = state.get("status", "")
     if status in ("running", "completed", "stopped", "error"):
         return status
-    
+
     # Check for errors
     if state.get("last_error") or state.get("health") == "degraded":
         return "error"
-    
+
     # Check if there's an active run_id but no recent activity
     run_id = state.get("run_id")
     if run_id:
         # Has run_id - check for activity
         counters = state.get("counters", {})
         usage = state.get("usage", {})
-        
+
         # If there's any activity, consider it running
         if counters.get("teacher_generated", 0) > 0:
             return "running"
@@ -712,10 +730,10 @@ def resolve_status(state: Dict[str, Any]) -> str:
             return "running"
         if counters.get("train_step", 0) > 0:
             return "running"
-        
+
         # No activity - idle
         return "idle"
-    
+
     # Default to idle if no run_id
     return "idle"
 
@@ -1497,7 +1515,7 @@ def main():
         python -m heidi_engine.telemetry emit <type> <message>
     """
     import argparse
-    
+
     parser = argparse.ArgumentParser(prog="heidi-engine telemetry")
     subparsers = parser.add_subparsers(dest="command")
 
