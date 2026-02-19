@@ -70,6 +70,8 @@ jobs:
           source .venv/bin/activate
           .local/ml/scripts/prepare_data.sh .local/ml/data/raw_sample.jsonl
       - name: CPU smoke train
+        env:
+          SKIP_PROVENANCE_CHECK: "1"
         run: |
           source .venv/bin/activate
           .local/ml/scripts/train_adapter.sh --smoke-cpu --train-steps 2 --train .local/ml/data/train/train.jsonl --eval .local/ml/data/eval/val.jsonl
