@@ -112,19 +112,13 @@ emit_event() {
             usage_arg="$usage_delta"
         fi
         
-        python3 -c "
-import heidi_engine.telemetry as tm
-tm.emit_event(
-    event_type='$event_type',
-    message=\"$message\",
-    stage='$stage',
-    round_num=$round,
-    counters_delta=$counters_arg,
-    usage_delta=$usage_arg,
-    model='$TEACHER_MODEL'
-)
-tm.flush_events()
-" 2>/dev/null || true
+        python3 -c "import sys, json, heidi_engine.telemetry as tm; \
+tm.emit_event(event_type=sys.argv[1], message=sys.argv[2], stage=sys.argv[3], \
+round_num=int(sys.argv[4]), \
+counters_delta=json.loads(sys.argv[5]) if sys.argv[5] != 'None' else None, \
+usage_delta=json.loads(sys.argv[6]) if sys.argv[6] != 'None' else None, \
+model=sys.argv[7]); tm.flush_events()" \
+"$event_type" "$message" "$stage" "$round" "$counters_arg" "$usage_arg" "$TEACHER_MODEL" 2>/dev/null || true
     fi
 }
 
@@ -173,16 +167,11 @@ init_telemetry() {
             \"SEED\": $SEED
         }"
         
-        python3 -c "
-import heidi_engine.telemetry as tm
-import os
-os.environ['AUTOTRAIN_DIR'] = '$OUT_DIR'
-run_id = tm.init_telemetry(
-    run_id=os.environ.get('RUN_ID', None),
-    config=$config_json
-)
-print(run_id)
-" 2>/dev/null || echo "$RUN_ID"
+        python3 -c "import sys, json, os, heidi_engine.telemetry as tm; \
+os.environ['AUTOTRAIN_DIR'] = sys.argv[1]; \
+run_id = tm.init_telemetry(run_id=os.environ.get('RUN_ID', None), \
+config=json.loads(sys.argv[2])); print(run_id)" \
+"$OUT_DIR" "$config_json" 2>/dev/null || echo "${RUN_ID:-}"
     fi
     
     # Always set RUN_ID if not set
@@ -201,10 +190,9 @@ set_status() {
     local round="${3:-0}"
     
     if [ "$TELEMETRY_AVAILABLE" = true ]; then
-        python3 -c "
-import heidi_engine.telemetry as tm
-tm.set_status('$status', '$stage', $round)
-" 2>/dev/null || true
+        python3 -c "import sys, heidi_engine.telemetry as tm; \
+tm.set_status(sys.argv[1], sys.argv[2], int(sys.argv[3]))" \
+"$status" "$stage" "$round" 2>/dev/null || true
     fi
 }
 
@@ -213,10 +201,8 @@ update_counters() {
     local delta="$1"  # JSON string like '{"teacher_generated": 10}'
     
     if [ "$TELEMETRY_AVAILABLE" = true ] && [ -n "$delta" ]; then
-        python3 -c "
-import heidi_engine.telemetry as tm
-tm.update_counters($delta)
-" 2>/dev/null || true
+        python3 -c "import sys, json, heidi_engine.telemetry as tm; \
+tm.update_counters(json.loads(sys.argv[1]))" "$delta" 2>/dev/null || true
     fi
 }
 
@@ -225,10 +211,9 @@ update_usage() {
     local delta="$1"  # JSON string
     
     if [ "$TELEMETRY_AVAILABLE" = true ] && [ -n "$delta" ]; then
-        python3 -c "
-import heidi_engine.telemetry as tm
-tm.update_usage($delta, '$TEACHER_MODEL')
-" 2>/dev/null || true
+        python3 -c "import sys, json, heidi_engine.telemetry as tm; \
+tm.update_usage(json.loads(sys.argv[1]), sys.argv[2])" \
+"$delta" "$TEACHER_MODEL" 2>/dev/null || true
     fi
 }
 
@@ -347,10 +332,10 @@ done
 # =============================================================================
 
 log_step() {
-    echo ""
-    echo "=============================================================================="
-    echo "STEP: $1"
-    echo "=============================================================================="
+    echo "" >&2
+    echo "==============================================================================" >&2
+    echo "STEP: $1" >&2
+    echo "==============================================================================" >&2
 }
 
 run_teacher_generate() {
@@ -371,7 +356,7 @@ run_teacher_generate() {
         --output "$output_file" \
         --teacher "$TEACHER_MODEL" \
         --round "$round_num" \
-        --seed "$SEED"
+        --seed "$SEED" >&2
     
     # Count generated samples
     if [ -f "$output_file" ]; then
@@ -413,7 +398,7 @@ run_validation() {
         --max-input "$MAX_INPUT_LENGTH" \
         --max-output "$MAX_OUTPUT_LENGTH" \
         --min-input "$MIN_INPUT_LENGTH" \
-        --min-output "$MIN_OUTPUT_LENGTH"
+        --min-output "$MIN_OUTPUT_LENGTH" >&2
     
     # Count validated samples
     if [ -f "$output_file" ]; then
@@ -444,7 +429,7 @@ run_unit_tests() {
     python3 "$SCRIPT_DIR/03_unit_test_gate.py" \
         --input "$input_file" \
         --output "$output_file" \
-        --timeout "$UNIT_TEST_TIMEOUT"
+        --timeout "$UNIT_TEST_TIMEOUT" >&2
     
     log_success "Tested dataset saved to: $output_file"
     echo "$output_file"
@@ -513,7 +498,7 @@ run_training() {
         --lora-alpha "$LORA_ALPHA" \
         --lora-dropout "$LORA_DROPOUT" \
         --lr "$LR" \
-        --seed "$SEED"
+        --seed "$SEED" >&2
     
     # Update counters with training completion
     update_counters "{\"train_step\": $TRAIN_STEPS}"
@@ -550,7 +535,7 @@ run_evaluation() {
         --base-model "$BASE_MODEL" \
         --seq-len "$SEQ_LEN" \
         --temperature 0.1 \
-        --max-new-tokens 512
+        --max-new-tokens 512 >&2
     
     # Extract and report metrics if available
     if [ -f "$output_file" ]; then
@@ -579,19 +564,13 @@ extract_metric() {
     
     # Use python to extract nested JSON value
     python3 -c "
-import json
-import sys
+import sys, json
 try:
-    with open('$report_file') as f:
-        data = json.load(f)
-    keys = '$metric_path'.split('.')
-    val = data
-    for k in keys:
-        val = val.get(k, {})
+    with open(sys.argv[1]) as f: data = json.load(f)
+    keys = sys.argv[2].split('.'); val = data
+    for k in keys: val = val.get(k, {})
     print(val if val is not None else 0)
-except Exception as e:
-    print(0)
-" 2>/dev/null || echo "0"
+except Exception: print(0)" "$report_file" "$metric_path" 2>/dev/null || echo "0"
 }
 
 update_best_adapter() {
@@ -616,7 +595,7 @@ update_best_adapter() {
     fi
     
     # Compare (higher is better)
-    local is_better=$(python3 -c "print($metric > $best_metric)")
+    local is_better=$(python3 -c "import sys; print(float(sys.argv[1]) > float(sys.argv[2]))" "$metric" "$best_metric")
     
     if [ "$is_better" = "True" ]; then
         log_success "New best adapter! Metric: $metric (previous: $best_metric)"
