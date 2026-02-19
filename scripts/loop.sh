@@ -27,12 +27,21 @@
 #     OUT_DIR             Output directory (default: ./autotrain)
 #     SEQ_LEN             Sequence length (default: 2048)
 #     BATCH_SIZE          Batch size (default: 1)
-#     GRAD_ACCUM          Gradient accumulation (default: 8)
+#     GRAD_ACCUM          Gradient accumulation steps (default: 8)
 #     TRAIN_STEPS         Training steps per round (default: 500)
 #     LORA_R              LoRA rank (default: 64)
 #     RUN_UNIT_TESTS      Enable unit test gate (default: 0)
 #     SEED                Random seed (default: 42)
 #     RUN_ID              Unique run identifier (auto-generated if not set)
+#
+# COLLECT MODE + TRAIN-NOW TRIGGER:
+#     In collect mode (--collect), pipeline runs generate+validate only.
+#     Training is skipped unless triggered by:
+#       - File: touch \$OUT_DIR/actions/train_now.\$RUN_ID
+#       - File: touch \$OUT_DIR/actions/train_now.latest
+#       - HTTP: curl -X POST http://127.0.0.1:7780/actions/train-now
+#     State is written to \$OUT_DIR/state/run_state.json each round.
+#     Rate-limiting: 5 min between train attempts.
 #
 # CONFIG FILE:
 #     Configuration can also be saved to autotrain/config.yaml
@@ -414,6 +423,179 @@ log_step() {
     echo "==============================================================================" >&2
 }
 
+# =============================================================================
+# STATE MANAGEMENT (for collect mode + train-now trigger)
+# =============================================================================
+
+ensure_state_dirs() {
+    mkdir -p "$OUT_DIR/state"
+    mkdir -p "$OUT_DIR/actions"
+    mkdir -p "$OUT_DIR/logs"
+}
+
+write_run_state() {
+    local run_id="${1:-}"
+    local mode="${2:-collect}"
+    local round="${3:-0}"
+    local raw_lines="${4:-0}"
+    local clean_lines="${5:-0}"
+    local rejected_lines="${6:-0}"
+    local train_ts="${7:-null}"
+    local train_round="${8:-null}"
+    
+    local state_file="$OUT_DIR/state/run_state.json"
+    local temp_file="$state_file.tmp.$$"
+    
+    cat > "$temp_file" <<EOF
+{
+    "run_id": "$run_id",
+    "mode": "$mode",
+    "current_round": $round,
+    "last_write_ts": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+    "counts": {
+        "raw_lines": $raw_lines,
+        "clean_lines": $clean_lines,
+        "rejected_lines": $rejected_lines
+    },
+    "last_train_ts": $train_ts,
+    "last_train_round": $train_round,
+    "telemetry_enabled": $TELEMETRY_AVAILABLE
+}
+EOF
+    
+    if mv "$temp_file" "$state_file" 2>/dev/null; then
+        return 0
+    else
+        echo "[WARNING] Failed to write run state, continuing..." >&2
+        rm -f "$temp_file" 2>/dev/null || true
+        return 1
+    fi
+}
+
+check_train_now() {
+    local run_id="${1:-}"
+    
+    # Check for specific run_id latch first
+    if [ -n "$run_id" ] && [ -f "$OUT_DIR/actions/train_now.$run_id" ]; then
+        echo "$OUT_DIR/actions/train_now.$run_id"
+        return 0
+    fi
+    
+    # Check for generic latest latch
+    if [ -f "$OUT_DIR/actions/train_now.latest" ]; then
+        echo "$OUT_DIR/actions/train_now.latest"
+        return 0
+    fi
+    
+    return 1
+}
+
+check_and_handle_train_now() {
+    local round_num=$1
+    local train_file=$2
+    local val_file=$3
+    
+    # Only relevant in collect mode
+    if [ "${PIPELINE_MODE:-full}" != "collect" ]; then
+        return 1
+    fi
+    
+    local latch_file
+    latch_file=$(check_train_now "$RUN_ID") || return 1
+    
+    log_info "Train-now trigger detected: $latch_file"
+    
+    # Rate limiting: check last attempt
+    local last_attempt_file="$OUT_DIR/state/last_train_attempt.txt"
+    if [ -f "$last_attempt_file" ]; then
+        local last_attempt
+        last_attempt=$(cat "$last_attempt_file")
+        local now
+        now=$(date +%s)
+        local diff=$((now - last_attempt))
+        if [ "$diff" -lt 300 ]; then
+            log_info "Train-now rate-limited (last attempt $diff seconds ago), skipping"
+            return 1
+        fi
+    fi
+    
+    # Check prerequisites
+    if [ ! -f "$train_file" ]; then
+        log_warn "Train-now: train file not found: $train_file"
+        return 1
+    fi
+    
+    if [ ! -f "$val_file" ]; then
+        log_warn "Train-now: val file not found: $val_file"
+        return 1
+    fi
+    
+    # Record attempt
+    date +%s > "$last_attempt_file"
+    
+    # Run training
+    log_info "Train-now: starting training for round $round_num"
+    emit_event "train_now_trigger" "Training triggered by latch" "train" "$round_num"
+    
+    local adapter_dir
+    adapter_dir=$(run_training "$train_file" "$val_file" "$round_num")
+    
+    if [ -n "$adapter_dir" ] && [ -d "$adapter_dir" ]; then
+        # Success: remove latch
+        rm -f "$latch_file"
+        
+        # Update state with successful train
+        write_run_state "$RUN_ID" "collect" "$round_num" 0 0 0 "$(date -u +%s)" "$round_num"
+        
+        log_info "Train-now: training completed successfully"
+        emit_event "train_now_complete" "Training completed" "train" "$round_num"
+        return 0
+    else
+        log_warn "Train-now: training failed, latch retained for retry"
+        return 1
+    fi
+}
+
+start_train_now_http() {
+    local port="${1:-7780}"
+    
+    log_info "Starting train-now HTTP endpoint on http://127.0.0.1:$port"
+    log_info "POST /actions/train-now to trigger training"
+    
+    python3 -c "
+import http.server
+import socketserver
+import os
+import sys
+
+OUT_DIR = os.environ.get('OUT_DIR', '$OUT_DIR')
+
+class TrainNowHandler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        if self.path == '/actions/train-now':
+            latch_path = os.path.join(OUT_DIR, 'actions', 'train_now.latest')
+            os.makedirs(os.path.dirname(latch_path), exist_ok=True)
+            open(latch_path, 'w').close()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(b'{\"status\": \"ok\", \"action\": \"train_now_triggered\"}')
+            print('Train-now latch created via HTTP')
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def log_message(self, format, *args):
+        pass  # Suppress logging
+
+with socketserver.TCPServer(('127.0.0.1', $port), TrainNowHandler) as httpd:
+    httpd.serve_forever()
+" &
+    HTTP_PID=$!
+    echo "$HTTP_PID" > "$OUT_DIR/state/train_now_http.pid"
+    log_info "Train-now HTTP server started (PID: $HTTP_PID)"
+}
+
 run_teacher_generate() {
     local round_num=$1
     local output_file="$OUT_DIR/data/raw_round_${round_num}.jsonl"
@@ -775,6 +957,9 @@ main() {
     # Setup directories
     setup_directories "$OUT_DIR"
     
+    # Ensure state directories exist (for collect mode + train-now)
+    ensure_state_dirs
+    
     # Set random seed
     set_seed "$SEED"
     
@@ -854,8 +1039,31 @@ main() {
         
         # Step 5/6/7: Train, evaluate, and track best adapter (skippable in collect mode)
         if [ "${PIPELINE_MODE:-full}" = "collect" ]; then
-            log_info "PIPELINE_MODE=collect: skipping training and evaluation for round $round_num"
-            emit_event "stage_skip" "Skipping train/eval in collect mode" "train" "$round_num"
+            # Count lines for state
+            local raw_count=0
+            local clean_count=0
+            local rejected_count=0
+            if [ -f "$raw_file" ]; then
+                raw_count=$(wc -l < "$raw_file" 2>/dev/null || echo 0)
+            fi
+            if [ -f "$clean_file" ]; then
+                clean_count=$(wc -l < "$clean_file" 2>/dev/null || echo 0)
+            fi
+            rejected_count=$((raw_count - clean_count))
+            [ "$rejected_count" -lt 0 ] && rejected_count=0
+            
+            # Write run state after this round
+            write_run_state "$RUN_ID" "collect" "$round_num" "$raw_count" "$clean_count" "$rejected_count" "null" "null"
+            
+            # Check for train-now trigger BEFORE skipping
+            if check_and_handle_train_now "$round_num" "$train_file" "$val_file"; then
+                log_info "Train-now completed for round $round_num"
+            else
+                log_info "PIPELINE_MODE=collect: skipping training and evaluation for round $round_num"
+                log_info "  To trigger training: touch $OUT_DIR/actions/train_now.\$RUN_ID"
+                log_info "  Or: touch $OUT_DIR/actions/train_now.latest"
+                emit_event "stage_skip" "Skipping train/eval in collect mode" "train" "$round_num"
+            fi
             adapter_dir=""
             eval_report=""
         else
