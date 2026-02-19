@@ -34,6 +34,10 @@ dev = [
     "pytest>=7.0.0,<8.0.0",
     "ruff>=0.1.0",
 ]
+http = [
+    "fastapi==0.129.0",
+    "uvicorn==0.41.0",
+]
 ml = [
     "transformers>=4.30.0",
     "peft>=0.4.0",
