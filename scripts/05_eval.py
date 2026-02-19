@@ -167,8 +167,7 @@ def setup_model_with_adapter(adapter_path: str, base_model: str, trust_remote_co
     # Load base model (use quantization for faster inference if available)
     try:
         from transformers import BitsAndBytesConfig
-        import torch
-        
+
         quant_config = BitsAndBytesConfig(
             load_in_8bit=True,
             llm_int8_threshold=6.0,

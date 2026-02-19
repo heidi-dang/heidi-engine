@@ -43,7 +43,6 @@ SAFETY:
 
 import argparse
 import hashlib
-import json
 import os
 import re
 import sys
@@ -66,6 +65,8 @@ try:
     HAS_SECURITY_VALIDATOR = True
 except ImportError:
     HAS_SECURITY_VALIDATOR = False
+
+from heidi_engine.utils.io_jsonl import load_jsonl, save_jsonl  # noqa: E402
 
 SKIP_PROVENANCE = os.environ.get("SKIP_PROVENANCE_CHECK", "").lower() in ("1", "true", "yes")
 
@@ -415,44 +416,6 @@ def process_sample(
     sample["validation"] = {"passed": True, "reason": "ok"}
 
     return sample, "ok"
-
-
-def load_jsonl(path: str) -> List[Dict[str, Any]]:
-    """
-    Load samples from JSONL file.
-
-    HOW IT WORKS:
-        - Reads one JSON object per line
-        - Skips empty lines
-        - Reports parse errors
-    """
-    samples = []
-
-    with open(path, "r") as f:
-        for line_num, line in enumerate(f, 1):
-            line = line.strip()
-            if not line:
-                continue
-
-            try:
-                sample = json.loads(line)
-                samples.append(sample)
-            except json.JSONDecodeError as e:
-                print(f"[WARN] Line {line_num}: JSON parse error: {e}", file=sys.stderr)
-                continue
-
-    return samples
-
-
-def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
-    """
-    Save samples to JSONL file.
-    """
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-
-    with open(path, "w") as f:
-        for sample in samples:
-            f.write(json.dumps(sample) + "\n")
 
 
 def main():

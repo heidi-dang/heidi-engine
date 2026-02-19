@@ -4,7 +4,7 @@ Checks if generated outputs are semantically correct for their task types.
 """
 
 import re
-from typing import Any, Dict, List, Tuple
+from typing import List, Tuple
 
 # Common placeholders that indicate hallucinated or lazy responses
 DEFAULT_PLACEHOLDERS = [
@@ -25,7 +25,7 @@ def validate_semantic(record: dict, placeholders: List[str] = None) -> Tuple[tup
     output = record.get("output", "")
     input_text = record.get("input", "")
     teacher_model = metadata.get("teacher_model", "")
-    
+
     # [BYPASS] If model is 'code-assistant', let it pass for testing the pipeline flow
     if teacher_model == "code-assistant":
         return (True, "code_assistant_bypass"), record
@@ -56,7 +56,7 @@ def validate_semantic(record: dict, placeholders: List[str] = None) -> Tuple[tup
         return _validate_documentation(input_text, output), record
     elif task_type == "code_review":
         return _validate_review(input_text, output), record
-    
+
     # If task type is unknown, just pass but warn
     return (True, "unknown_task_type_passed"), record
 
@@ -70,7 +70,7 @@ def _validate_bug_fixing(input_text: str, output: str) -> Tuple[bool, str]:
     func_name = _extract_function_name(input_text)
     if func_name and func_name not in output:
         return False, f"missing_original_function: {func_name}"
-    
+
     # Must contain explanation text (at least some non-code content)
     clean_output = re.sub(r'```.*?```', '', output, flags=re.DOTALL)
     if len(clean_output.strip()) < 20:
@@ -79,18 +79,18 @@ def _validate_bug_fixing(input_text: str, output: str) -> Tuple[bool, str]:
     # Must include corrected implementation (code block)
     if "```" not in output:
         return False, "missing_code_block"
-        
+
     return True, "ok"
 
 def _validate_unit_tests(input_text: str, output: str) -> Tuple[bool, str]:
     # Must include pytest
     if "pytest" not in output.lower() and "import pytest" not in output:
         return False, "missing_pytest"
-    
+
     # Must include at least one function starting with test_
     if "def test_" not in output:
         return False, "missing_test_case"
-        
+
     # Must reference original function name
     func_name = _extract_function_name(input_text)
     if func_name and func_name not in output:
@@ -116,7 +116,7 @@ def _validate_completion(input_text: str, output: str) -> Tuple[bool, str]:
     func_name = _extract_function_name(input_text)
     if func_name and func_name not in output:
         return False, f"completion_missing_function: {func_name}"
-        
+
     # Must not contain placeholder "pass" or generic solution() (already checked by Rule 0)
     return True, "ok"
 
@@ -125,7 +125,7 @@ def _validate_refactoring(input_text: str, output: str) -> Tuple[bool, str]:
     func_name = _extract_function_name(input_text)
     if func_name and func_name not in output:
         return False, f"refactor_missing_function: {func_name}"
-        
+
     # Rule about unrelated classes is hard to check perfectly, but Rule 0 handles "class Handler"
     return True, "ok"
 
@@ -137,18 +137,18 @@ def _validate_algorithm(input_text: str, output: str) -> Tuple[bool, str]:
         algo = match.group(1).lower()
         if algo not in output.lower():
              # maybe it used the name of the algo in the code
-             pass 
-    
+             pass
+
     if "```" not in output:
         return False, "algorithm_missing_code"
-        
+
     return True, "ok"
 
 def _validate_documentation(input_text: str, output: str) -> Tuple[bool, str]:
     # Must include docstrings
     if '"""' not in output and "'''" not in output:
         return False, "missing_docstring"
-        
+
     func_name = _extract_function_name(input_text)
     if func_name and func_name not in output:
         return False, f"documentation_missing_original_function: {func_name}"
@@ -160,7 +160,7 @@ def _validate_review(input_text: str, output: str) -> Tuple[bool, str]:
     clean_output = re.sub(r'```.*?```', '', output, flags=re.DOTALL)
     if len(clean_output.strip()) < 50:
         return False, "review_too_short"
-        
+
     # Must reference original code elements
     func_name = _extract_function_name(input_text)
     if func_name and func_name not in output:
