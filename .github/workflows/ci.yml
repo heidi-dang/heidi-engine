@@ -85,4 +85,4 @@ jobs:
       - name: Test collect mode with telemetry disabled
         run: |
           source .venv/bin/activate
-          HEIDI_TELEMETRY=0 .scripts/loop.sh --rounds 1 --samples 2 --collect || (echo "Collect mode failed" && exit 1)
+          HEIDI_TELEMETRY=0 ./scripts/loop.sh --rounds 1 --samples 2 --collect || (echo "Collect mode failed" && exit 1)
