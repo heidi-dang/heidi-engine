@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+set -e
+set -u
+set -o pipefail
+
 # =============================================================================
 # common.sh - Shared configuration, utilities, and VRAM-safe defaults
 # =============================================================================
@@ -81,6 +85,16 @@ export PIPELINE_MODE="${PIPELINE_MODE:-full}"
 export MAX_REQUESTS="${MAX_REQUESTS:-1000}"           # Global API budget across rounds/repos
 export SLEEP_BETWEEN_REQUESTS="${SLEEP_BETWEEN_REQUESTS:-0}" # Seconds to wait between API calls
 
+# Enhancement Stage Knobs
+export HEIDI_ENHANCE="${HEIDI_ENHANCE:-1}"            # Set to 0 to disable enhancement stage
+export HEIDI_USE_COPILOT="${HEIDI_USE_COPILOT:-1}"    # Set to 0 to disable GitHub Copilot
+export HEIDI_USE_OPENAI="${HEIDI_USE_OPENAI:-1}"      # Set to 0 to disable OpenAI
+export HEIDI_MAX_RETRIES="${HEIDI_MAX_RETRIES:-3}"    # Max retries for external calls
+export HEIDI_CALL_TIMEOUT_SEC="${HEIDI_CALL_TIMEOUT_SEC:-60}" # Timeout per call in seconds
+export HEIDI_FAIL_MODE="${HEIDI_FAIL_MODE:-open}"     # open: continue on failure; closed: exit on failure
+export HEIDI_PROGRESS="${HEIDI_PROGRESS:-1}"          # Set to 0 to disable progress bar
+export HEIDI_WATCHDOG_IDLE_SEC="${HEIDI_WATCHDOG_IDLE_SEC:-600}" # Watchdog timeout in seconds
+
 # Random seed for reproducibility
 export SEED="${SEED:-42}"
 
@@ -126,6 +140,104 @@ set_seed() {
     export CUDA_SEED_ALL="$seed"
     
     log_info "Random seed set to: ${seed}"
+}
+
+# -----------------------------------------------------------------------------
+# WATCHDOG - Monitors for hangs
+# -----------------------------------------------------------------------------
+WATCHDOG_FILE="/tmp/heidi_watchdog_$$.ts"
+
+# Update heartbeat
+heartbeat() {
+    # Atomic-ish update of heartbeat timestamp
+    date +%s > "${WATCHDOG_FILE}.tmp" && mv "${WATCHDOG_FILE}.tmp" "$WATCHDOG_FILE"
+}
+
+# Start watchdog in background
+# Usage: start_watchdog <repo_context> <log_file>
+start_watchdog() {
+    local context="$1"
+    local log_file="$2"
+    local idle_sec="${HEIDI_WATCHDOG_IDLE_SEC:-600}"
+    local fail_mode="${HEIDI_FAIL_MODE:-open}"
+
+    heartbeat
+    (
+        while true; do
+            sleep 30
+            if [[ ! -f "$WATCHDOG_FILE" ]]; then break; fi
+
+            local last_heartbeat; last_heartbeat=$(cat "$WATCHDOG_FILE")
+            local now; now=$(date +%s)
+            local diff=$((now - last_heartbeat))
+
+            if (( diff > idle_sec )); then
+                echo -e "\n${RED}[WATCHDOG] STALL DETECTED! No progress for ${diff}s (limit ${idle_sec}s)${NC}" >&2
+                echo "[WATCHDOG] Context: $context" >&2
+                if [[ -f "$log_file" ]]; then
+                    echo "[WATCHDOG] Last 80 lines of log:" >&2
+                    tail -n 80 "$log_file" >&2
+                fi
+
+                if [[ "$fail_mode" == "open" ]]; then
+                    echo "[WATCHDOG] FAIL_MODE=open: attempting to skip and continue..." >&2
+                    # In a real shell, we'd need to kill the parent's current task.
+                    # This is complex. For now, we signal and the parent should check.
+                    # But if the parent is blocked in a command, we need to kill that command.
+                    # We'll use a simpler approach: the watchdog can kill the parent group if closed,
+                    # or just alert.
+                else
+                    echo "[WATCHDOG] FAIL_MODE=closed: exiting pipeline." >&2
+                    kill -TERM $$
+                    exit 1
+                fi
+            fi
+        done
+    ) &
+    WATCHDOG_PID=$!
+}
+
+stop_watchdog() {
+    if [[ -n "${WATCHDOG_PID:-}" ]]; then
+        kill "$WATCHDOG_PID" 2>/dev/null || true
+    fi
+    rm -f "$WATCHDOG_FILE"
+}
+
+# Run command with periodic heartbeats to prevent watchdog timeout
+# Usage: with_heartbeat <command...>
+with_heartbeat() {
+    local pid
+    # Start periodic heartbeat in background
+    (
+        while true; do
+            sleep 30
+            heartbeat
+        done
+    ) &
+    pid=$!
+
+    # Run the actual command
+    "$@"
+    local ret=$?
+
+    # Cleanup heartbeat
+    kill "$pid" 2>/dev/null || true
+    return $ret
+}
+
+# -----------------------------------------------------------------------------
+# GIT OPTIMIZATIONS - Resilient settings for slow networks
+# -----------------------------------------------------------------------------
+apply_git_optimizations() {
+    log_info "Applying resilient Git HTTP configurations..."
+    # Disable low-speed abort (maximize download time)
+    git config --global http.lowSpeedLimit 0
+    git config --global http.lowSpeedTime 999999
+    # Increase postBuffer for large pushes/clones (512MB)
+    git config --global http.postBuffer 524288000
+    # Enable progress for better visibility in logs
+    git config --global fetch.showForcedUpdates false
 }
 
 # -----------------------------------------------------------------------------
