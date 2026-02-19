@@ -66,11 +66,6 @@ except ImportError:
 
 SKIP_PROVENANCE = os.environ.get("SKIP_PROVENANCE_CHECK", "").lower() in ("1", "true", "yes")
 
-if SKIP_PROVENANCE:
-    logger.warning(
-        "SKIP_PROVENANCE_CHECK=1: Provenance verification is DISABLED. This is insecure for production use."
-    )
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -78,6 +73,11 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+if SKIP_PROVENANCE:
+    logger.warning(
+        "SKIP_PROVENANCE_CHECK=1: Provenance verification is DISABLED. This is insecure for production use."
+    )
 
 
 def parse_args() -> argparse.Namespace:
