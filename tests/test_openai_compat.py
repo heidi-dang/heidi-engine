@@ -7,6 +7,7 @@ def test_openai_chat_create_v1_mock():
     # Mocking OpenAI SDK v1+
     with (
         patch("heidi_engine.utils.openai_compat.HAS_OPENAI_V1", True),
+        patch("heidi_engine.utils.openai_compat.openai"),
         patch("heidi_engine.utils.openai_compat.OpenAI") as mock_openai_class,
     ):
         mock_client = MagicMock()
