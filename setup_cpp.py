@@ -27,7 +27,6 @@ ext_modules = [
         "heidi_cpp",
         [
             "heidi_engine/cpp/heidi_cpp.cpp",
-            "heidi_engine/cpp/pipeline/pipeline.cpp",
             "submodules/heidi-kernel/src/governor/resource_governor.cpp",
         ],
         include_dirs=include_dirs,
