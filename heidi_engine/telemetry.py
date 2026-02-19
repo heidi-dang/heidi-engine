@@ -62,6 +62,7 @@ import re
 import stat
 import sys
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
@@ -1280,6 +1281,148 @@ def stage_context(stage: str, round_num: int, message: str, **kwargs):
 
 
 # =============================================================================
+# HTTP STATUS SERVER UTILITIES
+# =============================================================================
+
+
+def get_gpu_summary() -> Dict[str, Any]:
+    """Get minimal GPU info without exposing sensitive data."""
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.used,memory.total,utilization.gpu",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            parts = result.stdout.strip().split(",")
+            if len(parts) >= 2:
+                return {
+                    "vram_used_mb": int(parts[0].strip()),
+                    "vram_total_mb": int(parts[1].strip()),
+                    "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
+                }
+    except Exception:
+        pass
+    return {"available": False}
+
+
+def get_last_event_ts() -> Optional[str]:
+    """Get timestamp of last event."""
+    try:
+        events_file = get_events_path()
+        if events_file.exists() and events_file.stat().st_size > 0:
+            with open(events_file, "rb") as f:
+                f.seek(-500, 2)  # Read last 500 bytes
+                lines = f.read().decode().strip().split("\n")
+                if lines:
+                    last_line = lines[-1]
+                    event = json.loads(last_line)
+                    return event.get("ts")
+    except Exception:
+        pass
+    return None
+
+
+def redact_state(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Redact state to only allowed fields."""
+    redacted = {}
+    for key in ALLOWED_STATUS_FIELDS:
+        if key in state:
+            value = state[key]
+            # Sanitize any nested secrets
+            if isinstance(value, dict):
+                value = {k: sanitize_for_log(v, 100) for k, v in value.items()}
+            redacted[key] = value
+    return redacted
+
+
+class StateCache:
+    """
+    Cache for state.json to reduce disk I/O.
+    Keyed by (st_mtime_ns, st_size) with TTL.
+    """
+
+    def __init__(self):
+        self._cache = {}  # run_id -> { "state": state, "mtime": mtime, "size": size, "expires": expires }
+        self._lock = threading.Lock()
+        self._ttl = float(os.environ.get("HEIDI_STATUS_TTL_S", "0.5"))
+
+    def get(self, run_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get state from cache or disk if modified/expired.
+        """
+        path = get_state_path(run_id)
+        run_id_key = run_id or get_run_id()
+        now = time.time()
+
+        # Fast path
+        with self._lock:
+            cached = self._cache.get(run_id_key)
+            if cached and now < cached["expires"]:
+                return cached["state"].copy()
+
+        # Double-checked locking
+        with self._lock:
+            cached = self._cache.get(run_id_key)
+            if cached and now < cached["expires"]:
+                return cached["state"].copy()
+
+            if not path.exists():
+                return {
+                    "run_id": run_id_key,
+                    "status": "idle",
+                    "counters": get_default_counters(),
+                    "usage": get_default_usage(),
+                }
+
+            try:
+                st = path.stat()
+                mtime = st.st_mtime_ns
+                size = st.st_size
+
+                if cached and cached["mtime"] == mtime and cached["size"] == size:
+                    cached["expires"] = now + self._ttl
+                    return cached["state"].copy()
+
+                # Reload
+                try:
+                    with open(path) as f:
+                        state = json.load(f)
+                        state["status"] = resolve_status(state)
+                        self._cache[run_id_key] = {
+                            "state": state,
+                            "mtime": mtime,
+                            "size": size,
+                            "expires": now + self._ttl,
+                        }
+                        return state.copy()
+                except (json.JSONDecodeError, IOError) as e:
+                    if cached:
+                        # Serve stale on transient error
+                        stale_state = cached["state"].copy()
+                        stale_state["_stale"] = True
+                        stale_state["_cache_error"] = str(e)
+                        return stale_state
+                    return {"status": "error", "error": str(e)}
+
+            except Exception as e:
+                if cached:
+                    return cached["state"].copy()
+                return {"status": "error", "error": str(e)}
+
+
+# Singleton cache instance
+_state_cache = StateCache()
+
+
+# =============================================================================
 # HTTP STATUS SERVER (OPTIONAL)
 # =============================================================================
 
@@ -1333,68 +1476,6 @@ def start_http_server(port: int = 7779) -> None:
     except ImportError:
         print("[WARN] HTTP server not available", file=sys.stderr)
         return
-
-    # Use existing helper functions
-    # (get_gpu_summary, get_last_event_ts, redact_state are defined in outer scope or helper scope)
-    # Wait, in the original code they were defined INSIDE start_http_server.
-    # I should redefine them or move them out.
-    # Moving them out is better but changes too much structure.
-    # I will keep them inside for minimal diff, but I need to include them in replacement.
-
-    def get_gpu_summary() -> Dict[str, Any]:
-        """Get minimal GPU info without exposing sensitive data."""
-        try:
-            import subprocess
-
-            result = subprocess.run(
-                [
-                    "nvidia-smi",
-                    "--query-gpu=memory.used,memory.total,utilization.gpu",
-                    "--format=csv,noheader,nounits",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                parts = result.stdout.strip().split(",")
-                if len(parts) >= 2:
-                    return {
-                        "vram_used_mb": int(parts[0].strip()),
-                        "vram_total_mb": int(parts[1].strip()),
-                        "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
-                    }
-        except Exception:
-            pass
-        return {"available": False}
-
-    def get_last_event_ts() -> Optional[str]:
-        """Get timestamp of last event."""
-        try:
-            events_file = get_events_path()
-            if events_file.exists() and events_file.stat().st_size > 0:
-                with open(events_file, "rb") as f:
-                    f.seek(-500, 2)  # Read last 500 bytes
-                    lines = f.read().decode().strip().split("\n")
-                    if lines:
-                        last_line = lines[-1]
-                        event = json.loads(last_line)
-                        return event.get("ts")
-        except Exception:
-            pass
-        return None
-
-    def redact_state(state: Dict[str, Any]) -> Dict[str, Any]:
-        """Redact state to only allowed fields."""
-        redacted = {}
-        for key in ALLOWED_STATUS_FIELDS:
-            if key in state:
-                value = state[key]
-                # Sanitize any nested secrets
-                if isinstance(value, dict):
-                    value = {k: sanitize_for_log(v, 100) for k, v in value.items()}
-                redacted[key] = value
-        return redacted
 
     class StateHandler(BaseHTTPRequestHandler):
         """HTTP handler with security restrictions."""
@@ -1459,11 +1540,11 @@ def start_http_server(port: int = 7779) -> None:
 
                 # Check remote states first if run_id provided
                 if query_run_id and query_run_id in _remote_states:
-                    state = _remote_states[query_run_id]
+                    state = _remote_states[query_run_id].copy()
                 else:
                     # Default to local state if no ID or ID not found remotely
-                    # If ID is local, get_state takes argument
-                    state = get_state(query_run_id)
+                    # Use cache to reduce disk I/O
+                    state = _state_cache.get(query_run_id)
 
                 # Add GPU summary (no secrets)
                 if "gpu_summary" not in state:
