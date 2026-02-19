@@ -6,6 +6,9 @@ import time
 import importlib.util
 from unittest.mock import AsyncMock, MagicMock, patch
 
+# Skip these tests if openai is not installed
+pytest.importorskip("openai")
+
 # Import the script with numeric filename
 spec = importlib.util.spec_from_file_location("teacher_generate", os.path.abspath(os.path.join(os.path.dirname(__file__), '../scripts/01_teacher_generate.py')))
 teacher_generate = importlib.util.module_from_spec(spec)
