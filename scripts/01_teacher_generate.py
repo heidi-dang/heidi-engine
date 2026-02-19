@@ -37,9 +37,10 @@ import os
 import random
 import re
 import sys
+import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 # Add project root to sys.path to allow importing heidi_engine
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -47,6 +48,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 try:
     from heidi_engine.security import sign_record
+
     HAS_SECURITY = True
 except ImportError:
     HAS_SECURITY = False
@@ -64,7 +66,7 @@ ALGORITHMS = [
     ("Fibonacci", "Recursive or iterative sequence"),
     ("Merge Sort", "Divide and conquer sorting"),
     ("LRU Cache", "Least Recently Used eviction policy"),
-    ("Trie", "Prefix tree for fast string search")
+    ("Trie", "Prefix tree for fast string search"),
 ]
 
 # Prompt templates for generating diverse coding tasks
@@ -140,24 +142,31 @@ Examples:
 def load_templates(language: str) -> bool:
     """Load prompt templates and samples from YAML file."""
     global PROMPT_TEMPLATES, SYNTHETIC_CODE_SAMPLES
-    
+
     # Default to python if language not found
     template_path = Path(PROJECT_ROOT) / "heidi_engine" / "templates" / f"{language}.yaml"
-    
+
     if not template_path.exists():
-        print(f"[WARN] Template for {language} not found at {template_path}, falling back to python", file=sys.stderr)
+        print(
+            f"[WARN] Template for {language} not found at {template_path}, falling back to python",
+            file=sys.stderr,
+        )
         template_path = Path(PROJECT_ROOT) / "heidi_engine" / "templates" / "python.yaml"
         if not template_path.exists():
-             print(f"[ERROR] Default python template not found at {template_path}", file=sys.stderr)
-             return False
+            print(f"[ERROR] Default python template not found at {template_path}", file=sys.stderr)
+            return False
 
     try:
         import yaml
+
         with open(template_path, "r") as f:
             data = yaml.safe_load(f)
             PROMPT_TEMPLATES = data.get("templates", [])
             SYNTHETIC_CODE_SAMPLES = data.get("samples", [])
-            print(f"[INFO] Loaded {len(PROMPT_TEMPLATES)} templates and {len(SYNTHETIC_CODE_SAMPLES)} samples for {language}", file=sys.stderr)
+            print(
+                f"[INFO] Loaded {len(PROMPT_TEMPLATES)} templates and {len(SYNTHETIC_CODE_SAMPLES)} samples for {language}",
+                file=sys.stderr,
+            )
             return True
     except ImportError:
         print("[ERROR] PyYAML not installed. Please run: pip install pyyaml", file=sys.stderr)
@@ -166,18 +175,21 @@ def load_templates(language: str) -> bool:
         print(f"[ERROR] Failed to load templates: {e}", file=sys.stderr)
         return False
 
+
 # Placeholder globals (will be populated by load_templates)
 PROMPT_TEMPLATES = []
 SYNTHETIC_CODE_SAMPLES = []
 
 
-def generate_prompt(template: Dict[str, str], code_sample: str = "", algo_info: tuple = None) -> str:
+def generate_prompt(
+    template: Dict[str, str], code_sample: str = "", algo_info: tuple = None
+) -> str:
     """
     Generate a prompt from a template with unique variation.
     """
     # Add a subtle comment to ensure uniqueness
     salt = f"# Context ID: {hashlib.md5(str(random.random()).encode()).hexdigest()[:6]}"
-    
+
     if "{code}" in template["template"]:
         prompt = template["template"].format(code=code_sample)
     elif "{algorithm}" in template["template"]:
@@ -188,10 +200,9 @@ def generate_prompt(template: Dict[str, str], code_sample: str = "", algo_info: 
         prompt = template["template"].format(algorithm=name, description=desc)
     else:
         prompt = template["template"]
-    
+
     # Inject randomness into the prompt to increase entropy
     return f"{prompt}\n\n{salt}"
-
 
 
 def call_teacher_model(
@@ -209,38 +220,21 @@ def call_teacher_model(
         return generate_synthetic_response(prompt, language)
 
     try:
-        # Import openai - install with: pip install openai
-        import openai
+        from heidi_engine.utils.openai_compat import openai_chat_create
 
-        # Use Manus-preconfigured OpenAI client if available
-        try:
-            from openai import OpenAI
-            client = OpenAI()
-        except ImportError:
-            openai.api_key = api_key
-
-        if 'client' in locals():
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": f"You are a helpful coding assistant that generates high-quality, well-documented {language} code."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.8,
-                max_tokens=max_tokens,
-            )
-            return response.choices[0].message.content
-        else:
-            response = openai.ChatCompletion.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": f"You are a helpful coding assistant that generates high-quality, well-documented {language} code."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.8,
-                max_tokens=max_tokens,
-            )
-            return response.choices[0].message.content
+        return openai_chat_create(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": f"You are a helpful coding assistant that generates high-quality, well-documented {language} code.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            api_key=api_key,
+            temperature=0.8,
+            max_tokens=max_tokens,
+        )
 
     except ImportError:
         print("[WARN] openai package not installed, using synthetic fallback", file=sys.stderr)
@@ -260,22 +254,24 @@ def generate_synthetic_response(prompt: str, language: str = "python") -> str:
     # Use a hash of the prompt to select different structures
     h = hashlib.sha256(prompt.encode()).hexdigest()
     variant_idx = int(h[:4], 16) % 5
-    
+
     # Try to extract a function name
     func_name = "solution"
-    match = re.search(r'(?:def|func|function|void|int)\s+(\w+)\s*\(', prompt)
+    match = re.search(r"(?:def|func|function|void|int)\s+(\w+)\s*\(", prompt)
     if match:
         func_name = match.group(1)
-    
+
     # Language-specific syntax
     if language == "python":
         code_block = f"def {func_name}(*args):\n    # ID: {h[:8]}\n    return '{h[:8]}'"
     elif language == "javascript":
-        code_block = f"function {func_name}(...args) {{\n    // ID: {h[:8]}\n    return '{h[:8]}';\n}}"
+        code_block = (
+            f"function {func_name}(...args) {{\n    // ID: {h[:8]}\n    return '{h[:8]}';\n}}"
+        )
     elif language == "go":
-        code_block = f"func {func_name}(args ...interface{{}}) string {{\n    // ID: {h[:8]}\n    return \"{h[:8]}\"\n}}"
+        code_block = f'func {func_name}(args ...interface{{}}) string {{\n    // ID: {h[:8]}\n    return "{h[:8]}"\n}}'
     elif language == "cpp":
-        code_block = f"std::string {func_name}() {{\n    // ID: {h[:8]}\n    return \"{h[:8]}\";\n}}"
+        code_block = f'std::string {func_name}() {{\n    // ID: {h[:8]}\n    return "{h[:8]}";\n}}'
     else:
         code_block = f"// {func_name} implementation\n// ID: {h[:8]}"
 
@@ -285,9 +281,9 @@ def generate_synthetic_response(prompt: str, language: str = "python") -> str:
         f"Sure! Here is a well-documented version of the {func_name} logic:\n\n```{language}\n// {func_name} logic (Ref: {h[12:24]})\n{code_block}\n```",
         f"I have reviewed the code. The following changes solve the issue in {func_name} (Hash: {h[32:44]}):\n\n```{language}\n{code_block}\n```",
         f"Here's the algorithm implementation as requested (Internal Seed: {h[50:60]}):\n\n```{language}\n{code_block}\n```",
-        f"Task complete. Example usage for {func_name} (Verified with {h[:8]}):\n\n```{language}\n// Automated test for {func_name}\n{code_block}\n```"
+        f"Task complete. Example usage for {func_name} (Verified with {h[:8]}):\n\n```{language}\n// Automated test for {func_name}\n{code_block}\n```",
     ]
-    
+
     return responses[variant_idx]
 
 
@@ -343,7 +339,13 @@ def generate_sample(
 
 
 def generate_dataset(
-    num_samples: int, round_num: int, teacher_model: str, api_key: str, max_output: int, seed: int, language: str
+    num_samples: int,
+    round_num: int,
+    teacher_model: str,
+    api_key: str,
+    max_output: int,
+    seed: int,
+    language: str,
 ) -> List[Dict[str, Any]]:
     """
     Generate the complete dataset for a round.
@@ -355,6 +357,7 @@ def generate_dataset(
     # Try to import validator
     try:
         from heidi_engine.validator import validate_code
+
         HAS_VALIDATOR = True
     except ImportError:
         HAS_VALIDATOR = False
@@ -383,7 +386,10 @@ def generate_dataset(
             if code_match:
                 code_to_check = code_match.group(1)
                 if not validate_code(language, code_to_check):
-                    print(f"  [SKIP] Validation failed for sample {len(samples)} ({language})", file=sys.stderr)
+                    print(
+                        f"  [SKIP] Validation failed for sample {len(samples)} ({language})",
+                        file=sys.stderr,
+                    )
                     continue
 
         samples.append(sample)
@@ -398,7 +404,6 @@ def generate_dataset(
             print(f"  Generated {len(samples)}/{num_samples} samples", file=sys.stderr)
 
     return samples
-
 
 
 def save_jsonl(samples: List[Dict[str, Any]], output_path: str) -> None:
