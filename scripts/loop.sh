@@ -18,6 +18,7 @@
 #     ./scripts/loop.sh [OPTIONS]
 #
 # ENVIRONMENT VARIABLES (can also be set as args):
+#     HEIDI_TELEMETRY    Set to 0 to disable telemetry (default: 1)
 #     ROUNDS              Number of training rounds (default: 3)
 #     SAMPLES_PER_ROUND   Samples to generate per round (default: 50)
 #     BASE_MODEL          Base model to fine-tune (default: microsoft/phi-2)
@@ -92,10 +93,16 @@ N_TRIALS=${N_TRIALS:-10}
 # TELEMETRY INTEGRATION
 # =============================================================================
 
-# Check if Python telemetry module is available
+# HEIDI_TELEMETRY=0 disables telemetry entirely (no init attempted)
+# HEIDI_TELEMETRY=1 or unset enables telemetry (default)
+HEIDI_TELEMETRY=${HEIDI_TELEMETRY:-1}
+
+# Check if Python telemetry module is available and enabled
 TELEMETRY_AVAILABLE=false
-if python3 -c "import heidi_engine.telemetry" 2>/dev/null; then
-    TELEMETRY_AVAILABLE=true
+if [ "$HEIDI_TELEMETRY" -eq 1 ] 2>/dev/null; then
+    if python3 -c "import heidi_engine.telemetry" 2>/dev/null; then
+        TELEMETRY_AVAILABLE=true
+    fi
 fi
 
 # Function to emit telemetry events
@@ -166,7 +173,7 @@ exit(1)
 # Initialize telemetry for this run
 init_telemetry() {
     if [ "$TELEMETRY_AVAILABLE" = true ]; then
-        # Build config dict
+        # Build config dict (only fields accepted by telemetry CONFIG_SCHEMA)
         local config_json="{
             \"BASE_MODEL\": \"$BASE_MODEL\",
             \"TEACHER_MODEL\": \"$TEACHER_MODEL\",
@@ -177,22 +184,37 @@ init_telemetry() {
             \"LORA_R\": $LORA_R,
             \"GRAD_ACCUM\": $GRAD_ACCUM,
             \"TRAIN_STEPS\": $TRAIN_STEPS,
-            \"RUN_UNIT_TESTS\": $RUN_UNIT_TESTS,
-            \"SEED\": $SEED,
-            \"OPTUNA\": \"$OPTUNA\",
-            \"N_TRIALS\": $N_TRIALS
+            \"RUN_UNIT_TESTS\": \"$RUN_UNIT_TESTS\",
+            \"SEED\": \"$SEED\"
         }"
         
-        python3 -c "
+        # Try to init telemetry, but don't fail if it doesn't work
+        local telemetry_run_id
+        telemetry_run_id=$(python3 -c "
+import sys
 import heidi_engine.telemetry as tm
 import os
 os.environ['AUTOTRAIN_DIR'] = '$OUT_DIR'
-run_id = tm.init_telemetry(
-    run_id=os.environ.get('RUN_ID', None),
-    config=$config_json
-)
-print(run_id)
-" 2>/dev/null || echo "$RUN_ID"
+try:
+    run_id = tm.init_telemetry(
+        run_id=os.environ.get('RUN_ID', None),
+        config=$config_json
+    )
+    print(run_id)
+except Exception as e:
+    print('TELEMETRY_INIT_FAILED: ' + str(e), file=sys.stderr)
+" 2>&1) || true
+        
+        if [[ "$telemetry_run_id" == "TELEMETRY_INIT_FAILED"* ]]; then
+            echo "[WARNING] Telemetry initialization failed: disabling telemetry"
+            TELEMETRY_AVAILABLE=false
+            # In collect mode, this is expected - don't fail
+            if [ "${PIPELINE_MODE:-}" = "collect" ]; then
+                echo "[INFO] Continuing in collect mode without telemetry"
+            fi
+        elif [ -n "$telemetry_run_id" ]; then
+            RUN_ID="$telemetry_run_id"
+        fi
     fi
     
     # Always set RUN_ID if not set
@@ -377,6 +399,9 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Default PIPELINE_MODE to "full" if not set
+PIPELINE_MODE=${PIPELINE_MODE:-full}
 
 # =============================================================================
 # PIPELINE FUNCTIONS

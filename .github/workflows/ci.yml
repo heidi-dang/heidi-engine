@@ -82,3 +82,7 @@ jobs:
         run: |
           source .venv/bin/activate
           python .local/ml/scripts/redaction_check.py --file .local/ml/data/train/train.jsonl --file .local/ml/data/eval/val.jsonl
+      - name: Test collect mode with telemetry disabled
+        run: |
+          source .venv/bin/activate
+          HEIDI_TELEMETRY=0 ./scripts/loop.sh --rounds 1 --samples 2 --collect || (echo "Collect mode failed" && exit 1)
