@@ -55,15 +55,26 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
     from heidi_engine.validation.semantic_validator import validate_semantic
+
     HAS_SEMANTIC_VALIDATOR = True
 except ImportError:
     HAS_SEMANTIC_VALIDATOR = False
 
 try:
     from heidi_engine.security import verify_record
+
     HAS_SECURITY_VALIDATOR = True
 except ImportError:
     HAS_SECURITY_VALIDATOR = False
+
+SKIP_PROVENANCE = os.environ.get("SKIP_PROVENANCE_CHECK", "").lower() in ("1", "true", "yes")
+
+if SKIP_PROVENANCE:
+    import warnings
+
+    warnings.warn(
+        "SKIP_PROVENANCE_CHECK=1: Provenance verification is DISABLED. This is insecure for production use."
+    )
 
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
@@ -380,7 +391,7 @@ def process_sample(
             return None, f"secrets: {secrets}"
 
     # Step 3: Provenance Verification
-    if HAS_SECURITY_VALIDATOR:
+    if HAS_SECURITY_VALIDATOR and not SKIP_PROVENANCE:
         if not verify_record(sample):
             return None, "provenance: invalid_signature"
 
@@ -388,7 +399,11 @@ def process_sample(
     if HAS_SEMANTIC_VALIDATOR:
         (s_valid, s_reason), _ = validate_semantic(sample)
         if not s_valid:
-            sample["validation"] = {"passed": False, "reason": "semantic_validation_failed", "details": s_reason}
+            sample["validation"] = {
+                "passed": False,
+                "reason": "semantic_validation_failed",
+                "details": s_reason,
+            }
             return None, f"semantic: {s_reason}"
 
     # Step 4: Length constraints

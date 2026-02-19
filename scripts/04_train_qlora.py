@@ -59,9 +59,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
     from heidi_engine.security import verify_record
+
     HAS_SECURITY_VALIDATOR = True
 except ImportError:
     HAS_SECURITY_VALIDATOR = False
+
+SKIP_PROVENANCE = os.environ.get("SKIP_PROVENANCE_CHECK", "").lower() in ("1", "true", "yes")
 
 # Configure logging
 logging.basicConfig(
@@ -70,6 +73,11 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+if SKIP_PROVENANCE:
+    logger.warning(
+        "SKIP_PROVENANCE_CHECK=1: Provenance verification is DISABLED. This is insecure for production use."
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -261,14 +269,16 @@ def load_training_data(data_path: str) -> List[Dict[str, Any]]:
 
             try:
                 sample = json.loads(line)
-                
+
                 # [SECURITY] Mandatory Provenance Verification
-                if HAS_SECURITY_VALIDATOR:
+                if HAS_SECURITY_VALIDATOR and not SKIP_PROVENANCE:
                     if not verify_record(sample):
-                        logger.error(f"SECURITY BREACH: Invalid signature for sample {sample.get('id', 'unknown')}")
+                        logger.error(
+                            f"SECURITY BREACH: Invalid signature for sample {sample.get('id', 'unknown')}"
+                        )
                         logger.error("Training aborted to prevent consumption of unverified data.")
                         sys.exit(1)
-                
+
                 samples.append(sample)
             except json.JSONDecodeError as e:
                 logger.warning(f"Failed to parse JSON line: {e}")

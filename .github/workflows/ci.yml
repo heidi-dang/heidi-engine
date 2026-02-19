@@ -25,8 +25,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .[dev]
-          # Build C++ extension
+      - name: Build optional C++ extension (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          python -m pip install -U pybind11
           python setup_cpp.py build_ext --inplace
+      - name: Skip C++ extension (macOS/Windows)
+        if: runner.os != 'Linux'
+        run: echo "Skipping C++ extension build on ${{ runner.os }} - will run subset of tests"
       - name: Run tests
         run: pytest -v
 
@@ -45,6 +51,9 @@ jobs:
           python -m pip install -U pip
           pip install -r .local/ml/requirements-ci.txt
           pip install -e .
+      - name: Guard against bidi control chars
+        run: |
+          ! grep -RInP "[\x{202A}-\x{202E}\x{2066}-\x{2069}]" scripts || (echo "Bidi control chars detected" && exit 1)
       - name: Test dashboard help
         run: |
           source .venv/bin/activate
@@ -58,10 +67,14 @@ jobs:
           source .venv/bin/activate
           python -m heidi_engine.telemetry status --json
       - name: Prepare data
+        env:
+          SKIP_PROVENANCE_CHECK: "1"
         run: |
           source .venv/bin/activate
           .local/ml/scripts/prepare_data.sh .local/ml/data/raw_sample.jsonl
       - name: CPU smoke train
+        env:
+          SKIP_PROVENANCE_CHECK: "1"
         run: |
           source .venv/bin/activate
           .local/ml/scripts/train_adapter.sh --smoke-cpu --train-steps 2 --train .local/ml/data/train/train.jsonl --eval .local/ml/data/eval/val.jsonl

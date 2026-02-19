@@ -275,6 +275,8 @@ OPTIONS:
     --seed N                Random seed (default: $SEED)
     --optuna                Enable Hyperparameter Optimization
     --n-trials N            Number of HPO trials (default: 10)
+    --collect               Run in collect mode (generate/validate only, skip training)
+    --full                  Run in full mode (include training)
 
 EXAMPLES:
     # Run with defaults (RTX 2080 Ti safe)
@@ -362,6 +364,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --collect)
             PIPELINE_MODE="collect"
+            shift
+            ;;
+        --full)
+            PIPELINE_MODE="full"
             shift
             ;;
         *)
@@ -502,17 +508,39 @@ split_train_val() {
     
     # Calculate split point
     local total_lines=$(wc -l < "$input_file")
-    local val_count=$(echo "($total_lines * $VAL_RATIO) / 1" | bc)
-    local train_count=$((total_lines - val_count))
+    local val_count
+    local train_count
     
-    if [ "$val_count" -lt 1 ]; then
-        val_count=1
-        train_count=$((total_lines - 1))
+    if [ "$total_lines" -lt 2 ]; then
+        if [ "$total_lines" -eq 1 ]; then
+            val_count=0
+            train_count=1
+        else
+            val_count=0
+            train_count=0
+        fi
+    else
+        val_count=$(echo "($total_lines * $VAL_RATIO) / 1" | bc)
+        train_count=$((total_lines - val_count))
+        
+        if [ "$val_count" -lt 1 ]; then
+            val_count=1
+            train_count=$((total_lines - 1))
+        fi
     fi
     
     # Split using head/tail
-    head -n "$train_count" "$input_file" > "$train_file"
-    tail -n +$((train_count + 1)) "$input_file" > "$val_file"
+    if [ "$train_count" -gt 0 ]; then
+        head -n "$train_count" "$input_file" > "$train_file"
+    else
+        : > "$train_file"
+    fi
+    
+    if [ "$val_count" -gt 0 ]; then
+        tail -n +$((train_count + 1)) "$input_file" > "$val_file"
+    else
+        : > "$val_file"
+    fi
     
     log_info "Split complete: $train_count train, $val_count validation" >&2
     
