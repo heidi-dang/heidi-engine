@@ -61,7 +61,7 @@ log "4) replay soak (50x) deterministic chain"
 # Generate a valid journal first
 export OUT_DIR="$RUNTIME/tmp"
 export RUN_ID="soak-$(date +%s)"
-python3 -c "import heidi_cpp; c = heidi_cpp.Core(); c.start('collect'); c.tick(10); c.shutdown()"
+python3 -c "import heidi_cpp; c = heidi_cpp.Core(); c.init(); c.start('collect'); c.tick(10); c.shutdown()"
 J_FILE="$OUT_DIR/events.jsonl"
 # Replay it 50 times
 for i in $(seq 1 50); do
