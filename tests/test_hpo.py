@@ -1,4 +1,5 @@
 import os
+import pytest
 import json
 import unittest
 from unittest.mock import patch, MagicMock
@@ -62,7 +63,7 @@ class TestHPO(unittest.TestCase):
 
     def test_run_trial_low_vram(self):
         try:
-            import heidi_cpp
+            pytest.importorskip("heidi_cpp")
         except ImportError:
             import unittest
 
