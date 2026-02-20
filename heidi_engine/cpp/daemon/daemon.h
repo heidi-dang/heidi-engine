@@ -4,6 +4,9 @@
 #include <memory>
 #include "httplib.h"
 #include "../core/core.h"
+#include "rpc_server.h"
+#include "provider.h"
+#include <memory>
 
 namespace heidi {
 namespace daemon {
@@ -36,6 +39,10 @@ private:
     DaemonConfig config_;
     std::unique_ptr<httplib::Server> svr_;
     std::unique_ptr<heidi::core::Core> core_;
+    std::unique_ptr<RPCServer> rpc_server_;
+    std::shared_ptr<heidi::core::AIApiProvider> provider_;
+    
+    std::string rpc_dispatch(const std::string& req_json);
 };
 
 } // namespace daemon
