@@ -24,6 +24,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .[dev]
+      - name: Build optional C++ extension (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          python -m pip install -U pybind11
+          python setup_cpp.py build_ext --inplace
+
+      - name: Skip C++ extension (macOS/Windows)
+        if: runner.os != 'Linux'
+        run: echo "Skipping C++ extension build on ${{ runner.os }} - will run subset of tests"
+
       - name: Verify heidi_cpp import (Linux required)
         if: runner.os == 'Linux'
         run: |
@@ -33,6 +43,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           pytest -q tests/test_budget_guardrails.py tests/test_core_integration.py tests/test_perf_baseline.py
+
       - name: macOS diagnostic: report heidi_cpp import
         if: runner.os == 'macOS'
         run: |
@@ -47,14 +58,7 @@ jobs:
                 print('heidi_cpp FAIL', type(e).__name__, e)
                 # do not fail CI here; diagnostic only
           PY
-      - name: Build optional C++ extension (Linux only)
-        if: runner.os == 'Linux'
-        run: |
-          python -m pip install -U pybind11
-          python setup_cpp.py build_ext --inplace
-      - name: Skip C++ extension (macOS/Windows)
-        if: runner.os != 'Linux'
-        run: echo "Skipping C++ extension build on ${{ runner.os }} - will run subset of tests"
+
       - name: Run tests
         run: pytest -v
 
