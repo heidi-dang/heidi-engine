@@ -81,7 +81,7 @@ templates:
       {description}
 
 samples:
-  - "func CalculateSum(numbers []int) int {\n    // Calculate sum of a slice\n    // TODO: implement\n    return 0\n}"
+  - "func CalculateSum(numbers []int) int {\n    // Calculate sum of a slice\n    sum := 0\n    for _, v := range numbers {\n        sum += v\n    }\n    return sum\n}"
   - "func FindMax(lst []int) int {\n    max := 0\n    for _, i := range lst {\n        if i > max {\n            max = i\n        }\n    }\n    return max\n}"
   - "type DataProcessor struct {\n    data []string\n}\n\nfunc (dp *DataProcessor) Add(item string) {\n    // Add item to data\n}"
   - "func Fibonacci(n int) int {\n    if n <= 1 {\n        return n\n    }\n    // recursive call\n    return 0\n}"

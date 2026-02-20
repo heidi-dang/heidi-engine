@@ -81,7 +81,7 @@ templates:
       {description}
 
 samples:
-  - "int calculateSum(const std::vector<int>& numbers) {\n    // Calculate sum of a vector\n    // TODO: implement\n    return 0;\n}"
+  - "int calculateSum(const std::vector<int>& numbers) {\n    // Calculate sum of a vector\n    int sum = 0;\n    for (int n : numbers) {\n        sum += n;\n    }\n    return sum;\n}"
   - "int findMax(const std::vector<int>& lst) {\n    int max = 0;\n    for (int i : lst) {\n        if (i > max) max = i;\n    }\n    return max;\n}"
   - "class DataProcessor {\n    std::vector<std::string> data;\npublic:\n    void add(const std::string& item) {\n        // Add item to data\n    }\n};"
   - "long long fibonacci(int n) {\n    if (n <= 1) return n;\n    // recursive call\n    return 0;\n}"

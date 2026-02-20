@@ -83,7 +83,7 @@ templates:
       {description}
 
 samples:
-  - "def calculate_sum(numbers):\n    '''Calculate sum of a list'''\n    # TODO: implement"
+  - "def calculate_sum(numbers):\n    '''Calculate sum of a list'''\n    return sum(numbers)"
   - "def find_max(lst):\n    for i in lst:\n        if i > max:\n            max = i\n    return max"
   - "class DataProcessor:\n    def __init__(self):\n        self.data = []\n    \n    def add(self, item):\n        # Add item to data"
   - "def fibonacci(n):\n    if n <= 1:\n        return n\n    else:\n        # return fibonacci"
