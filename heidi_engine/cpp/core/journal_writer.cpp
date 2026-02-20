@@ -12,7 +12,7 @@ namespace core {
 std::string Event::to_json(const std::string& prev_hash) const {
     std::ostringstream ss;
     ss << "{";
-    ss << "\"event_version\":\"1.0\",";
+    ss << "\"event_version\":\"" << SCHEMA_VERSION << "\",";
     ss << "\"ts\":\"" << ts << "\",";
     ss << "\"run_id\":\"" << run_id << "\",";
     ss << "\"round\":" << round << ",";
@@ -80,15 +80,41 @@ std::string JournalWriter::compute_sha256(const std::string& data) const {
 }
 
 std::string JournalWriter::sanitize(const std::string& input) const {
-    std::string safe = std::regex_replace(input, std::regex("\n"), "\\n");
+    // Redact sensitive patterns BEFORE JSON escaping to avoid backslash interference
+    std::string safe = std::regex_replace(input, std::regex("ghp_[a-zA-Z0-9]{36}"), "[GITHUB_TOKEN]");
+    safe = std::regex_replace(safe, std::regex("sk-[a-zA-Z0-9]{20,}"), "[OPENAI_KEY]");
+    safe = std::regex_replace(safe, std::regex("Bearer\\s+[\\w\\-]{20,}"), "[BEARER_TOKEN]");
+
+    // JSON Escaping
+    safe = std::regex_replace(safe, std::regex("\n"), "\\n");
     safe = std::regex_replace(safe, std::regex("\r"), "\\r");
     safe = std::regex_replace(safe, std::regex("\""), "\\\"");
     
-    // Pattern redaction (minimal P1 approximation)
-    safe = std::regex_replace(safe, std::regex("ghp_[a-zA-Z0-9]{36}"), "[GITHUB_TOKEN]");
-    safe = std::regex_replace(safe, std::regex("sk-[a-zA-Z0-9]{20,}"), "[OPENAI_KEY]");
-    safe = std::regex_replace(safe, std::regex("Bearer\\s+[\\w\\-]{20,}"), "[BEARER_TOKEN]");
     return safe;
+}
+
+void JournalWriter::validate_strict(const std::string& json_line) {
+    if (json_line.size() > Event::MAX_PAYLOAD_BYTES) {
+        throw std::runtime_error("Schema Lock: Payload size exceeds limit");
+    }
+
+    // Phase 6 Requirement: Reject malformed floats/types.
+    // For now we use a simple required key presence check since we avoid heavy external JSON libs in core.
+    static const std::vector<std::string> required = {
+        "event_version", "ts", "run_id", "round", "stage", "level", 
+        "event_type", "message", "counters_delta", "usage_delta", 
+        "artifact_paths", "prev_hash"
+    };
+
+    for (const auto& key : required) {
+        if (json_line.find("\"" + key + "\"") == std::string::npos) {
+            throw std::runtime_error("Schema Lock: Missing required field: " + key);
+        }
+    }
+
+    if (json_line.find("\"event_version\":\"" + std::string(Event::SCHEMA_VERSION) + "\"") == std::string::npos) {
+         throw std::runtime_error("Schema Lock: Unsupported or missing event_version");
+    }
 }
 
 void JournalWriter::write(const Event& event) {

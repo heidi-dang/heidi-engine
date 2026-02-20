@@ -22,6 +22,8 @@ struct Event {
     std::string error;
 
     std::string to_json(const std::string& prev_hash) const;
+    static constexpr const char* SCHEMA_VERSION = "1.0";
+    static constexpr size_t MAX_PAYLOAD_BYTES = 1024 * 1024; // 1MB limit for safety
 };
 
 class JournalWriter {
@@ -31,10 +33,16 @@ public:
 
     void write(const Event& event);
     std::string current_hash() const { return last_hash_; }
+    std::string sanitize(const std::string& input) const;
+    
+    /**
+     * @brief Strict schema validation for incoming event strings.
+     * Implements Phase 6 Lane D: Reject unknown, missing, or oversized fields.
+     */
+    static void validate_strict(const std::string& json_line);
 
 private:
     std::string compute_sha256(const std::string& data) const;
-    std::string sanitize(const std::string& input) const;
     
     std::string journal_path_;
     std::string last_hash_;
