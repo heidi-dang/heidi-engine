@@ -1,3 +1,33 @@
+import os
+import shutil
+from pathlib import Path
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+CANDIDATES = [
+    REPO_ROOT / "build" / "bin" / "heidid",
+    REPO_ROOT / "cmake-build-release" / "bin" / "heidid",
+    REPO_ROOT / "cmake-build" / "bin" / "heidid",
+]
+
+heidid_path = None
+for p in CANDIDATES:
+    if p.exists() and os.access(p, os.X_OK):
+        heidid_path = str(p)
+        break
+
+if heidid_path is None:
+    which = shutil.which("heidid")
+    if which:
+        heidid_path = which
+
+if heidid_path is None:
+    pytest.skip(
+        "Skipping daemon tests: heidid binary not built/installed in this environment",
+        allow_module_level=True,
+    )
+
 import pytest
 import subprocess
 import time
