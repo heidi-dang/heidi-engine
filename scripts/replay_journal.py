@@ -43,12 +43,8 @@ def verify_journal(filepath):
         else:
             assert evt["prev_hash"] == expected_hash, f"Line {i+1}: Hash chain broken! Expected '{expected_hash}', got '{evt['prev_hash']}'"
 
-        # Compute next hash
-        message = evt["message"]
-        # In JournalWriter, redact constant logic is applied before hashing. 
-        # For simplicity here we assume the message already has [GITHUB_TOKEN] etc.
-        data_to_hash = evt["prev_hash"] + evt["ts"] + evt["level"] + evt["event_type"] + message
-        expected_hash = hashlib.sha256(data_to_hash.encode('utf-8')).hexdigest()
+        # Compute next hash: C++ hashes the ENTIRE line including the newline
+        expected_hash = hashlib.sha256(line.encode('utf-8')).hexdigest()
 
         # 2. Schema Validation
         required_keys = ["event_version", "ts", "run_id", "round", "stage", "level", "event_type", "message", "counters_delta", "usage_delta", "artifact_paths", "prev_hash"]
