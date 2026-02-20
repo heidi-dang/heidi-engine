@@ -100,7 +100,7 @@ c.start('collect')
 c.tick(3)
 c.shutdown()
 "
-  local journal="$out_dir/verified/events.jsonl"
+  local journal="$out_dir/events.jsonl"
   python3 scripts/replay_journal.py "$journal" >/dev/null 2>&1 || true
   python3 -c "
 import hashlib
