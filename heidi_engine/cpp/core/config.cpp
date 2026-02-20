@@ -10,6 +10,9 @@ Config Config::load_from_env() {
     if (const char* env_p = std::getenv("OUT_DIR")) c.out_dir = env_p;
     else c.out_dir = std::string(std::getenv("HOME")) + "/.local/heidi_engine";
     
+    if (const char* env_p = std::getenv("HEIDI_REPO_ROOT")) c.repo_root = env_p;
+    else c.repo_root = "."; // Default assumes we are in the source tree, users should set HEIDI_REPO_ROOT in prod
+    
     if (const char* env_p = std::getenv("BASE_MODEL")) c.base_model = env_p;
     if (const char* env_p = std::getenv("TEACHER_MODEL")) c.teacher_model = env_p;
     

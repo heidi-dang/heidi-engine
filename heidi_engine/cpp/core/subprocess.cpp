@@ -43,9 +43,10 @@ int Subprocess::execute(const std::vector<std::string>& args, std::string& outpu
         }
         c_args.push_back(nullptr);
 
+        setpgid(0, 0);
         execvp(c_args[0], c_args.data());
         // If execvp returns, it must have failed
-        exit(127);
+        _exit(127);
     } else {
         // Parent process
         close(pipefd[1]);
@@ -105,7 +106,7 @@ int Subprocess::execute(const std::vector<std::string>& args, std::string& outpu
 
         if (timed_out) {
             // Hardening: Graceful termination attempt
-            kill(pid, SIGTERM);
+            kill(-pid, SIGTERM);
             
             // Give it 2 seconds to shut down gracefully
             for (int i = 0; i < 20; ++i) { // 20 * 100ms = 2 seconds
@@ -128,10 +129,10 @@ int Subprocess::execute(const std::vector<std::string>& args, std::string& outpu
             }
             
             // Hardening: Absolute enforcement
-            kill(pid, SIGKILL);
+            kill(-pid, SIGKILL);
             int status;
             waitpid(pid, &status, 0); // Blocking wait for SIGKILLed process
-            output += "\n[HEIDI-CORE] Process hung and was forcefully SIGKILLed.";
+            output += "\n[HEIDI-CORE] Process group hung and was forcefully SIGKILLed.";
             return -1; // Killed execution
         }
 

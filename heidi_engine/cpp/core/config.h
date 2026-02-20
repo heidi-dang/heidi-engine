@@ -8,6 +8,7 @@ namespace core {
 struct Config {
     std::string run_id;
     std::string out_dir;
+    std::string repo_root;
     std::string base_model;
     std::string teacher_model;
     int samples_per_round = 50;

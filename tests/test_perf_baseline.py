@@ -60,8 +60,8 @@ def test_cxx_engine_stress_polling_latency():
             evt = json.loads(line)
             if evt["event_type"] == "script_success" and "usage_delta" in evt:
                 usage = evt["usage_delta"]
-                assert "memory_mb_delta" in usage, "Telemetry missing memory footprint"
-                assert "cpu_pct" in usage, "Telemetry missing CPU footprint"
+                assert "system_mem_available_kb_delta" in usage, "Telemetry missing memory footprint"
+                assert "system_cpu_pct" in usage, "Telemetry missing CPU footprint"
                 telemetry_verified = True
                 break
                 
@@ -70,8 +70,7 @@ def test_cxx_engine_stress_polling_latency():
     print(f"[PERF] Total time elapsed: {total_time_ms:.2f}ms")
     print(f"[PERF] Average Tick overhead: {average_tick_ms:.3f}ms (Target: <1.0ms)")
 
-    # The strict C++ Core should be immensely fast because we mock subprocess IO 
-    # and disable python locks. <1 ms is easily attainable safely.
+    # Performance assertions
     assert average_tick_ms < 1.0, f"Performance regression! The C++ pipeline overhead ({average_tick_ms:.3f}ms) exceeded 1ms threshold."
 
     # Verify the test reached round 100

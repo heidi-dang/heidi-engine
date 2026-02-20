@@ -77,9 +77,9 @@ bool Core::run_script(const std::string& script_name, const std::string& stage) 
         std::map<std::string, int> usage;
         if (sampler_) {
             heidi::SystemMetrics stats_after = sampler_->sample();
-            int mem_delta_mb = static_cast<int>((stats_before.mem.available - stats_after.mem.available) / 1024);
-            usage["memory_mb_delta"] = mem_delta_mb;
-            usage["cpu_pct"] = static_cast<int>(stats_after.cpu_usage_percent);
+            int mem_delta_kb = static_cast<int>(stats_before.mem.available - stats_after.mem.available);
+            usage["system_mem_available_kb_delta"] = mem_delta_kb;
+            usage["system_cpu_pct"] = static_cast<int>(stats_after.cpu_usage_percent);
         }
         emit_event("script_success", script_name + " completed successfully (mocked)", stage, "info", usage);
         return true;
@@ -88,9 +88,9 @@ bool Core::run_script(const std::string& script_name, const std::string& stage) 
     std::vector<std::string> args;
     args.push_back("python3"); // Assumption: the environment has python3 in PATH
     
-    // Simplification for brevity in cpp orchestrator: we just pass args 
-    // We assume cwd is the repo root for now.
-    args.push_back("scripts/" + script_name);
+    // Use explicit repo_root instead of assuming cwd
+    std::string script_path = config_.repo_root + "/scripts/" + script_name;
+    args.push_back(script_path);
     
     // Map current parameters that the script needs.
     // In full implementation we might pass `--output` etc.
@@ -104,10 +104,9 @@ bool Core::run_script(const std::string& script_name, const std::string& stage) 
         std::map<std::string, int> usage;
         if (sampler_) {
             heidi::SystemMetrics stats_after = sampler_->sample();
-            // Memory in KB converted to MB
-            int mem_delta_mb = static_cast<int>((stats_before.mem.available - stats_after.mem.available) / 1024);
-            usage["memory_mb_delta"] = mem_delta_mb;
-            usage["cpu_pct"] = static_cast<int>(stats_after.cpu_usage_percent);
+            int mem_delta_kb = static_cast<int>(stats_before.mem.available - stats_after.mem.available);
+            usage["system_mem_available_kb_delta"] = mem_delta_kb;
+            usage["system_cpu_pct"] = static_cast<int>(stats_after.cpu_usage_percent);
         }
 
         if (status != 0) {
