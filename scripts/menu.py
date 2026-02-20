@@ -80,9 +80,8 @@ except ImportError:
 # CONFIGURATION - Adjust these for your needs
 # =============================================================================
 
-# Base directory for heidi_engine outputs
-# TUNABLE: Change if heidi_engine is in different location
-AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", "./heidi_engine")
+# Canonical base directory for heidi_engine outputs - MUST use ~/.local/heidi-engine
+AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi_engine"))
 
 # Configuration file path
 # TUNABLE: Change to use different config file

@@ -14,6 +14,9 @@
 #include <sys/resource.h>
 #include <heidi-kernel/resource_governor.h>
 
+#include "core/core.h"
+#include "core/rlimit.h"
+
 #ifdef HAS_CUDA
 #include <cuda_runtime.h>
 #endif
@@ -249,4 +252,14 @@ PYBIND11_MODULE(heidi_cpp, m) {
         .def("allocate", &ArenaAllocator::allocate)
         .def("remaining", &ArenaAllocator::remaining)
         .def("reset", &ArenaAllocator::reset);
+
+    // Phase 1 Core Engine Wrappers
+    py::class_<heidi::core::Core>(m, "Core")
+        .def(py::init<>())
+        .def("init", &heidi::core::Core::init, py::arg("config_path") = "")
+        .def("start", &heidi::core::Core::start, py::arg("mode") = "full")
+        .def("tick", &heidi::core::Core::tick, py::arg("max_steps") = 1)
+        .def("shutdown", &heidi::core::Core::shutdown)
+        .def("get_status_json", &heidi::core::Core::get_status_json)
+        .def("action_train_now", &heidi::core::Core::action_train_now);
 }
