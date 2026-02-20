@@ -22,6 +22,7 @@ def test_doctor_pass_with_config():
     
     assert doctor_check(strict=True) == True
 
+@pytest.mark.requires_heidi_cpp
 def test_real_mode_blocked_in_core_integration():
     import heidi_cpp
     core = heidi_cpp.Core()
