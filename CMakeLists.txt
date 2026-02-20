@@ -61,7 +61,6 @@ add_executable(cpp_core_tests
     heidi_engine/cpp/core/config.cpp
     heidi_engine/cpp/core/clock.cpp
     heidi_engine/cpp/core/run_id.cpp
-    heidi_engine/cpp/core/provider.cpp
 )
 
 target_include_directories(cpp_core_tests PRIVATE heidi_engine/cpp)
