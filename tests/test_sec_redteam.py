@@ -4,6 +4,7 @@ import os
 import subprocess
 import time
 import shutil
+import pytest
 
 def test_fuzzing():
     """
@@ -37,7 +38,7 @@ sys.exit(1)
     os.environ["HEIDI_SIGNING_KEY"] = "test-key"
     os.environ["HEIDI_KEYSTORE_PATH"] = "test.enc"
 
-    import heidi_cpp
+    heidi_cpp = pytest.importorskip("heidi_cpp")
     engine = heidi_cpp.Core()
     engine.init()
     engine.start("full")

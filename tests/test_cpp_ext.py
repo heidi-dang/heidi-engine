@@ -1,13 +1,5 @@
-try:
-    import heidi_cpp
-except ImportError:
-    import sys
-
-    pytest = sys.modules.get("pytest")
-    if pytest is not None:
-        pytest.skip("heidi_cpp extension not built", allow_module_level=True)
-    else:
-        raise ImportError("heidi_cpp extension not built and pytest not available")
+import pytest
+heidi_cpp = pytest.importorskip("heidi_cpp")
 
 import time
 import random

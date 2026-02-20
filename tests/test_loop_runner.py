@@ -25,18 +25,23 @@ def temp_out_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("OUT_DIR", str(tmp_path))
     monkeypatch.setenv("ROUNDS", "1")
     monkeypatch.setenv("RUN_ID", "test_run_123")
-    monkeypatch.setenv("RUN_ID", "test_run_123")
     return tmp_path
 
 def get_runner_classes():
     runners = [PythonLoopRunner]
-    if CppLoopRunner is not None:
-        runners.append(CppLoopRunner)
+    # We always include CppLoopRunner in the params if it was defined (even as dummy)
+    # but the fixture will skip it if the extension is missing.
+    from heidi_engine.loop_runner import CppLoopRunner as CppLR
+    runners.append(CppLR)
     return runners
 
 @pytest.fixture(params=get_runner_classes())
 def runner_class(request, monkeypatch):
-    if CppLoopRunner and request.param == CppLoopRunner:
+    if "CppLoopRunner" in str(request.param):
+        try:
+            import heidi_cpp
+        except ImportError:
+            pytest.skip("heidi_cpp extension not found. Skipping CppLoopRunner tests.")
         monkeypatch.setenv("HEIDI_MOCK_SUBPROCESSES", "1")
     return request.param
 
@@ -64,7 +69,7 @@ def test_loop_runner_full_mode(mock_run, temp_out_dir, mock_telemetry, runner_cl
     assert runner.get_status()["state"] == "IDLE"
     
     # Check that scripts were "called" if using Python
-    if runner_class == PythonLoopRunner:
+    if "PythonLoopRunner" in str(runner_class):
         assert mock_run.call_count == 4
         telemetry.emit_event.assert_called()
 
@@ -86,7 +91,7 @@ def test_loop_runner_collect_mode(mock_run, temp_out_dir, mock_telemetry, monkey
     assert runner.get_status()["state"] == "IDLE"
 
     # Only 2 steps should have run
-    if runner_class == PythonLoopRunner:
+    if "PythonLoopRunner" in str(runner_class):
         assert mock_run.call_count == 2
     
     # Trigger train now
@@ -100,7 +105,7 @@ def test_loop_runner_collect_mode(mock_run, temp_out_dir, mock_telemetry, monkey
     assert runner.get_status()["state"] == "IDLE"
     
     # Now the other 2 steps should have run
-    if runner_class == PythonLoopRunner:
+    if "PythonLoopRunner" in str(runner_class):
         assert mock_run.call_count == 4
 
 @patch('subprocess.run')
@@ -128,8 +133,7 @@ def test_loop_runner_with_tests(mock_run, temp_out_dir, mock_telemetry, monkeypa
     
     assert runner.get_status()["state"] == "IDLE"
 
-    if runner_class == PythonLoopRunner:
+    if "PythonLoopRunner" in str(runner_class):
         assert mock_run.call_count == 5
         tests_call = str(mock_run.mock_calls[2])
         assert "03_unit_test_gate.py" in tests_call
-

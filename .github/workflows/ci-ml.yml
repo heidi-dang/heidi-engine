@@ -44,3 +44,16 @@ JSONL
         run: |
           source .venv/bin/activate
           python .local/ml/scripts/redaction_check.py --file .local/ml/data/train/train.jsonl --file .local/ml/data/eval/val.jsonl
+
+  ci-complete:
+    needs: smoke
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check status
+        run: |
+          if [[ "${{ needs.smoke.result }}" == "success" || "${{ needs.smoke.result }}" == "skipped" ]]; then
+            exit 0
+          else
+            exit 1
+          fi

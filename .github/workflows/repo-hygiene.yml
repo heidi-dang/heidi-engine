@@ -14,3 +14,16 @@ jobs:
             echo "$bad" >&2
             exit 1
           fi
+
+  ci-complete:
+    needs: forbid-venv
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check status
+        run: |
+          if [[ "${{ needs.forbid-venv.result }}" == "success" || "${{ needs.forbid-venv.result }}" == "skipped" ]]; then
+            exit 0
+          else
+            exit 1
+          fi
