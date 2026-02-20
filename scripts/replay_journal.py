@@ -46,10 +46,11 @@ def verify_journal(filepath):
         # Compute next hash: C++ hashes the ENTIRE line including the newline
         expected_hash = hashlib.sha256(line.encode('utf-8')).hexdigest()
 
-        # 2. Schema Validation
-        required_keys = ["event_version", "ts", "run_id", "round", "stage", "level", "event_type", "message", "counters_delta", "usage_delta", "artifact_paths", "prev_hash"]
-        for key in required_keys:
-            assert key in evt, f"Line {i+1}: Missing required schema key '{key}'"
+        # 2. Schema Validation (Lane D: Zero-Trust Hard Lock)
+        from heidi_engine.utils.io_jsonl import REQUIRED_KEYS, SCHEMA_VERSION
+        missing = REQUIRED_KEYS - set(evt.keys())
+        assert not missing, f"Line {i+1}: Missing required schema keys {missing}"
+        assert evt["event_version"] == SCHEMA_VERSION, f"Line {i+1}: Unsupported schema version {evt['event_version']}"
 
         # 3. Deterministic State Progression Simulation
         if evt["event_type"] == "pipeline_start":
