@@ -1,27 +1,43 @@
-#include "engine_daemon.h"
+#include "daemon.h"
 #include <iostream>
 #include <string>
+#include <vector>
+
+void print_usage() {
+    std::cout << "Usage: heidid [options]\n"
+              << "Options:\n"
+              << "  -d, --daemon     Run in the background (detach from terminal)\n"
+              << "  -p, --port       Specify HTTP port (default 8080)\n"
+              << "  -h, --host       Specify HTTP host (default 127.0.0.1)\n"
+              << "  --help           Show this useage message\n";
+}
 
 int main(int argc, char* argv[]) {
-    std::string config_path = "engine_config.yaml";
-    
-    if (argc > 1) {
-        std::string arg1 = argv[1];
-        if (arg1 == "--help" || arg1 == "-h") {
-            std::cout << "Usage: heidid [--config path/to/config.yaml]" << std::endl;
+    heidi::daemon::DaemonConfig config;
+
+    // Really simple argument parsing
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "-d" || arg == "--daemon") {
+            config.detach = true;
+        } else if ((arg == "-p" || arg == "--port") && i + 1 < argc) {
+            config.port = std::stoi(argv[++i]);
+        } else if ((arg == "-h" || arg == "--host") && i + 1 < argc) {
+            config.host = argv[++i];
+        } else if (arg == "--help") {
+            print_usage();
             return 0;
-        }
-        if (argc > 2 && arg1 == "--config") {
-            config_path = argv[2];
+        } else {
+            std::cerr << "Unknown argument: " << arg << "\n";
+            print_usage();
+            return 1;
         }
     }
 
-    try {
-        heidi::EngineDaemon daemon(config_path);
-        daemon.run();
-        return 0;
-    } catch (const std::exception& e) {
-        std::cerr << "[FATAL] Daemon error: " << e.what() << std::endl;
-        return 1;
-    }
+    // Create and start the Daemon
+    heidi::daemon::Daemon daemon(config);
+    daemon.init();
+    daemon.start();
+
+    return 0;
 }
