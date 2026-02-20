@@ -1,0 +1,16 @@
+name: repo-hygiene
+on: [pull_request]
+jobs:
+  forbid-venv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if virtualenv artifacts are tracked
+        run: |
+          set -euo pipefail
+          bad=$(git ls-files | grep -E '(^\\.venv|/\\.venv|^venv|/site-packages/|\\.dist-info/)' || true)
+          if [ -n "$bad" ]; then
+            echo "Tracked virtualenv artifacts detected:" >&2
+            echo "$bad" >&2
+            exit 1
+          fi
