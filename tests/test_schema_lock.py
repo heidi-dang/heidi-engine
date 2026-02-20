@@ -24,7 +24,7 @@ def test_schema_violation_missing_keys(tmp_path):
     bad_jsonl.write_text(json.dumps(bad_data) + "\n")
 
     with pytest.raises(ValueError) as e:
-        load_jsonl(str(bad_jsonl))
+        load_jsonl(str(bad_jsonl), is_journal=True)
     assert (
         "Missing keys" in str(e.value)
         or "schema version" in str(e.value)
@@ -34,8 +34,9 @@ def test_schema_violation_missing_keys(tmp_path):
 
 def test_schema_violation_bad_version(tmp_path):
     bad_jsonl = tmp_path / "bad_version.jsonl"
+    # Unsupported version
     bad_data = {
-        "event_version": "2.0",  # Unsupported
+        "event_version": "2.0",
         "ts": "2026-02-20T10:00:00Z",
         "run_id": "test_001",
         "round": 1,
@@ -51,25 +52,14 @@ def test_schema_violation_bad_version(tmp_path):
     bad_jsonl.write_text(json.dumps(bad_data) + "\n")
 
     with pytest.raises(ValueError) as e:
-        load_jsonl(str(bad_jsonl))
-    assert (
-        "Missing keys" in str(e.value)
-        or "schema version" in str(e.value)
-        or "JSON parsing error" in str(e.value)
-    )
+        load_jsonl(str(bad_jsonl), is_journal=True)
+    assert "Unsupported schema version" in str(e.value) or "JSON parsing error" in str(e.value)
 
 
 def test_schema_violation_oversized(tmp_path):
-    # This specifically tests the Python side's ability to handle JSON load failure
-    # if it were truncated, but Lane D requirement for C++ is more focused on oversized.
-    # Python's json.loads handles large strings fine, but it will exit on any JSON error.
     bad_jsonl = tmp_path / "garbage.jsonl"
     bad_jsonl.write_text("not a json\n")
 
     with pytest.raises(ValueError) as e:
-        load_jsonl(str(bad_jsonl))
-    assert (
-        "Missing keys" in str(e.value)
-        or "schema version" in str(e.value)
-        or "JSON parsing error" in str(e.value)
-    )
+        load_jsonl(str(bad_jsonl), is_journal=True)
+    assert "JSON parsing error" in str(e.value)

@@ -21,9 +21,10 @@ REQUIRED_KEYS = {
 }
 
 
-def load_jsonl(path: str) -> List[Dict[str, Any]]:
+def load_jsonl(path: str, is_journal: bool = False) -> List[Dict[str, Any]]:
     """
-    Load samples from JSONL file with Phase 6 Zero-Trust validation.
+    Load samples from JSONL file.
+    If is_journal=True, enforces Phase 6 Zero-Trust Journal validation (12 keys).
     """
     samples = []
 
@@ -36,18 +37,21 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
             try:
                 sample = json.loads(line)
 
-                # Zero-Trust Validation (Lane D)
-                missing = REQUIRED_KEYS - set(sample.keys())
-                if missing:
-                    print(f"[FATAL] Line {line_num}: Missing keys: {missing}", file=sys.stderr)
-                    raise ValueError(f"Line {line_num}: Missing keys: {missing}")
+                if is_journal:
+                    # Zero-Trust Validation (Lane D)
+                    missing = REQUIRED_KEYS - set(sample.keys())
+                    if missing:
+                        print(f"[FATAL] Line {line_num}: Missing keys: {missing}", file=sys.stderr)
+                        raise ValueError(f"Line {line_num}: Missing keys: {missing}")
 
-                if sample["event_version"] != SCHEMA_VERSION:
-                    print(
-                        f"[FATAL] Line {line_num}: Unsupported schema version {sample['event_version']}",
-                        file=sys.stderr,
-                    )
-                    raise ValueError(f"Line {line_num}: Missing keys: {missing}")
+                    if sample["event_version"] != SCHEMA_VERSION:
+                        print(
+                            f"[FATAL] Line {line_num}: Unsupported schema version {sample['event_version']}",
+                            file=sys.stderr,
+                        )
+                        raise ValueError(
+                            f"Line {line_num}: Unsupported schema version {sample['event_version']}"
+                        )
 
                 samples.append(sample)
             except json.JSONDecodeError as e:
