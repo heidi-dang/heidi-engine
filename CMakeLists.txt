@@ -64,5 +64,5 @@ add_executable(cpp_core_tests
 )
 
 target_include_directories(cpp_core_tests PRIVATE heidi_engine/cpp)
-target_link_libraries(cpp_core_tests PRIVATE gtest_main crypto pthread)
+target_link_libraries(cpp_core_tests PRIVATE gtest_main crypto pthread heidi-metrics)
 add_test(NAME CoreTest COMMAND cpp_core_tests)

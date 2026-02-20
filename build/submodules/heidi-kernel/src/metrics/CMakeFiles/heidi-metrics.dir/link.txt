@@ -1,0 +1,2 @@
+/usr/bin/ar qc libheidi-metrics.a "CMakeFiles/heidi-metrics.dir/sampler.cpp.o"
+/usr/bin/ranlib libheidi-metrics.a

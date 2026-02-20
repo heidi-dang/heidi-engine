@@ -6,6 +6,8 @@
 #include "status_writer.h"
 #include <memory>
 #include <atomic>
+#include <map>
+#include "heidi-kernel/metrics.h"
 
 namespace heidi {
 namespace core {
@@ -32,9 +34,11 @@ private:
     std::unique_ptr<Clock> clock_;
     std::unique_ptr<JournalWriter> journal_;
     std::unique_ptr<StatusWriter> status_;
+    std::unique_ptr<heidi::MetricsSampler> sampler_;
     
     void emit_event(const std::string& event_type, const std::string& message, 
-                    const std::string& stage, const std::string& level = "info");
+                    const std::string& stage, const std::string& level = "info",
+                    const std::map<std::string, int>& usage_delta = {});
     void set_state(const std::string& new_state, const std::string& stage);
     bool run_script(const std::string& script_name, const std::string& stage);
 };

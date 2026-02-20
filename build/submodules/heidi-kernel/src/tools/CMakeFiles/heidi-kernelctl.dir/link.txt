@@ -1,0 +1,1 @@
+/usr/bin/c++ "CMakeFiles/heidi-kernelctl.dir/kernelctl.cpp.o" -o heidi-kernelctl 

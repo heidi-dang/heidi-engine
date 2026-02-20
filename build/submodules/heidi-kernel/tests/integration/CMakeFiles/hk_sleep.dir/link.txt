@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/hk_sleep.dir/__/helpers/hk_sleep.cpp.o -o hk_sleep  ../../src/libheidi-kernel-lib.a 

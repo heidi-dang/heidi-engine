@@ -23,10 +23,12 @@ void Core::init(const std::string& config_path) {
     
     journal_ = std::make_unique<JournalWriter>(journal_path, config_.run_id);
     status_ = std::make_unique<StatusWriter>(status_path);
+    sampler_ = std::make_unique<heidi::MetricsSampler>();
 }
 
 void Core::emit_event(const std::string& event_type, const std::string& message, 
-                      const std::string& stage, const std::string& level) {
+                      const std::string& stage, const std::string& level,
+                      const std::map<std::string, int>& usage_delta) {
     if (!journal_) return;
     
     Event e;
@@ -37,6 +39,7 @@ void Core::emit_event(const std::string& event_type, const std::string& message,
     e.level = level;
     e.event_type = event_type;
     e.message = message;
+    e.usage_delta = usage_delta;
     
     journal_->write(e);
 }
@@ -67,7 +70,18 @@ void Core::start(const std::string& mode) {
 bool Core::run_script(const std::string& script_name, const std::string& stage) {
     if (stop_requested_) return false;
 
+    heidi::SystemMetrics stats_before;
+    if (sampler_) stats_before = sampler_->sample();
+
     if (config_.mock_subprocesses) {
+        std::map<std::string, int> usage;
+        if (sampler_) {
+            heidi::SystemMetrics stats_after = sampler_->sample();
+            int mem_delta_mb = static_cast<int>((stats_before.mem.available - stats_after.mem.available) / 1024);
+            usage["memory_mb_delta"] = mem_delta_mb;
+            usage["cpu_pct"] = static_cast<int>(stats_after.cpu_usage_percent);
+        }
+        emit_event("script_success", script_name + " completed successfully (mocked)", stage, "info", usage);
         return true;
     }
 
@@ -85,13 +99,25 @@ bool Core::run_script(const std::string& script_name, const std::string& stage) 
     
     std::string output;
     try {
-        int status = Subprocess::execute(args, output);
+        int status = Subprocess::execute(args, output, 300); // 300 second hard timeout
+        
+        std::map<std::string, int> usage;
+        if (sampler_) {
+            heidi::SystemMetrics stats_after = sampler_->sample();
+            // Memory in KB converted to MB
+            int mem_delta_mb = static_cast<int>((stats_before.mem.available - stats_after.mem.available) / 1024);
+            usage["memory_mb_delta"] = mem_delta_mb;
+            usage["cpu_pct"] = static_cast<int>(stats_after.cpu_usage_percent);
+        }
+
         if (status != 0) {
             std::string err_msg = script_name + " failed with exit code " + std::to_string(status) + ":\n" + output.substr(0, 200);
-            emit_event("pipeline_error", err_msg, "pipeline", "error");
+            emit_event("pipeline_error", err_msg, "pipeline", "error", usage);
             set_state("ERROR", "error");
             return false;
         }
+        
+        emit_event("script_success", script_name + " completed successfully", stage, "info", usage);
     } catch (const std::exception& e) {
         std::string err_msg = "Subprocess exception for " + script_name + ": " + e.what();
         emit_event("pipeline_error", err_msg, "pipeline", "error");

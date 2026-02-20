@@ -39,6 +39,7 @@ ext_modules = [
             "heidi_engine/cpp/core/mock_provider.cpp",
             "heidi_engine/cpp/core/async_collector.cpp",
             "submodules/heidi-kernel/src/governor/resource_governor.cpp",
+            "submodules/heidi-kernel/src/metrics/sampler.cpp",
         ],
         include_dirs=include_dirs,
         library_dirs=library_dirs,

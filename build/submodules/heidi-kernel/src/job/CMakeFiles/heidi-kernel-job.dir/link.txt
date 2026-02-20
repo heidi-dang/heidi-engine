@@ -1,0 +1,2 @@
+/usr/bin/ar qc libheidi-kernel-job.a "CMakeFiles/heidi-kernel-job.dir/job.cpp.o" "CMakeFiles/heidi-kernel-job.dir/process_inspector_procfs.cpp.o"
+/usr/bin/ranlib libheidi-kernel-job.a

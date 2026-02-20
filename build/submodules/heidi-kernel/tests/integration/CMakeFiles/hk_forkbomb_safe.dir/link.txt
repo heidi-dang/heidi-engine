@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/hk_forkbomb_safe.dir/__/helpers/hk_forkbomb_safe.cpp.o -o hk_forkbomb_safe  ../../src/libheidi-kernel-lib.a 
