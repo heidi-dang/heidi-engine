@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "../heidi_engine/cpp/core/journal_writer.h"
 #include "../heidi_engine/cpp/core/core.h"
+#include <heidi-kernel/resource_governor.h>
 #include <fstream>
 #include <cstdio>
 #include <regex>
@@ -74,4 +75,52 @@ TEST(CoreTest, StateTransitions) {
     Core core;
     // We can't fully run init() without setting OUT_DIR env var, 
     // so we will test what we can or rely on Python testing.
+}
+
+TEST(GovernorTest, HighWatermarks) {
+    heidi::GovernorPolicy policy;
+    policy.cpu_high_watermark_pct = 80.0;
+    policy.mem_high_watermark_pct = 90.0;
+    policy.cooldown_ms = 1000;
+
+    heidi::ResourceGovernor gov(policy);
+
+    // 1. Under limits
+    auto r1 = gov.decide(50.0, 80.0, 1, 0);
+    EXPECT_EQ(r1.decision, heidi::GovernorDecision::START_NOW);
+    EXPECT_EQ(r1.reason, heidi::BlockReason::NONE);
+
+    // 2. CPU Over
+    auto r2 = gov.decide(85.0, 80.0, 1, 0);
+    EXPECT_EQ(r2.decision, heidi::GovernorDecision::HOLD_QUEUE);
+    EXPECT_EQ(r2.reason, heidi::BlockReason::CPU_HIGH);
+    EXPECT_EQ(r2.retry_after_ms, 1000);
+
+    // 3. MEM Over
+    auto r3 = gov.decide(50.0, 95.0, 1, 0);
+    EXPECT_EQ(r3.decision, heidi::GovernorDecision::HOLD_QUEUE);
+    EXPECT_EQ(r3.reason, heidi::BlockReason::MEM_HIGH);
+
+    // 4. Multiple jobs (policy limit is default 10)
+    auto r4 = gov.decide(50.0, 50.0, 11, 0);
+    EXPECT_EQ(r4.decision, heidi::GovernorDecision::HOLD_QUEUE);
+    EXPECT_EQ(r4.reason, heidi::BlockReason::RUNNING_LIMIT);
+}
+
+TEST(JournalWriterTest, StrictSchemaValidation) {
+    // 1. Missing keys
+    std::string bad_json = "{\"event_version\":\"1.0\",\"ts\":\"now\"}";
+    EXPECT_THROW(heidi::core::JournalWriter::validate_strict(bad_json), std::runtime_error);
+
+    // 2. Bad version
+    std::string bad_version = "{\"event_version\":\"2.0\",\"ts\":\"now\",\"run_id\":\"123\",\"round\":1,\"stage\":\"s\",\"level\":\"i\",\"event_type\":\"e\",\"message\":\"m\",\"counters_delta\":{},\"usage_delta\":{},\"artifact_paths\":[],\"prev_hash\":\"h\"}";
+    EXPECT_THROW(heidi::core::JournalWriter::validate_strict(bad_version), std::runtime_error);
+
+    // 3. Oversized
+    std::string oversized(2 * 1024 * 1024, 'a');
+    EXPECT_THROW(heidi::core::JournalWriter::validate_strict(oversized), std::runtime_error);
+
+    // 4. Correct schema
+    std::string good_json = "{\"event_version\":\"1.0\",\"ts\":\"now\",\"run_id\":\"123\",\"round\":1,\"stage\":\"s\",\"level\":\"i\",\"event_type\":\"e\",\"message\":\"m\",\"counters_delta\":{},\"usage_delta\":{},\"artifact_paths\":[],\"prev_hash\":\"h\"}";
+    EXPECT_NO_THROW(heidi::core::JournalWriter::validate_strict(good_json));
 }
