@@ -59,10 +59,13 @@ fi
 
 log "4) replay soak (50x) deterministic chain"
 # Generate a valid journal first
+export OUT_DIR="$RUNTIME/tmp"
+export RUN_ID="soak-$(date +%s)"
 python3 -c "import heidi_cpp; c = heidi_cpp.Core(); c.start('collect'); c.tick(10); c.shutdown()"
+J_FILE="$OUT_DIR/events.jsonl"
 # Replay it 50 times
 for i in $(seq 1 50); do
-  python3 scripts/replay_journal.py journal.jsonl >/dev/null || { error "Replay failed at iter $i"; exit 1; }
+  python3 scripts/replay_journal.py "$J_FILE" >/dev/null || { error "Replay failed at iter $i"; exit 1; }
 done
 log "50x Replay Soak PASSED."
 
