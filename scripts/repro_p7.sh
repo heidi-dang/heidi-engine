@@ -14,6 +14,12 @@ echo "[p7] clone (clean)"
 git clone --filter=blob:none --no-tags "https://github.com/${REPO}.git" repo
 cd repo
 git submodule update --init --recursive
+
+# Patch test file if missing pytest import (workaround for origin/main bug)
+if ! grep -q "^import pytest" tests/test_sec_redteam.py 2>/dev/null; then
+  sed -i '1a import pytest' tests/test_sec_redteam.py
+fi
+
 HEAD_SHA="$(git rev-parse HEAD)"
 echo "HEAD_SHA=$HEAD_SHA"
 
