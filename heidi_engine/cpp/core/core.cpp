@@ -3,6 +3,8 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
+#include <thread>
+#include <chrono>
 
 namespace heidi {
 namespace core {
@@ -24,10 +26,19 @@ void Core::init(const std::string& config_path) {
     journal_ = std::make_unique<JournalWriter>(journal_path, config_.run_id);
     status_ = std::make_unique<StatusWriter>(status_path);
     sampler_ = std::make_unique<heidi::MetricsSampler>();
+    
+    // Set up resource guardrails based on configuration parameters
+    heidi::GovernorPolicy policy;
+    policy.cpu_high_watermark_pct = config_.max_cpu_pct;
+    // Note: Kernel defines RAM constraints via mem available pct, but we want absolute bounds. Note this.
+    // For simplicity, we assume an 8GB nominal test container bounds map to max_mem_pct, but usually this is OS wide.
+    policy.mem_high_watermark_pct = config_.max_mem_pct;
+    
+    governor_ = std::make_unique<heidi::ResourceGovernor>(policy);
 }
 
-void Core::emit_event(const std::string& event_type, const std::string& message, 
-                      const std::string& stage, const std::string& level,
+void Core::emit_event(std::string_view event_type, std::string_view message, 
+                      std::string_view stage, std::string_view level,
                       const std::map<std::string, int>& usage_delta) {
     if (!journal_) return;
     
@@ -35,17 +46,17 @@ void Core::emit_event(const std::string& event_type, const std::string& message,
     e.ts = clock_->now_iso8601();
     e.run_id = config_.run_id;
     e.round = current_round_;
-    e.stage = stage;
-    e.level = level;
-    e.event_type = event_type;
-    e.message = message;
+    e.stage = std::string(stage);
+    e.level = std::string(level);
+    e.event_type = std::string(event_type);
+    e.message = std::string(message);
     e.usage_delta = usage_delta;
     
     journal_->write(e);
 }
 
-void Core::set_state(const std::string& new_state, const std::string& stage) {
-    current_state_ = new_state;
+void Core::set_state(std::string_view new_state, std::string_view stage) {
+    current_state_ = std::string(new_state);
     if (status_) {
         // Simple serialization since we don't have json.hpp handy
         std::ostringstream ss;
@@ -60,6 +71,26 @@ void Core::set_state(const std::string& new_state, const std::string& stage) {
 }
 
 void Core::start(const std::string& mode) {
+    if (stop_requested_) return;
+
+    // Zero-Trust Gatekeeper (Lane C): Refuse REAL mode if insecure
+    if (mode == "full") {
+        if (!governor_) {
+            emit_event("gatekeeper_failed", "REAL mode refused: Resource Governor (guardrails) NOT initialized", "init", "critical");
+            set_state("ERROR", "error");
+            return;
+        }
+
+        // Check for mandatory Zero-Trust environment variables
+        const char* key = std::getenv("HEIDI_SIGNING_KEY");
+        const char* keystore = std::getenv("HEIDI_KEYSTORE_PATH");
+        if (!key || !keystore) {
+             emit_event("gatekeeper_failed", "REAL mode refused: Missing signing key or keystore path (Lane C enforcement)", "init", "critical");
+             set_state("ERROR", "error");
+             return;
+        }
+    }
+
     mode_ = mode;
     current_round_ = 1;
     stop_requested_ = false;
@@ -67,23 +98,57 @@ void Core::start(const std::string& mode) {
     set_state("COLLECTING", "initializing");
 }
 
-bool Core::run_script(const std::string& script_name, const std::string& stage) {
+bool Core::run_script(const std::string& script_name, std::string_view stage) {
     if (stop_requested_) return false;
-
-    heidi::SystemMetrics stats_before;
-    if (sampler_) stats_before = sampler_->sample();
 
     if (config_.mock_subprocesses) {
         std::map<std::string, int> usage;
         if (sampler_) {
-            heidi::SystemMetrics stats_after = sampler_->sample();
-            int mem_delta_kb = static_cast<int>(stats_before.mem.available - stats_after.mem.available);
-            usage["system_mem_available_kb_delta"] = mem_delta_kb;
-            usage["system_cpu_pct"] = static_cast<int>(stats_after.cpu_usage_percent);
+            // Hotpath fix: do not sample /proc/stat in mock mode; use synthetic baseline
+            usage["system_mem_available_kb_delta"] = 1024;
+            usage["system_cpu_pct"] = 5;
         }
         emit_event("script_success", script_name + " completed successfully (mocked)", stage, "info", usage);
         return true;
     }
+
+    // Apply Budget Guardrails check looping until resources clear or timeout
+    double wait_time_sec = 0;
+    heidi::SystemMetrics stats_before;
+    bool has_stats_before = false;
+
+    while (!stop_requested_) {
+        if (sampler_) {
+            stats_before = sampler_->sample();
+            has_stats_before = true;
+        }
+        
+        // Wait gracefully while spikes exist
+        if (governor_ && sampler_) {
+            double mem_pct = 100.0 * (1.0 - static_cast<double>(stats_before.mem.available) / static_cast<double>(stats_before.mem.total));
+            
+            auto decision = governor_->decide(stats_before.cpu_usage_percent, mem_pct, 1, 0); 
+            if (decision.decision == heidi::GovernorDecision::HOLD_QUEUE) {
+                std::string reason_str = "Unknown";
+                if (decision.reason == heidi::BlockReason::CPU_HIGH) reason_str = "CPU spiked > " + std::to_string(config_.max_cpu_pct) + "%";
+                else if (decision.reason == heidi::BlockReason::MEM_HIGH) reason_str = "RAM spiked > " + std::to_string(config_.max_mem_pct) + "%";
+                
+                emit_event("pipeline_throttled", "Delaying script execution: " + reason_str, stage, "warn");
+                std::this_thread::sleep_for(std::chrono::milliseconds(decision.retry_after_ms));
+                wait_time_sec += (decision.retry_after_ms / 1000.0);
+                
+                if (wait_time_sec > (config_.max_wall_time_minutes * 60)) {
+                   emit_event("pipeline_error", "Exceeded maximum global pipeline wall time limits waiting for resources", stage, "error");
+                   set_state("ERROR", "error");
+                   return false; 
+                }
+                continue; 
+            }
+        }
+        break; 
+    }
+    
+    if (stop_requested_) return false;
 
     std::vector<std::string> args;
     args.push_back("python3"); // Assumption: the environment has python3 in PATH
@@ -102,7 +167,7 @@ bool Core::run_script(const std::string& script_name, const std::string& stage) 
         int status = Subprocess::execute(args, output, 300); // 300 second hard timeout
         
         std::map<std::string, int> usage;
-        if (sampler_) {
+        if (sampler_ && has_stats_before) {
             heidi::SystemMetrics stats_after = sampler_->sample();
             int mem_delta_kb = static_cast<int>(stats_before.mem.available - stats_after.mem.available);
             usage["system_mem_available_kb_delta"] = mem_delta_kb;
@@ -111,7 +176,7 @@ bool Core::run_script(const std::string& script_name, const std::string& stage) 
 
         if (status != 0) {
             std::string err_msg = script_name + " failed with exit code " + std::to_string(status) + ":\n" + output.substr(0, 200);
-            emit_event("pipeline_error", err_msg, "pipeline", "error", usage);
+            emit_event("pipeline_error", journal_ ? journal_->sanitize(err_msg) : err_msg, "pipeline", "error", usage);
             set_state("ERROR", "error");
             return false;
         }
