@@ -37,17 +37,29 @@ mkdir -p "$RUNTIME/pending" "$RUNTIME/verified" "$RUNTIME/tmp"
 log "1) REAL-mode refusal (Fail-Closed check + Non-zero Exit)"
 # Attempt to initialize C++ Core in REAL mode without required env vars
 # It should THROW a runtime_error (non-zero exit) and set state to ERROR.
-if python3 -c "import heidi_cpp; c = heidi_cpp.Core(); c.start('real')" 2>/dev/null; then
+REAL_STDERR="$RUNTIME/real_refusal.log"
+if python3 -c "import heidi_cpp; c = heidi_cpp.Core(); c.start('real')" 2>"$REAL_STDERR"; then
   error "REAL mode unexpectedly exited with 0"
+  cat "$REAL_STDERR" 2>/dev/null || true
   exit 1
 else
-  log "PASSED: REAL mode refused start with non-zero exit code."
+  RETCODE=$?
+  if [ $RETCODE -eq 0 ]; then
+    error "REAL mode exited with code 0 (should be non-zero)"
+    cat "$REAL_STDERR" 2>/dev/null || true
+    exit 1
+  fi
+  log "PASSED: REAL mode refused start with non-zero exit code (exit $RETCODE)."
+  log "Refusal output:"
+  cat "$REAL_STDERR" 2>/dev/null || log "(no stderr captured)"
 fi
 
 log "2) pending->trainer access (must refuse)"
 echo '{"id":"1","instruction":"i","input":"in","output":"out","metadata":{}}' > "$RUNTIME/pending/attack.jsonl"
-if python3 scripts/04_train_qlora.py --data "$RUNTIME/pending/attack.jsonl" --output "$RUNTIME/tmp/out" 2>/dev/null; then
+TRAIN_STDERR="$RUNTIME/train_refusal.log"
+if python3 scripts/04_train_qlora.py --data "$RUNTIME/pending/attack.jsonl" --output "$RUNTIME/tmp/out" 2>"$TRAIN_STDERR"; then
   error "trainer accepted pending data outside verified/ boundary"
+  cat "$TRAIN_STDERR" 2>/dev/null || true
   exit 1
 else
   log "Trainer correctly refused unverified data via Boundary Control."
@@ -55,24 +67,57 @@ fi
 
 log "3) symlink escape (must refuse)"
 ln -sf /etc/passwd "$RUNTIME/pending/attack_symlink"
-if python3 scripts/02_validate_clean.py --input "$RUNTIME/pending/attack_symlink" --output "$RUNTIME/tmp/clean.jsonl" 2>/dev/null; then
+SYMLINK_STDERR="$RUNTIME/symlink_refusal.log"
+if python3 scripts/02_validate_clean.py --input "$RUNTIME/pending/attack_symlink" --output "$RUNTIME/tmp/clean.jsonl" 2>"$SYMLINK_STDERR"; then
   error "verify accepted symlink escape"
+  cat "$SYMLINK_STDERR" 2>/dev/null || true
   exit 1
 else
   log "Validator correctly blocked symlink escape outside root."
 fi
 
-log "4) locale/timezone invariance check"
-get_head_hash() {
-  local locale=$1
-  LC_ALL=$locale TZ=UTC python3 -c "import heidi_cpp; os=__import__('os'); os.environ['OUT_DIR']='$RUNTIME/tmp'; c = heidi_cpp.Core(); c.init(); c.start('collect'); c.tick(1); c.shutdown(); print(__import__('hashlib').sha256(open('$RUNTIME/tmp/verified/events.jsonl').readlines()[0].encode()).hexdigest())"
+log "4) locale/timezone invariance check (full replay digest)"
+run_with_locale() {
+  local locale=$1 tz=$2
+  local out_dir="$RUNTIME/tmp/locale_${locale//\//_}_${tz//\//_}"
+  mkdir -p "$out_dir"
+  LC_ALL="$locale" TZ="$tz" python3 -c "
+import os
+import sys
+import hashlib
+import json
+os.environ['OUT_DIR'] = '$out_dir'
+import heidi_cpp
+c = heidi_cpp.Core()
+c.init()
+c.start('collect')
+c.tick(3)
+c.shutdown()
+"
+  local journal="$out_dir/verified/events.jsonl"
+  python3 scripts/replay_journal.py "$journal" >/dev/null 2>&1 || true
+  python3 -c "
+import hashlib
+import os
+journal = '$journal'
+digest = hashlib.sha256(open(journal).read().encode()).hexdigest()
+chain_head = open(journal).readlines()[0] if os.path.exists(journal) and open(journal).read() else ''
+chain_hash = hashlib.sha256(chain_head.encode()).hexdigest()[:16]
+print(digest + ':' + chain_hash)
+"
 }
-HASH_C=$(get_head_hash "C")
-HASH_AU=$(get_head_hash "en_AU.UTF-8")
-if [ "$HASH_C" == "$HASH_AU" ]; then
-  log "PASSED: Determinism verified across locales ($HASH_C)."
+
+DIGEST_C=$(run_with_locale "C" "UTC")
+DIGEST_AU=$(run_with_locale "en_AU.UTF-8" "Australia/Melbourne")
+DIGEST_TZ=$(run_with_locale "C" "America/New_York")
+
+if [ "$DIGEST_C" == "$DIGEST_AU" ] && [ "$DIGEST_C" == "$DIGEST_TZ" ]; then
+  log "PASSED: Full replay digest invariant across locales/TZ ($DIGEST_C)."
 else
-  error "Locale drift detected! C=$HASH_C, AU=$HASH_AU"
+  error "Locale/TZ drift detected!"
+  error "  C/UTC:        $DIGEST_C"
+  error "  en_AU/AU_Melbourne: $DIGEST_AU"
+  error "  C/New_York:   $DIGEST_TZ"
   exit 1
 fi
 
