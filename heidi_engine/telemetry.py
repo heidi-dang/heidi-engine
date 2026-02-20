@@ -208,14 +208,21 @@ def sanitize_for_log(value: Any, max_length: int = MAX_MESSAGE_LENGTH) -> Any:
     Sanitize value for logging.
 
     HOW IT WORKS:
-        - Redacts secrets
+        - Redacts secrets (both in values and dictionary keys)
         - Truncates long strings
         - Converts to safe types
+
+    SECURITY:
+        - Defense in depth: Ensures keys don't leak secrets
     """
     if isinstance(value, str):
         return truncate_string(redact_secrets(value), max_length)
     elif isinstance(value, dict):
-        return {k: sanitize_for_log(v, max_length) for k, v in value.items()}
+        # SECURITY: Sanitize both keys and values in dictionaries
+        return {
+            sanitize_for_log(k, max_length): sanitize_for_log(v, max_length)
+            for k, v in value.items()
+        }
     elif isinstance(value, list):
         return [sanitize_for_log(v, max_length) for v in value]
     elif isinstance(value, (int, float, bool, type(None))):
@@ -338,12 +345,23 @@ def get_run_dir(run_id: Optional[str] = None) -> Path:
         Creates runs/<run_id>/ directory structure.
         All run-specific files go here.
 
-    TUNABLE:
-        - Modify directory structure by changing path construction
+    SECURITY:
+        - Hardened against path traversal by sanitizing run_id
+        - Ensures run_id stays within the runs/ directory
     """
     if run_id is None:
         run_id = get_run_id()
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+
+    # SECURITY: Sanitize run_id to prevent path traversal. Path.name extracts
+    # only the final component, neutralizing absolute or relative path injection.
+    safe_run_id = Path(run_id).name
+
+    # If the resulting name is empty or reference to parent/self, use default or UUID
+    if not safe_run_id or safe_run_id in (".", ".."):
+        # Fallback to get_run_id() which is guaranteed to be safe if not passed in
+        safe_run_id = get_run_id()
+
+    return Path(AUTOTRAIN_DIR) / "runs" / safe_run_id
 
 
 def get_events_path(run_id: Optional[str] = None) -> Path:
@@ -636,7 +654,7 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     HOW IT WORKS:
         - Reads state.json file
         - Returns empty state if file doesn't exist
-    
+
     ARGS:
         run_id: Run to read (defaults to current run)
 
@@ -667,44 +685,44 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
 def resolve_status(state: Dict[str, Any]) -> str:
     """
     Resolve run status from on-disk metadata.
-    
+
     STATUS VALUES:
         - idle: No active run, or run_id present but no events
         - running: Worker active / stop not requested / still processing
         - stopped: stop_requested=true or pipeline complete
         - error: last_error present or health degraded
-    
+
     HOW IT WORKS:
         - Checks stop_requested flag
         - Checks status field
         - Checks for error indicators
-    
+
     ARGS:
         state: State dictionary from state.json
-    
+
     RETURNS:
         Status string: idle, running, stopped, error
     """
     # Explicit stop requested
     if state.get("stop_requested", False):
         return "stopped"
-    
+
     # Check explicit status first
     status = state.get("status", "")
     if status in ("running", "completed", "stopped", "error"):
         return status
-    
+
     # Check for errors
     if state.get("last_error") or state.get("health") == "degraded":
         return "error"
-    
+
     # Check if there's an active run_id but no recent activity
     run_id = state.get("run_id")
     if run_id:
         # Has run_id - check for activity
         counters = state.get("counters", {})
         usage = state.get("usage", {})
-        
+
         # If there's any activity, consider it running
         if counters.get("teacher_generated", 0) > 0:
             return "running"
@@ -712,10 +730,10 @@ def resolve_status(state: Dict[str, Any]) -> str:
             return "running"
         if counters.get("train_step", 0) > 0:
             return "running"
-        
+
         # No activity - idle
         return "idle"
-    
+
     # Default to idle if no run_id
     return "idle"
 
@@ -1121,8 +1139,22 @@ def _rotate_events_log(events_file: Path) -> None:
     HOW IT WORKS:
         - Renames current log to .1, .2, etc.
         - Deletes oldest if over retention limit
+
+    SECURITY:
+        - Validates that rotation only happens within the runs directory
     """
     run_dir = events_file.parent
+
+    # SECURITY: Ensure the rotation only happens within the expected directory
+    expected_root = (Path(AUTOTRAIN_DIR) / "runs").resolve()
+    try:
+        resolved_run_dir = run_dir.resolve()
+        # Verify that resolved_run_dir is either the expected_root or a subdirectory of it
+        if expected_root != resolved_run_dir and expected_root not in resolved_run_dir.parents:
+            print(f"[ERROR] Security violation: Attempted rotation in {run_dir}", file=sys.stderr)
+            return
+    except Exception:
+        return
 
     # Remove oldest if at limit
     oldest = run_dir / f"events.jsonl.{EVENT_LOG_RETENTION}"
@@ -1349,15 +1381,18 @@ def start_http_server(port: int = 7779) -> None:
         return None
 
     def redact_state(state: Dict[str, Any]) -> Dict[str, Any]:
-        """Redact state to only allowed fields."""
+        """
+        Redact state to only allowed fields and sanitize for secrets.
+
+        SECURITY:
+            - Uses allowlist for fields
+            - Applies sanitize_for_log to all fields recursively
+        """
         redacted = {}
         for key in ALLOWED_STATUS_FIELDS:
             if key in state:
-                value = state[key]
-                # Sanitize any nested secrets
-                if isinstance(value, dict):
-                    value = {k: sanitize_for_log(v, 100) for k, v in value.items()}
-                redacted[key] = value
+                # SECURITY: Apply full sanitization to all allowed fields
+                redacted[key] = sanitize_for_log(state[key], 1000)
         return redacted
 
     class StateHandler(BaseHTTPRequestHandler):
@@ -1497,7 +1532,7 @@ def main():
         python -m heidi_engine.telemetry emit <type> <message>
     """
     import argparse
-    
+
     parser = argparse.ArgumentParser(prog="heidi-engine telemetry")
     subparsers = parser.add_subparsers(dest="command")
 

@@ -113,6 +113,16 @@ class TestSecretRedaction:
         assert "ghp_" not in str(sanitized)
         assert "sk-" not in str(sanitized)
 
+    def test_sanitize_secrets_in_keys(self):
+        """Test that secrets in dictionary keys are also redacted."""
+        secret_key = "sk-1111122222333334444455555"
+        data = {secret_key: "some value"}
+        sanitized = sanitize_for_log(data)
+
+        # The key itself should be redacted in the resulting dict
+        assert secret_key not in sanitized
+        assert "[OPENAI_KEY]" in sanitized
+
     def test_sanitize_truncation(self):
         """Test that long strings are truncated."""
         long_text = "a" * 1000
