@@ -43,15 +43,9 @@ int Subprocess::execute(const std::vector<std::string>& args, std::string& outpu
         }
         c_args.push_back(nullptr);
 
-<<<<<<< HEAD
         setpgid(0, 0);
         execvp(c_args[0], c_args.data());
         // If execvp returns, it must have failed
-=======
-        execvp(c_args[0], c_args.data());
-        // If execvp returns, it must have failed
-        // Use _exit() to avoid flushing parent buffers in child
->>>>>>> origin/main
         _exit(127);
     } else {
         // Parent process
@@ -111,13 +105,8 @@ int Subprocess::execute(const std::vector<std::string>& args, std::string& outpu
         close(pipefd[0]);
 
         if (timed_out) {
-<<<<<<< HEAD
             // Hardening: Graceful termination attempt
             kill(-pid, SIGTERM);
-=======
-            // Hardening: Graceful termination attempt using killpg for process trees
-            killpg(pid, SIGTERM);
->>>>>>> origin/main
             
             // Give it 2 seconds to shut down gracefully
             for (int i = 0; i < 20; ++i) { // 20 * 100ms = 2 seconds
@@ -139,19 +128,11 @@ int Subprocess::execute(const std::vector<std::string>& args, std::string& outpu
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
             
-<<<<<<< HEAD
             // Hardening: Absolute enforcement
             kill(-pid, SIGKILL);
             int status;
             waitpid(pid, &status, 0); // Blocking wait for SIGKILLed process
             output += "\n[HEIDI-CORE] Process group hung and was forcefully SIGKILLed.";
-=======
-            // Hardening: Absolute enforcement using killpg for process trees
-            killpg(pid, SIGKILL);
-            int status;
-            waitpid(pid, &status, 0); // Blocking wait for SIGKILLed process
-            output += "\n[HEIDI-CORE] Process hung and was forcefully SIGKILLed.";
->>>>>>> origin/main
             return -1; // Killed execution
         }
 

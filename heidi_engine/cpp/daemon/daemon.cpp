@@ -10,21 +10,6 @@
 namespace heidi {
 namespace daemon {
 
-<<<<<<< HEAD
-=======
-static std::function<void()> g_shutdown_callback;
-
-static void signal_handler(int sig) {
-    if (sig == SIGTERM || sig == SIGINT) {
-        std::cout << "Received signal " << sig << ", initiating graceful shutdown..." << std::endl;
-        if (g_shutdown_callback) {
-            g_shutdown_callback();
-        }
-        exit(0);
-    }
-}
-
->>>>>>> origin/main
 Daemon::Daemon(const DaemonConfig& config)
     : config_(config), 
       svr_(std::make_unique<httplib::Server>()),
@@ -38,25 +23,9 @@ Daemon::~Daemon() {
 void Daemon::init() {
     core_->init();
     setup_routes();
-<<<<<<< HEAD
 }
 
 void Daemon::setup_routes() {
-=======
-    
-    // Register signal handlers for graceful shutdown
-    g_shutdown_callback = [this]() { this->stop(); };
-    std::signal(SIGTERM, signal_handler);
-    std::signal(SIGINT, signal_handler);
-}
-
-void Daemon::setup_routes() {
-    // Health check endpoint
-    svr_->Get("/health", [](const httplib::Request&, httplib::Response& res) {
-        res.set_content("{\"status\":\"ok\"}", "application/json");
-    });
-    
->>>>>>> origin/main
     // Basic status endpoint serving JSON representation of Core state
     svr_->Get("/api/v1/status", [this](const httplib::Request&, httplib::Response& res) {
         std::string status_json = core_->get_status_json();

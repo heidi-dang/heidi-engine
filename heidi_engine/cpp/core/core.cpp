@@ -3,11 +3,8 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
-<<<<<<< HEAD
 #include <thread>
 #include <chrono>
-=======
->>>>>>> origin/main
 
 namespace heidi {
 namespace core {
@@ -28,7 +25,6 @@ void Core::init(const std::string& config_path) {
     
     journal_ = std::make_unique<JournalWriter>(journal_path, config_.run_id);
     status_ = std::make_unique<StatusWriter>(status_path);
-<<<<<<< HEAD
     sampler_ = std::make_unique<heidi::MetricsSampler>();
     
     // Set up resource guardrails based on configuration parameters
@@ -44,41 +40,23 @@ void Core::init(const std::string& config_path) {
 void Core::emit_event(std::string_view event_type, std::string_view message, 
                       std::string_view stage, std::string_view level,
                       const std::map<std::string, int>& usage_delta) {
-=======
-}
-
-void Core::emit_event(const std::string& event_type, const std::string& message, 
-                      const std::string& stage, const std::string& level) {
->>>>>>> origin/main
     if (!journal_) return;
     
     Event e;
     e.ts = clock_->now_iso8601();
     e.run_id = config_.run_id;
     e.round = current_round_;
-<<<<<<< HEAD
     e.stage = std::string(stage);
     e.level = std::string(level);
     e.event_type = std::string(event_type);
     e.message = std::string(message);
     e.usage_delta = usage_delta;
-=======
-    e.stage = stage;
-    e.level = level;
-    e.event_type = event_type;
-    e.message = message;
->>>>>>> origin/main
     
     journal_->write(e);
 }
 
-<<<<<<< HEAD
 void Core::set_state(std::string_view new_state, std::string_view stage) {
     current_state_ = std::string(new_state);
-=======
-void Core::set_state(const std::string& new_state, const std::string& stage) {
-    current_state_ = new_state;
->>>>>>> origin/main
     if (status_) {
         // Simple serialization since we don't have json.hpp handy
         std::ostringstream ss;
@@ -93,7 +71,6 @@ void Core::set_state(const std::string& new_state, const std::string& stage) {
 }
 
 void Core::start(const std::string& mode) {
-<<<<<<< HEAD
     if (stop_requested_) return;
 
     // Zero-Trust Gatekeeper (Lane C): Refuse REAL mode if insecure
@@ -132,8 +109,6 @@ void Core::start(const std::string& mode) {
         }
     }
 
-=======
->>>>>>> origin/main
     mode_ = mode;
     current_round_ = 1;
     stop_requested_ = false;
@@ -141,7 +116,6 @@ void Core::start(const std::string& mode) {
     set_state("COLLECTING", "initializing");
 }
 
-<<<<<<< HEAD
 bool Core::run_script(const std::string& script_name, std::string_view stage) {
     if (mode_ == "full" && current_state_ == "IDLE") {
         emit_event("gatekeeper_violation", "Attempted to run script in REAL mode without start()", "execution", "critical");
@@ -204,21 +178,6 @@ bool Core::run_script(const std::string& script_name, std::string_view stage) {
     // Use explicit repo_root instead of assuming cwd
     std::string script_path = config_.repo_root + "/scripts/" + script_name;
     args.push_back(script_path);
-=======
-bool Core::run_script(const std::string& script_name, const std::string& stage) {
-    if (stop_requested_) return false;
-
-    if (config_.mock_subprocesses) {
-        return true;
-    }
-
-    std::vector<std::string> args;
-    args.push_back("python3"); // Assumption: the environment has python3 in PATH
-    
-    // Simplification for brevity in cpp orchestrator: we just pass args 
-    // We assume cwd is the repo root for now.
-    args.push_back("scripts/" + script_name);
->>>>>>> origin/main
     
     // Map current parameters that the script needs.
     // In full implementation we might pass `--output` etc.
@@ -227,7 +186,6 @@ bool Core::run_script(const std::string& script_name, const std::string& stage) 
     
     std::string output;
     try {
-<<<<<<< HEAD
         int status = Subprocess::execute(args, output, 300); // 300 second hard timeout
         
         std::map<std::string, int> usage;
@@ -246,15 +204,6 @@ bool Core::run_script(const std::string& script_name, const std::string& stage) 
         }
         
         emit_event("script_success", script_name + " completed successfully", stage, "info", usage);
-=======
-        int status = Subprocess::execute(args, output);
-        if (status != 0) {
-            std::string err_msg = script_name + " failed with exit code " + std::to_string(status) + ":\n" + output.substr(0, 200);
-            emit_event("pipeline_error", err_msg, "pipeline", "error");
-            set_state("ERROR", "error");
-            return false;
-        }
->>>>>>> origin/main
     } catch (const std::exception& e) {
         std::string err_msg = "Subprocess exception for " + script_name + ": " + e.what();
         emit_event("pipeline_error", err_msg, "pipeline", "error");

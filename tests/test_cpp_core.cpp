@@ -1,11 +1,8 @@
 #include <gtest/gtest.h>
 #include "../heidi_engine/cpp/core/journal_writer.h"
 #include "../heidi_engine/cpp/core/core.h"
-<<<<<<< HEAD
 #include "../heidi_engine/cpp/core/manifest.h"
 #include <heidi-kernel/resource_governor.h>
-=======
->>>>>>> origin/main
 #include <fstream>
 #include <cstdio>
 #include <regex>
@@ -80,7 +77,6 @@ TEST(CoreTest, StateTransitions) {
     // We can't fully run init() without setting OUT_DIR env var, 
     // so we will test what we can or rely on Python testing.
 }
-<<<<<<< HEAD
 
 TEST(GovernorTest, HighWatermarks) {
     heidi::GovernorPolicy policy;
@@ -169,5 +165,3 @@ TEST(SignatureTest, HMACVerification) {
     // Negative test: tampered data
     EXPECT_FALSE(heidi::core::SignatureUtil::verify(data + " ", sig, key));
 }
-=======
->>>>>>> origin/main
