@@ -16,7 +16,17 @@ include_directories(
 # Build heidid daemon
 add_executable(heidid
     heidi_engine/cpp/daemon/main.cpp
-    heidi_engine/cpp/daemon/engine_daemon.cpp
+    heidi_engine/cpp/daemon/daemon.cpp
+    heidi_engine/cpp/core/core.cpp
+    heidi_engine/cpp/core/clock.cpp
+    heidi_engine/cpp/core/config.cpp
+    heidi_engine/cpp/core/journal_writer.cpp
+    heidi_engine/cpp/core/run_id.cpp
+    heidi_engine/cpp/core/status_writer.cpp
+    heidi_engine/cpp/core/subprocess.cpp
+    heidi_engine/cpp/core/mock_provider.cpp
+    heidi_engine/cpp/core/async_collector.cpp
+    heidi_engine/cpp/core/manifest.cpp
 )
 
 target_link_libraries(heidid
@@ -27,6 +37,8 @@ target_link_libraries(heidid
         heidi-kernel-governor
         heidi-kernel-lib
         z
+        crypto
+        pthread
 )
 
 # Optional: Build Python extension using CMake if desired, 
@@ -34,3 +46,25 @@ target_link_libraries(heidid
 
 # Output binary to bin directory
 set_target_properties(heidid PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+# Add Tests
+enable_testing()
+# C++ Core Unit Tests
+add_executable(cpp_core_tests
+    tests/test_cpp_core.cpp
+    tests/test_cpp_async.cpp
+    heidi_engine/cpp/core/clock.cpp
+    heidi_engine/cpp/core/run_id.cpp
+    heidi_engine/cpp/core/config.cpp
+    heidi_engine/cpp/core/journal_writer.cpp
+    heidi_engine/cpp/core/status_writer.cpp
+    heidi_engine/cpp/core/subprocess.cpp
+    heidi_engine/cpp/core/mock_provider.cpp
+    heidi_engine/cpp/core/async_collector.cpp
+    heidi_engine/cpp/core/core.cpp
+    heidi_engine/cpp/core/manifest.cpp
+)
+
+target_include_directories(cpp_core_tests PRIVATE heidi_engine/cpp)
+target_link_libraries(cpp_core_tests PRIVATE gtest_main crypto pthread heidi-metrics heidi-kernel-governor)
+add_test(NAME CoreTest COMMAND cpp_core_tests)

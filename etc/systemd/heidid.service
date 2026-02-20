@@ -1,0 +1,35 @@
+[Unit]
+Description=Heidi Engine Orchestration Daemon (heidid)
+After=network.target
+
+[Service]
+Type=simple
+# We execute heidid without daemonize (-f foreground) since systemd prefers managing backgrounding itself
+ExecStart=/opt/heidi-engine/bin/heidid
+
+# Environment variables overriding Config
+Environment="HEIDI_REPO_ROOT=/opt/heidi-engine"
+Environment="OUT_DIR=/var/run/heidi-engine"
+Environment="MAX_WALL_TIME_MINUTES=120"
+Environment="MAX_CPU_PCT=95.0"
+Environment="MAX_MEM_PCT=90.0"
+
+# Explicit WorkingDirectory so scripts don't break
+WorkingDirectory=/opt/heidi-engine
+
+# Security / Hardening bounds inside systemd
+Restart=always
+RestartSec=5
+User=heidi
+Group=heidi
+LimitNOFILE=65535
+TimeoutStopSec=10
+KillMode=mixed
+KillSignal=SIGTERM
+
+# Capability bounds
+NoNewPrivileges=yes
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

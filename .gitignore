@@ -107,6 +107,18 @@ tensorboard/
 # -----------------------------------------------------------------------------
 tmp/
 temp/
-*.tmp
-autotrain_repos/
-.venv3/
+# -----------------------------------------------------------------------------
+# BUILD ARTIFACTS
+# -----------------------------------------------------------------------------
+build/
+bin/
+heidid
+*.so
+*.a
+*.o
+*.d
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+CTestTestfile.cmake

@@ -31,7 +31,7 @@ EVENT SCHEMA (v1.0 - FROZEN):
         "counters_delta": {},
         "usage_delta": {},
         "artifact_paths": [],
-        "error": "error message if level=error (truncated)"
+        "prev_hash": "checksum of previous event"
     }
 
 STATE SCHEMA (state.json):
@@ -127,7 +127,7 @@ ALLOWED_EVENT_FIELDS: Set[str] = {
     "counters_delta",
     "usage_delta",
     "artifact_paths",
-    "error",
+    "prev_hash",
 }
 
 # Allowed fields for HTTP status response (redacted, no secrets)

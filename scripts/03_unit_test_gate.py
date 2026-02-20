@@ -47,7 +47,18 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from heidi_engine.utils.io_jsonl import load_jsonl, save_jsonl  # noqa: E402
+from heidi_engine.utils.io_jsonl import load_jsonl, save_jsonl
+from heidi_engine.utils.security_util import enforce_containment
+
+def enforce_strict_clean_schema(sample: Dict[str, Any]):
+    """Lane D: Strict Schema enforcement."""
+    REQUIRED = {"id", "instruction", "input", "output", "metadata", "validation"}
+    missing = REQUIRED - set(sample.keys())
+    if missing:
+        raise ValueError(f"Missing required keys: {missing}")
+    unknown = set(sample.keys()) - REQUIRED
+    if unknown:
+        raise ValueError(f"Unknown keys: {unknown}")
 
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
@@ -357,7 +368,17 @@ def main():
     print(f"[INFO] Loading samples from: {args.input}")
 
     # Load samples
+    enforce_containment(args.input, os.getcwd())
+    enforce_containment(args.output, os.getcwd())
     samples = load_jsonl(args.input)
+    
+    for sample in samples:
+        try:
+            enforce_strict_clean_schema(sample)
+        except ValueError as e:
+            print(f"[FATAL] Schema violation: {e}", file=sys.stderr)
+            sys.exit(1)
+            
     print(f"[INFO] Loaded {len(samples)} samples")
 
     # Create base temp directory

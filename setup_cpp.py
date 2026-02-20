@@ -22,12 +22,24 @@ if cuda_home and os.path.exists(os.path.join(cuda_home, "include/cuda_runtime.h"
     macros.append(("HAS_CUDA", "1"))
     print(f"[INFO] CUDA detected at {cuda_home}")
 
+libraries.append("crypto")  # Explicitly require openssl crypto for SHA256
+
 ext_modules = [
     Pybind11Extension(
         "heidi_cpp",
         [
             "heidi_engine/cpp/heidi_cpp.cpp",
+            "heidi_engine/cpp/core/clock.cpp",
+            "heidi_engine/cpp/core/config.cpp",
+            "heidi_engine/cpp/core/core.cpp",
+            "heidi_engine/cpp/core/journal_writer.cpp",
+            "heidi_engine/cpp/core/run_id.cpp",
+            "heidi_engine/cpp/core/status_writer.cpp",
+            "heidi_engine/cpp/core/subprocess.cpp",
+            "heidi_engine/cpp/core/mock_provider.cpp",
+            "heidi_engine/cpp/core/async_collector.cpp",
             "submodules/heidi-kernel/src/governor/resource_governor.cpp",
+            "submodules/heidi-kernel/src/metrics/sampler.cpp",
         ],
         include_dirs=include_dirs,
         library_dirs=library_dirs,

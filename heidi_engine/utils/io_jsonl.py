@@ -4,14 +4,16 @@ import sys
 from typing import Any, Dict, List
 
 
+SCHEMA_VERSION = "1.0"
+REQUIRED_KEYS = {
+    "event_version", "ts", "run_id", "round", "stage", "level", 
+    "event_type", "message", "counters_delta", "usage_delta", 
+    "artifact_paths", "prev_hash"
+}
+
 def load_jsonl(path: str) -> List[Dict[str, Any]]:
     """
-    Load samples from JSONL file.
-
-    HOW IT WORKS:
-        - Reads one JSON object per line
-        - Skips empty lines
-        - Reports parse errors with line numbers
+    Load samples from JSONL file with Phase 6 Zero-Trust validation.
     """
     samples = []
 
@@ -23,10 +25,21 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
             try:
                 sample = json.loads(line)
+                
+                # Zero-Trust Validation (Lane D)
+                missing = REQUIRED_KEYS - set(sample.keys())
+                if missing:
+                    print(f"[FATAL] Line {line_num}: Missing keys: {missing}", file=sys.stderr)
+                    sys.exit(1)
+                
+                if sample["event_version"] != SCHEMA_VERSION:
+                    print(f"[FATAL] Line {line_num}: Unsupported schema version {sample['event_version']}", file=sys.stderr)
+                    sys.exit(1)
+                
                 samples.append(sample)
             except json.JSONDecodeError as e:
-                print(f"[WARN] Line {line_num}: JSON parse error: {e}", file=sys.stderr)
-                continue
+                print(f"[FATAL] Line {line_num}: JSON parse error: {e}", file=sys.stderr)
+                sys.exit(1)
 
     return samples
 

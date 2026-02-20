@@ -66,7 +66,11 @@ try:
 except ImportError:
     HAS_SECURITY_VALIDATOR = False
 
-from heidi_engine.utils.io_jsonl import load_jsonl, save_jsonl  # noqa: E402
+from heidi_engine.utils.io_jsonl import load_jsonl, save_jsonl
+from heidi_engine.utils.security_util import enforce_containment
+
+# Lane B: Boundary Control
+ALLOWED_BASE = os.getcwd() # Or explicitly verified/pending via config
 
 SKIP_PROVENANCE = os.environ.get("SKIP_PROVENANCE_CHECK", "").lower() in ("1", "true", "yes")
 
@@ -185,30 +189,17 @@ Examples:
     return parser.parse_args()
 
 
-def validate_schema(sample: Dict[str, Any]) -> Tuple[bool, str]:
-    """
-    Validate that sample has all required fields.
-
-    HOW IT WORKS:
-        - Checks each required field exists
-        - Verifies field types are strings (for text fields)
-
-    TUNABLE:
-        - Add/remove required fields
-        - Add type checking
-    """
-    for field in REQUIRED_FIELDS:
-        if field not in sample:
-            return False, f"missing required field: {field}"
-
-        # Check text fields are strings
-        if field in ["instruction", "input", "output"]:
-            if not isinstance(sample[field], str):
-                return False, f"field {field} is not a string"
-            if len(sample[field].strip()) == 0:
-                return False, f"field {field} is empty"
-
     return True, "ok"
+
+def enforce_strict_clean_schema(sample: Dict[str, Any]):
+    """Lane D: Strict Schema enforcement."""
+    REQUIRED = {"id", "instruction", "input", "output", "metadata"}
+    missing = REQUIRED - set(sample.keys())
+    if missing:
+        raise ValueError(f"Missing required keys: {missing}")
+    unknown = set(sample.keys()) - REQUIRED
+    if unknown:
+        raise ValueError(f"Unknown keys: {unknown}")
 
 
 def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
@@ -425,6 +416,8 @@ def main():
     args = parse_args()
 
     print(f"[INFO] Loading samples from: {args.input}")
+    enforce_containment(args.input, os.getcwd())
+    enforce_containment(args.output, os.getcwd())
 
     # Load raw samples
     raw_samples = load_jsonl(args.input)
@@ -435,6 +428,12 @@ def main():
     dropped_reasons: dict = {}
 
     for sample in raw_samples:
+        try:
+            enforce_strict_clean_schema(sample)
+        except ValueError as e:
+            print(f"[FATAL] Schema violation: {e}", file=sys.stderr)
+            sys.exit(1)
+
         processed, reason = process_sample(
             sample,
             max_input=args.max_input,

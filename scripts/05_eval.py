@@ -47,6 +47,8 @@ from typing import Any, Dict, List, Optional, Tuple
 # Add project root to sys.path to allow importing heidi_engine
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from heidi_engine.utils.security_util import enforce_containment
+
 
 def parse_args() -> argparse.Namespace:
     """
@@ -411,8 +413,8 @@ def main():
     Main entry point for evaluation.
     """
     args = parse_args()
-
-    print(f"[INFO] Loading evaluation data from: {args.data}")
+    enforce_containment(args.data, os.path.join(os.getcwd(), "verified"))
+    enforce_containment(args.output, os.path.join(os.getcwd(), "eval"))
     eval_data = load_eval_data(args.data, args.num_samples)
     print(f"[INFO] Loaded {len(eval_data)} samples")
 

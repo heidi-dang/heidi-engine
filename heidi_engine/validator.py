@@ -49,7 +49,7 @@ def _validate_python(code: str) -> bool:
 
 def _validate_cpp(code: str) -> bool:
     if not shutil.which("g++"):
-        return True # Skip if compiler not found
+        raise RuntimeError("Zero-Trust Violation: g++ compiler not found. Verification mandatory.") # Enforcement
 
     with tempfile.NamedTemporaryFile(suffix=".cpp", mode="w", delete=False) as f:
         f.write(code)
@@ -70,7 +70,7 @@ def _validate_cpp(code: str) -> bool:
 
 def _validate_go(code: str) -> bool:
     if not shutil.which("go"):
-        return True
+        raise RuntimeError("Zero-Trust Violation: go compiler not found. Verification mandatory.")
 
     with tempfile.NamedTemporaryFile(suffix=".go", mode="w", delete=False) as f:
         # Unpack code into main package if needed, or just write it
@@ -94,7 +94,7 @@ def _validate_go(code: str) -> bool:
 
 def _validate_javascript(code: str) -> bool:
     if not shutil.which("node"):
-        return True
+        raise RuntimeError("Zero-Trust Violation: node not found. Verification mandatory.")
 
     with tempfile.NamedTemporaryFile(suffix=".js", mode="w", delete=False) as f:
         f.write(code)
