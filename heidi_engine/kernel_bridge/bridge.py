@@ -9,8 +9,7 @@ import threading
 from typing import Dict, Any, Optional
 from .config import KernelBridgeConfig
 from .result import KernelBridgeResult, KernelBridgeStatus
-from .transport import Transport
-from .null_transport import NullTransport
+from .transport_factory import create_transport
 from ..telemetry import emit_event
 
 
@@ -19,26 +18,12 @@ class KernelBridge:
     
     def __init__(self, config: Optional[KernelBridgeConfig] = None):
         self.config = config or KernelBridgeConfig.from_env()
-        self._transport: Optional[Transport] = None
+        self._transport = None
         self._lock = threading.Lock()
         self._semaphore = threading.Semaphore(self.config.max_inflight)
         
-        # Initialize transport based on configuration
-        if self.config.enabled:
-            self._init_transport()
-        else:
-            self._transport = NullTransport(self.config)
-    
-    def _init_transport(self) -> None:
-        """Initialize the appropriate transport."""
-        if self.config.endpoint.startswith('unix://'):
-            from .unix_transport import UnixSocketTransport
-            self._transport = UnixSocketTransport(self.config)
-        elif self.config.endpoint.startswith(('http://', 'https://')):
-            from .http_transport import HttpTransport
-            self._transport = HttpTransport(self.config)
-        else:
-            raise ValueError(f"Unsupported endpoint: {self.config.endpoint}")
+        # Initialize transport using factory
+        self._transport = create_transport(self.config)
     
     def is_available(self) -> bool:
         """Check if kernel bridge is available."""
@@ -54,7 +39,11 @@ class KernelBridge:
         """Make a call to the kernel daemon."""
         if not self.config.enabled:
             # Use null transport
-            return NullTransport(self.config).call(method, params or {})
+            from .null_transport import NullTransport
+            result = NullTransport(self.config).call(method, params or {})
+            # Emit telemetry for null transport
+            self._emit_telemetry(method, result, 0)
+            return result
         
         if not self._transport:
             return KernelBridgeResult.unavailable_result("Transport not initialized")

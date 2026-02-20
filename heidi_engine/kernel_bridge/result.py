@@ -6,7 +6,6 @@ Result types and status enums for kernel bridge operations.
 
 from enum import Enum
 from typing import Any, Dict, Optional
-from pydantic import BaseModel
 
 
 class KernelBridgeStatus(Enum):
@@ -18,28 +17,30 @@ class KernelBridgeStatus(Enum):
     INVALID_REQUEST = "invalid_request"
 
 
-class KernelBridgeResult(BaseModel):
+class KernelBridgeResult:
     """Result from kernel bridge operation."""
     
-    status: KernelBridgeStatus
-    success: bool
-    reason: Optional[str] = None
-    latency_ms: Optional[int] = None
-    payload_size: Optional[int] = None
-    payload: Optional[Dict[str, Any]] = None
-    error_code: Optional[str] = None
-    retry_count: int = 0
+    def __init__(self, status: KernelBridgeStatus, success: bool, **kwargs):
+        self.status = status
+        self.success = success
+        self.reason = kwargs.get('reason')
+        self.latency_ms = kwargs.get('latency_ms')
+        self.payload_size = kwargs.get('payload_size')
+        self.payload = kwargs.get('payload')
+        self.error_code = kwargs.get('error_code')
+        self.retry_count = kwargs.get('retry_count', 0)
     
     @classmethod
     def success_result(cls, payload: Optional[Dict[str, Any]] = None, 
                        latency_ms: Optional[int] = None) -> 'KernelBridgeResult':
         """Create a successful result."""
+        payload_size = len(str(payload).encode()) if payload else 0
         return cls(
             status=KernelBridgeStatus.OK,
             success=True,
             payload=payload,
             latency_ms=latency_ms,
-            payload_size=len(str(payload).encode()) if payload else 0
+            payload_size=payload_size
         )
     
     @classmethod
@@ -76,3 +77,16 @@ class KernelBridgeResult(BaseModel):
             success=False,
             reason=reason
         )
+    
+    def dict(self) -> Dict[str, Any]:
+        """Convert result to dictionary."""
+        return {
+            'status': self.status.value,
+            'success': self.success,
+            'reason': self.reason,
+            'latency_ms': self.latency_ms,
+            'payload_size': self.payload_size,
+            'payload': self.payload,
+            'error_code': self.error_code,
+            'retry_count': self.retry_count
+        }

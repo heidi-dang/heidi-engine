@@ -10,8 +10,8 @@ import struct
 import threading
 import json
 from typing import Dict, Any, Optional
-from ...result import KernelBridgeResult, KernelBridgeStatus
-from ...transport import Transport
+from ..result import KernelBridgeResult, KernelBridgeStatus
+from ..transport import Transport
 
 
 class UnixSocketTransport(Transport):
