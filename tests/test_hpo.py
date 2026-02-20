@@ -1,6 +1,7 @@
 import os
 import json
 import unittest
+import pytest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 import sys
@@ -61,12 +62,7 @@ class TestHPO(unittest.TestCase):
         mock_run.assert_called_once()
 
     def test_run_trial_low_vram(self):
-        try:
-            import heidi_cpp
-        except ImportError:
-            import unittest
-
-            raise unittest.SkipTest("heidi_cpp extension not built")
+        pytest.importorskip("heidi_cpp", reason="C++ extension not available on this CI lane")
 
         with patch("heidi_cpp.get_free_gpu_memory") as mock_gpu:
             # Mock low VRAM

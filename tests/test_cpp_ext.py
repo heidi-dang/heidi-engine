@@ -1,19 +1,14 @@
-try:
-    import heidi_cpp
-except ImportError:
-    import sys
+import pytest
 
-    pytest = sys.modules.get("pytest")
-    if pytest is not None:
-        pytest.skip("heidi_cpp extension not built", allow_module_level=True)
-    else:
-        raise ImportError("heidi_cpp extension not built and pytest not available")
+heidi_cpp = pytest.importorskip(
+    "heidi_cpp",
+    reason="C++ extension not available on this CI lane",
+)
 
 import time
 import random
 import sys
 import numpy as np
-import pytest
 
 
 def benchmark_dedupe():
