@@ -46,15 +46,21 @@ if(NOT TARGET CURL::libcurl AND NOT DEFINED PC_CURL_INCLUDE_DIRS)
 endif()
 
 # Add heidi-kernel as a subdirectory
+
 add_subdirectory(submodules/heidi-kernel)
 
-# Include directories
+# Include directories (for sources not in a target yet)
 include_directories(
     heidi_engine/cpp/include
     heidi_engine/cpp/core
     submodules/heidi-kernel/include
     deps/include
 )
+
+## Create a reusable core library so tests and binaries link against
+## a single authoritative set of object files. This prevents symbol
+## drift when tests list source files manually.
+
 
 # Build heidid daemon
 add_executable(heidid
@@ -106,31 +112,63 @@ endif()
 # Output binary to bin directory
 set_target_properties(heidid PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
+# heidi_core: single static library containing core implementation
+add_library(heidi_core STATIC
+    heidi_engine/cpp/core/core.cpp
+    heidi_engine/cpp/core/clock.cpp
+    heidi_engine/cpp/core/config.cpp
+    heidi_engine/cpp/core/journal_writer.cpp
+    heidi_engine/cpp/core/run_id.cpp
+    heidi_engine/cpp/core/status_writer.cpp
+    heidi_engine/cpp/core/subprocess.cpp
+    heidi_engine/cpp/core/mock_provider.cpp
+    heidi_engine/cpp/core/async_collector.cpp
+    heidi_engine/cpp/core/manifest.cpp
+    heidi_engine/cpp/core/provider.cpp
+)
+
+target_include_directories(heidi_core PUBLIC
+    heidi_engine/cpp
+)
+
+target_link_libraries(heidi_core
+    PUBLIC
+        heidi-kernel-lib
+        heidi-metrics
+        heidi-kernel-governor
+        heidi-kernel-job
+        z
+        crypto
+        pthread
+)
+
+# Propagate HAVE_CURL into heidi_core when available and conditionally
+# compile/link the real curl transport. The provider transport files
+# are part of heidi_core; we only add HAVE_CURL if headers+lib are present.
+if(HEIDI_HAS_CURL)
+    target_compile_definitions(heidi_core PUBLIC HAVE_CURL)
+    target_include_directories(heidi_core PUBLIC ${CURL_INCLUDE_DIR})
+    target_link_libraries(heidi_core PUBLIC ${CURL_LIB_TARGET})
+endif()
+
+# Link heidid against heidi_core instead of duplicating sources
+target_link_libraries(heidid PRIVATE heidi_core)
+
 # Add Tests
 enable_testing()
 # C++ Core Unit Tests
 add_executable(cpp_core_tests
     tests/test_cpp_core.cpp
     tests/test_cpp_async.cpp
-    heidi_engine/cpp/core/clock.cpp
-    heidi_engine/cpp/core/run_id.cpp
-    heidi_engine/cpp/core/config.cpp
-    heidi_engine/cpp/core/journal_writer.cpp
-    heidi_engine/cpp/core/status_writer.cpp
-    heidi_engine/cpp/core/subprocess.cpp
-    heidi_engine/cpp/core/provider.cpp
-    heidi_engine/cpp/core/mock_provider.cpp
-    heidi_engine/cpp/core/async_collector.cpp
-    heidi_engine/cpp/core/core.cpp
-    heidi_engine/cpp/core/manifest.cpp
+    # Tests should compile only test sources; link core implementation via heidi_core
 )
 
 target_include_directories(cpp_core_tests PRIVATE heidi_engine/cpp)
 if(HEIDI_HAS_CURL)
     target_compile_definitions(cpp_core_tests PRIVATE HAVE_CURL)
     target_include_directories(cpp_core_tests PRIVATE ${CURL_INCLUDE_DIR})
-    target_link_libraries(cpp_core_tests PRIVATE gtest_main crypto pthread ${CURL_LIB_TARGET})
+    target_link_libraries(cpp_core_tests PRIVATE gtest_main heidi_core ${CURL_LIB_TARGET})
 else()
-    target_link_libraries(cpp_core_tests PRIVATE gtest_main crypto pthread)
+    target_link_libraries(cpp_core_tests PRIVATE gtest_main heidi_core)
 endif()
 add_test(NAME CoreTest COMMAND cpp_core_tests)
