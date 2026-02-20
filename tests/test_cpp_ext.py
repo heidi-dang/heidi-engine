@@ -1,13 +1,10 @@
-try:
-    import heidi_cpp
-except ImportError:
-    import sys
+import platform
+import pytest
 
-    pytest = sys.modules.get("pytest")
-    if pytest is not None:
-        pytest.skip("heidi_cpp extension not built", allow_module_level=True)
-    else:
-        raise ImportError("heidi_cpp extension not built and pytest not available")
+if platform.system() != "Linux":
+    pytest.skip("C++ integration tests only run on Linux", allow_module_level=True)
+
+heidi_cpp = pytest.importorskip("heidi_cpp", reason="C++ extension not built/available")
 
 import time
 import random
