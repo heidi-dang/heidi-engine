@@ -4,6 +4,9 @@ import os
 import subprocess
 import time
 import shutil
+import pytest
+
+pytestmark = pytest.mark.requires_heidi_cpp
 
 def test_fuzzing():
     """

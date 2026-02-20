@@ -1,12 +1,18 @@
 import pytest
-import heidi_cpp
 import time
 import json
 import os
 import shutil
 from unittest import mock
 
-def test_engine_throttles_high_cpu_spike():
+pytestmark = pytest.mark.requires_heidi_cpp
+
+@pytest.fixture(scope="session")
+def heidi_cpp_mod():
+    import heidi_cpp
+    return heidi_cpp
+
+def test_engine_throttles_high_cpu_spike(heidi_cpp_mod):
     """
     Simulates a running environment where max_cpu_pct is mocked impossibly low.
     The C++ Core should emit 'pipeline_throttled' and pause execution until 
@@ -38,7 +44,7 @@ def test_engine_throttles_high_cpu_spike():
     # Set a tiny global timeout (e.g. 0 minutes -> 0 seconds) to ensure the fail-closed loop aborts immediately
     os.environ["MAX_WALL_TIME_MINUTES"] = "0"
 
-    engine = heidi_cpp.Core()
+    engine = heidi_cpp_mod.Core()
     engine.init("mock_config.yaml")
 
     engine.start("full")

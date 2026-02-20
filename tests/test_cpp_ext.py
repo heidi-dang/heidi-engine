@@ -1,22 +1,18 @@
-try:
-    import heidi_cpp
-except ImportError:
-    import sys
-
-    pytest = sys.modules.get("pytest")
-    if pytest is not None:
-        pytest.skip("heidi_cpp extension not built", allow_module_level=True)
-    else:
-        raise ImportError("heidi_cpp extension not built and pytest not available")
-
 import time
 import random
 import sys
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.requires_heidi_cpp
 
-def benchmark_dedupe():
+
+@pytest.fixture(scope="session")
+def heidi_cpp_mod():
+    import heidi_cpp
+    return heidi_cpp
+
+def benchmark_dedupe(heidi_cpp_mod):
     print("--- Benchmarking Deduplication ---")
     data = [f"string_{random.randint(0, 1000)}" for _ in range(100000)]
 
@@ -28,7 +24,7 @@ def benchmark_dedupe():
 
     # C++ extension
     start = time.time()
-    cpp_result = heidi_cpp.deduplicate_strings(data)
+    cpp_result = heidi_cpp_mod.deduplicate_strings(data)
     cpp_time = time.time() - start
     print(f"C++ deduplicate_strings time: {cpp_time:.4f}s")
     print(f"Speedup: {py_time / cpp_time:.2f}x")
@@ -38,7 +34,7 @@ def benchmark_dedupe():
     print("Correctness verified.")
 
 
-def benchmark_sort():
+def benchmark_sort(heidi_cpp_mod):
     print("\n--- Benchmarking In-place Sort (NumPy) ---")
     size = 1000000
     data = np.random.rand(size).astype(np.float32)
@@ -53,7 +49,7 @@ def benchmark_sort():
     # C++ extension (std::sort)
     cpp_data = data.copy()
     start = time.time()
-    heidi_cpp.sort_batch_inplace(cpp_data)
+    heidi_cpp_mod.sort_batch_inplace(cpp_data)
     cpp_time = time.time() - start
     print(f"C++ sort_batch_inplace time: {cpp_time:.4f}s")
     print(f"Speedup: {py_time / cpp_time:.2f}x")
@@ -63,9 +59,9 @@ def benchmark_sort():
     print("Correctness verified (True in-place).")
 
 
-def test_arena():
+def test_arena(heidi_cpp_mod):
     print("\n--- Testing Arena Allocator ---")
-    arena = heidi_cpp.ArenaAllocator(1024)
+    arena = heidi_cpp_mod.ArenaAllocator(1024)
     print(f"Initial capacity: {arena.remaining()} bytes")
 
     buf1 = arena.allocate(100)
@@ -81,7 +77,7 @@ def test_arena():
     assert arena.remaining() == 1024
 
 
-def benchmark_parallel_validate():
+def benchmark_parallel_validate(heidi_cpp_mod):
     print("\n--- Benchmarking Parallel Validation ---")
     snippets = [f"def func_{i}():\n    return {i}" for i in range(50000)]
 
@@ -93,7 +89,7 @@ def benchmark_parallel_validate():
 
     # C++ Parallel validation
     start = time.time()
-    cpp_results = heidi_cpp.parallel_validate(snippets, threads=4)
+    cpp_results = heidi_cpp_mod.parallel_validate(snippets, threads=4)
     cpp_time = time.time() - start
     print(f"C++ parallel_validate (4 threads) time: {cpp_time:.4f}s")
     print(f"Speedup: {py_time / cpp_time:.2f}x")
@@ -102,13 +98,13 @@ def benchmark_parallel_validate():
     print("Correctness verified.")
 
 
-def benchmark_compression():
+def benchmark_compression(heidi_cpp_mod):
     print("\n--- Benchmarking Compression ---")
     # Large JSON-like string
     data = json.dumps([{"id": i, "content": "synthetic data " * 10} for i in range(1000)])
 
     start = time.time()
-    compressed = heidi_cpp.compress_data(data)
+    compressed = heidi_cpp_mod.compress_data(data)
     cpp_time = time.time() - start
 
     ratio = len(data) / len(compressed)
@@ -117,14 +113,14 @@ def benchmark_compression():
     assert ratio > 1.0, "Compression failed"
 
 
-def test_gpu_memory():
+def test_gpu_memory(heidi_cpp_mod):
     print("\n--- Testing GPU Memory Checker ---")
-    free_mem = heidi_cpp.get_free_gpu_memory()
+    free_mem = heidi_cpp_mod.get_free_gpu_memory()
     print(f"Free GPU memory: {free_mem} bytes")
     # If 0, it might just mean no CUDA or no GPU, which is fine for a test
 
 
-def benchmark_transpose():
+def benchmark_transpose(heidi_cpp_mod):
     print("\n--- Benchmarking In-PLACE Transpose (Square) ---")
     dim = 2000
     data = np.random.rand(dim * dim).astype(np.float32)
@@ -138,7 +134,7 @@ def benchmark_transpose():
     # C++ In-place
     cpp_data = data.copy()
     start = time.time()
-    heidi_cpp.transpose_inplace(cpp_data, dim, dim)
+    heidi_cpp_mod.transpose_inplace(cpp_data, dim, dim)
     cpp_time = time.time() - start
     print(f"C++ transpose_inplace time: {cpp_time:.4f}s")
 
@@ -148,17 +144,17 @@ def benchmark_transpose():
     print("Correctness verified.")
 
 
-def benchmark_custom_dedup():
+def benchmark_custom_dedup(heidi_cpp_mod):
     print("\n--- Benchmarking Custom Hash Deduplication ---")
     data = [f"long_string_prefix_{random.randint(0, 5000)}_suffix_{i}" for i in range(100000)]
 
     start = time.time()
-    res1 = heidi_cpp.deduplicate_strings(data)
+    res1 = heidi_cpp_mod.deduplicate_strings(data)
     t1 = time.time() - start
     print(f"C++ STL hash dedup time: {t1:.4f}s")
 
     start = time.time()
-    res2 = heidi_cpp.dedup_with_custom_hash(data)
+    res2 = heidi_cpp_mod.dedup_with_custom_hash(data)
     t2 = time.time() - start
     print(f"C++ custom hash dedup time: {t2:.4f}s")
 
@@ -166,31 +162,31 @@ def benchmark_custom_dedup():
     print("Correctness verified.")
 
 
-def benchmark_batch_compression():
+def benchmark_batch_compression(heidi_cpp_mod):
     print("\n--- Benchmarking Batch Log Compression ---")
     logs = [f"log_entry_{i}_" + "A" * 100 for i in range(10000)]
 
     start = time.time()
-    compressed = heidi_cpp.compress_logs(logs)
+    compressed = heidi_cpp_mod.compress_logs(logs)
     cpp_time = time.time() - start
     print(f"C++ compress_logs (10k items) time: {cpp_time:.4f}s")
     assert len(compressed) == 10000
 
 
-def test_resource_limits():
+def test_resource_limits(heidi_cpp_mod):
     print("\n--- Testing Resource Limiter Wrapper ---")
 
     def dummy():
         pass
 
     try:
-        heidi_cpp.run_with_limits(dummy, max_threads=2, max_memory_mb=2048)
+        heidi_cpp_mod.run_with_limits(dummy, max_threads=2, max_memory_mb=2048)
         print("Resource limiter executed successfully (dummy).")
     except Exception as e:
         print(f"Resource limiter failed (expected on some systems): {e}")
 
 
-def benchmark_kernel_bounds():
+def benchmark_kernel_bounds(heidi_cpp_mod):
     print("\n11. Testing Kernel Resource Governor...")
 
     def dummy_task():
@@ -199,7 +195,7 @@ def benchmark_kernel_bounds():
 
     start = time.time()
     for _ in range(100):
-        heidi_cpp.run_with_kernel_bounds(dummy_task, max_jobs=5, cpu_limit=80.0)
+        heidi_cpp_mod.run_with_kernel_bounds(dummy_task, max_jobs=5, cpu_limit=80.0)
     end = time.time()
     print(f"    Kernel Bounds (100 runs): {end - start:.4f}s")
 

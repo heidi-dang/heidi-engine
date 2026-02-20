@@ -1,11 +1,17 @@
 import pytest
-import heidi_cpp
 import time
 import json
 import os
 import shutil
 
-def test_cxx_engine_stress_polling_latency():
+pytestmark = pytest.mark.requires_heidi_cpp
+
+@pytest.fixture(scope="session")
+def heidi_cpp_mod():
+    import heidi_cpp
+    return heidi_cpp
+
+def test_cxx_engine_stress_polling_latency(heidi_cpp_mod):
     """
     Stress-test the C++ orchestration layer by forcing it through 100 epochs
     of state transitions in mocked subprocess mode. We measure the purely
@@ -29,7 +35,7 @@ def test_cxx_engine_stress_polling_latency():
     os.environ["HEIDI_SIGNING_KEY"] = "test-key"
     os.environ["HEIDI_KEYSTORE_PATH"] = "test.enc"
 
-    engine = heidi_cpp.Core()
+    engine = heidi_cpp_mod.Core()
     engine.init("mock_config.yaml")
 
     # Start training exactly like Daemon does

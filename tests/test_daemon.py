@@ -14,6 +14,11 @@ def check_port(port):
 def daemon_process():
     # Use a non-standard port for test to avoid conflicts
     port = 8181
+
+    bin_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'build', 'bin', 'heidid'))
+    if not os.path.exists(bin_path):
+        pytest.skip(f"Daemon binary not found at {bin_path}. Skipping daemon tests.")
+
     if check_port(port):
         pytest.skip(f"Port {port} is already in use. Cannot run daemon test.")
 
