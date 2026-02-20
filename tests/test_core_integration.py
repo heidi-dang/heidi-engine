@@ -1,4 +1,11 @@
 import pytest
+import sys
+import platform
+
+# Skip C++ integration tests on non-Linux platforms
+if platform.system() != 'Linux':
+    pytest.skip("C++ integration tests only run on Linux")
+
 import heidi_cpp
 import time
 
