@@ -1,0 +1,117 @@
+#include "journal_writer.h"
+#include <fstream>
+#include <sstream>
+#include <iomanip>
+#include <stdexcept>
+#include <openssl/sha.h>
+#include <regex>
+
+namespace heidi {
+namespace core {
+
+std::string Event::to_json(const std::string& prev_hash) const {
+    std::ostringstream ss;
+    ss << "{";
+    ss << "\"event_version\":\"1.0\",";
+    ss << "\"ts\":\"" << ts << "\",";
+    ss << "\"run_id\":\"" << run_id << "\",";
+    ss << "\"round\":" << round << ",";
+    ss << "\"stage\":\"" << stage << "\",";
+    ss << "\"level\":\"" << level << "\",";
+    ss << "\"event_type\":\"" << event_type << "\",";
+    ss << "\"message\":\"" << message << "\",";
+    
+    ss << "\"counters_delta\":{";
+    bool first = true;
+    for (const auto& kv : counters_delta) {
+        if (!first) ss << ",";
+        ss << "\"" << kv.first << "\":" << kv.second;
+        first = false;
+    }
+    ss << "},";
+    
+    ss << "\"usage_delta\":{";
+    first = true;
+    for (const auto& kv : usage_delta) {
+        if (!first) ss << ",";
+        ss << "\"" << kv.first << "\":" << kv.second;
+        first = false;
+    }
+    ss << "},";
+    
+    ss << "\"artifact_paths\":[";
+    first = true;
+    for (const auto& path : artifact_paths) {
+        if (!first) ss << ",";
+        ss << "\"" << path << "\"";
+        first = false;
+    }
+    ss << "],";
+    
+    if (error.empty()) {
+        ss << "\"error\":null,";
+    } else {
+        ss << "\"error\":\"" << error << "\",";
+    }
+
+    ss << "\"prev_hash\":\"" << prev_hash << "\"";
+    ss << "}";
+    return ss.str();
+}
+
+JournalWriter::JournalWriter(const std::string& journal_path, const std::string& initial_hash)
+    : journal_path_(journal_path), last_hash_(initial_hash) {
+}
+
+JournalWriter::~JournalWriter() = default;
+
+std::string JournalWriter::compute_sha256(const std::string& data) const {
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256_CTX sha256;
+    SHA256_Init(&sha256);
+    SHA256_Update(&sha256, data.c_str(), data.size());
+    SHA256_Final(hash, &sha256);
+    
+    std::stringstream ss;
+    for(int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
+    }
+    return ss.str();
+}
+
+std::string JournalWriter::sanitize(const std::string& input) const {
+    std::string safe = std::regex_replace(input, std::regex("\n"), "\\n");
+    safe = std::regex_replace(safe, std::regex("\r"), "\\r");
+    safe = std::regex_replace(safe, std::regex("\""), "\\\"");
+    
+    // Pattern redaction (minimal P1 approximation)
+    safe = std::regex_replace(safe, std::regex("ghp_[a-zA-Z0-9]{36}"), "[GITHUB_TOKEN]");
+    safe = std::regex_replace(safe, std::regex("sk-[a-zA-Z0-9]{20,}"), "[OPENAI_KEY]");
+    safe = std::regex_replace(safe, std::regex("Bearer\\s+[\\w\\-]{20,}"), "[BEARER_TOKEN]");
+    return safe;
+}
+
+void JournalWriter::write(const Event& event) {
+    Event safe_event = event;
+    safe_event.message = sanitize(event.message);
+    if (!event.error.empty()) {
+        safe_event.error = sanitize(event.error);
+    }
+    
+    std::string json_line = safe_event.to_json(last_hash_);
+    std::string line_with_newline = json_line + "\n";
+    
+    // Write atomically / append to file
+    std::ofstream ofs(journal_path_, std::ios_base::app);
+    if (!ofs.is_open()) {
+        throw std::runtime_error("Could not open journal " + journal_path_);
+    }
+    ofs << line_with_newline;
+    ofs.flush();
+    
+    // Hash chain
+    last_hash_ = compute_sha256(line_with_newline);
+}
+
+} // namespace core
+} // namespace heidi

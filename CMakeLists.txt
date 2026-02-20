@@ -34,3 +34,20 @@ target_link_libraries(heidid
 
 # Output binary to bin directory
 set_target_properties(heidid PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+# Add Tests
+enable_testing()
+add_executable(cpp_core_tests
+    tests/test_cpp_core.cpp
+    heidi_engine/cpp/core/journal_writer.cpp
+    heidi_engine/cpp/core/status_writer.cpp
+    heidi_engine/cpp/core/core.cpp
+    heidi_engine/cpp/core/config.cpp
+    heidi_engine/cpp/core/clock.cpp
+    heidi_engine/cpp/core/run_id.cpp
+    heidi_engine/cpp/core/rlimit.cpp
+)
+
+target_include_directories(cpp_core_tests PRIVATE heidi_engine/cpp)
+target_link_libraries(cpp_core_tests PRIVATE gtest gtest_main crypto pthread)
+add_test(NAME CoreTest COMMAND cpp_core_tests)
