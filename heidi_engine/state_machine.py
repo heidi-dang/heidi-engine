@@ -15,7 +15,7 @@ import stat
 from enum import Enum, auto
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 CANONICAL_AUTOTRAIN_DIR = Path("~/.local/heidi-engine").expanduser()
@@ -163,8 +163,8 @@ class StateMachine:
             "usage": self._default_usage(),
             "last_event": None,
             "last_transition": None,
-            "started_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         self._persist()
 
@@ -200,7 +200,7 @@ class StateMachine:
         state_file.parent.mkdir(parents=True, exist_ok=True)
 
         temp_file = state_file.with_suffix(".tmp")
-        self._state["updated_at"] = datetime.utcnow().isoformat()
+        self._state["updated_at"] = datetime.now(timezone.utc).isoformat()
 
         with open(temp_file, "w") as f:
             json.dump(self._state, f, indent=2)
