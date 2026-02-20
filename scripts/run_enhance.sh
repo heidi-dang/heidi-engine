@@ -5,7 +5,7 @@ set -o pipefail
 
 die(){ echo "ERROR: $*" >&2; exit 1; }
 need_cmd(){ command -v "$1" >/dev/null 2>&1 || die "Missing command: $1"; }
-timestamp(){ date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+timestamp(){ python3 -c "from datetime import datetime, timezone; print(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z')"; }
 
 # -------- tiny progress UI (no extra deps) --------
 progress_bar() {
@@ -161,7 +161,7 @@ if os.path.exists(f):
             d = json.load(j)
             if "counters" not in d: d["counters"] = {}
             d["counters"][key] = d["counters"].get(key, 0) + 1
-            d["last_update"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            d["last_update"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
             j.seek(0); json.dump(d, j, indent=2); j.truncate()
         except Exception as e:
             sys.stderr.write(f"State update failed: {e}\n")
@@ -827,7 +827,7 @@ if os.path.exists(f):
             fcntl.flock(j, fcntl.LOCK_EX)
             d = json.load(j)
             d['target_repos'] = int(tot)
-            d['last_update'] = __import__('datetime').datetime.now(__import__('datetime').timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            d['last_update'] = __import__('datetime').datetime.now(__import__('datetime').timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
             j.seek(0); json.dump(d, j, indent=2); j.truncate()
         except Exception:
             pass

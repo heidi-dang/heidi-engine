@@ -130,7 +130,7 @@ class StateMachine:
     def _generate_run_id(self) -> str:
         import uuid
 
-        return f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
+        return f"run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
 
     def _get_run_dir(self) -> Path:
         return self.autotrain_dir / "runs" / self.run_id
@@ -163,8 +163,8 @@ class StateMachine:
             "usage": self._default_usage(),
             "last_event": None,
             "last_transition": None,
-            "started_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+            "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
         }
         self._persist()
 
@@ -200,7 +200,7 @@ class StateMachine:
         state_file.parent.mkdir(parents=True, exist_ok=True)
 
         temp_file = state_file.with_suffix(".tmp")
-        self._state["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self._state["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
         with open(temp_file, "w") as f:
             json.dump(self._state, f, indent=2)

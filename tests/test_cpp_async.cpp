@@ -1,5 +1,4 @@
 #include <gtest/gtest.h>
-#include "../heidi_engine/cpp/core/provider.h"
 #include "../heidi_engine/cpp/core/async_collector.h"
 #include <chrono>
 
