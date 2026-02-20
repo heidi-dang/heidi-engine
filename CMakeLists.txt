@@ -137,9 +137,10 @@ target_link_libraries(heidi_core
         heidi-metrics
         heidi-kernel-governor
         heidi-kernel-job
-        z
-        crypto
-        pthread
+        # Use portable imported targets instead of raw library names
+        Threads::Threads
+        OpenSSL::Crypto
+        ZLIB::ZLIB
 )
 
 # Propagate HAVE_CURL into heidi_core when available and conditionally
@@ -153,6 +154,19 @@ endif()
 
 # Link heidid against heidi_core instead of duplicating sources
 target_link_libraries(heidid PRIVATE heidi_core)
+
+# Find portable system libraries instead of hardcoding platform-specific names
+find_package(Threads REQUIRED)
+find_package(OpenSSL REQUIRED)
+find_package(ZLIB REQUIRED)
+
+# Link system dependencies using imported targets for portability
+target_link_libraries(heidid
+    PRIVATE
+        Threads::Threads
+        OpenSSL::Crypto
+        ZLIB::ZLIB
+)
 
 # Add Tests
 enable_testing()
