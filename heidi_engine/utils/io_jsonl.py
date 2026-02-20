@@ -6,10 +6,20 @@ from typing import Any, Dict, List
 
 SCHEMA_VERSION = "1.0"
 REQUIRED_KEYS = {
-    "event_version", "ts", "run_id", "round", "stage", "level", 
-    "event_type", "message", "counters_delta", "usage_delta", 
-    "artifact_paths", "prev_hash"
+    "event_version",
+    "ts",
+    "run_id",
+    "round",
+    "stage",
+    "level",
+    "event_type",
+    "message",
+    "counters_delta",
+    "usage_delta",
+    "artifact_paths",
+    "prev_hash",
 }
+
 
 def load_jsonl(path: str, is_journal: bool = False) -> List[Dict[str, Any]]:
     """
@@ -26,22 +36,27 @@ def load_jsonl(path: str, is_journal: bool = False) -> List[Dict[str, Any]]:
 
             try:
                 sample = json.loads(line)
-                
+
                 if is_journal:
                     # Zero-Trust Validation (Lane D)
                     missing = REQUIRED_KEYS - set(sample.keys())
                     if missing:
                         print(f"[FATAL] Line {line_num}: Missing keys: {missing}", file=sys.stderr)
-                        sys.exit(1)
-                    
+                        raise ValueError(f"Line {line_num}: Missing keys: {missing}")
+
                     if sample["event_version"] != SCHEMA_VERSION:
-                        print(f"[FATAL] Line {line_num}: Unsupported schema version {sample['event_version']}", file=sys.stderr)
-                        sys.exit(1)
-                
+                        print(
+                            f"[FATAL] Line {line_num}: Unsupported schema version {sample['event_version']}",
+                            file=sys.stderr,
+                        )
+                        raise ValueError(
+                            f"Line {line_num}: Unsupported schema version {sample['event_version']}"
+                        )
+
                 samples.append(sample)
             except json.JSONDecodeError as e:
                 print(f"[FATAL] Line {line_num}: JSON parse error: {e}", file=sys.stderr)
-                sys.exit(1)
+                raise ValueError("JSON parsing error or invalid input")
 
     return samples
 

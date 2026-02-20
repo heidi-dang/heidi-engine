@@ -22,7 +22,7 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--input", "--in", dest="input", required=True)
     p.add_argument("--val-ratio", "--holdout", dest="val_ratio", type=float, default=0.1)
-    p.add_argument("--out-train", dest="out_train", default=".local/ml/data/train/train.jsonl")
+    p.add_argument("--out-train", dest="out_train", default="./verified/ml/data/train/train.jsonl")
     p.add_argument("--out-eval", dest="out_eval", default=".local/ml/data/eval/val.jsonl")
     p.add_argument("--seed", dest="seed", type=int, default=42)
     p.add_argument(

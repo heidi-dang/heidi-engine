@@ -70,7 +70,7 @@ from heidi_engine.utils.io_jsonl import load_jsonl, save_jsonl
 from heidi_engine.utils.security_util import enforce_containment
 
 # Lane B: Boundary Control
-ALLOWED_BASE = os.getcwd() # Or explicitly verified/pending via config
+ALLOWED_BASE = os.getcwd()  # Or explicitly verified/pending via config
 
 SKIP_PROVENANCE = os.environ.get("SKIP_PROVENANCE_CHECK", "").lower() in ("1", "true", "yes")
 
@@ -188,8 +188,8 @@ Examples:
 
     return parser.parse_args()
 
-
     return True, "ok"
+
 
 def enforce_strict_clean_schema(sample: Dict[str, Any]):
     """Lane D: Strict Schema enforcement."""
@@ -372,7 +372,7 @@ def process_sample(
         - Tuple of (processed_sample or None, reason)
     """
     # Step 1: Schema validation
-    valid, reason = validate_schema(sample)
+    valid, reason = validate_semantic(sample)
     if not valid:
         return None, f"schema: {reason}"
 
