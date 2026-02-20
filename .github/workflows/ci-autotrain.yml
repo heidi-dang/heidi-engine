@@ -3,6 +3,10 @@ name: "CI - AutoTrain"
 on:
   push:
     branches: ["main", "feat/**"]
+    paths:
+      - 'heidi_engine/**'
+      - 'scripts/**'
+      - '.github/workflows/ci-autotrain.yml'
   pull_request:
     paths:
       - 'heidi_engine/**'

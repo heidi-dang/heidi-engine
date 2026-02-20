@@ -2,6 +2,11 @@ name: CI - ML smoke
 
 on:
   push:
+    paths:
+      - '.local/ml/**'
+      - 'heidi_engine/ml/**'
+      - 'scripts/**'
+      - '.github/workflows/ci-ml.yml'
   pull_request:
     paths:
       - '.local/ml/**'
@@ -23,13 +28,11 @@ jobs:
         run: |
           if [[ -d .local/ml ]]; then 
             echo "has_ml=true" >> "$GITHUB_OUTPUT"
-            echo "ML tree found - has_ml=true"
+            echo "ML tree found"
           else 
             echo "has_ml=false" >> "$GITHUB_OUTPUT"
-            echo "ML tree not found - has_ml=false"
+            echo "ML tree not found - will skip ML jobs"
           fi
-          echo "Debug: Output file contents:"
-          cat "$GITHUB_OUTPUT"
 
   # ML smoke test - only runs if ML tree is present
   smoke:
