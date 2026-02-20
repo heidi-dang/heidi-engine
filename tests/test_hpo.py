@@ -1,9 +1,16 @@
 import os
 import json
+import platform
+import pytest
 import unittest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 import sys
+
+if platform.system() != "Linux":
+    pytest.skip("C++ integration tests only run on Linux", allow_module_level=True)
+
+heidi_cpp = pytest.importorskip("heidi_cpp", reason="C++ extension not built/available")
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -61,13 +68,6 @@ class TestHPO(unittest.TestCase):
         mock_run.assert_called_once()
 
     def test_run_trial_low_vram(self):
-        try:
-            import heidi_cpp
-        except ImportError:
-            import unittest
-
-            raise unittest.SkipTest("heidi_cpp extension not built")
-
         with patch("heidi_cpp.get_free_gpu_memory") as mock_gpu:
             # Mock low VRAM
             mock_gpu.return_value = 500 * 1024 * 1024  # 500MB
