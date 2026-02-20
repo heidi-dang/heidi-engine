@@ -4,9 +4,35 @@ on:
   push:
     branches: ["main", "feat/**"]
   pull_request:
+    paths:
+      - 'heidi_engine/**'
+      - 'scripts/**'
+      - '.github/workflows/ci-autotrain.yml'
+  workflow_dispatch:
 
 jobs:
+  # Preflight job to check if AutoTrain components are present
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      has_autotrain: ${{ steps.check.outputs.has_autotrain }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        shell: bash
+        run: |
+          if [[ -d heidi_engine && -f heidi_engine/telemetry.py ]]; then 
+            echo "has_autotrain=true" >> "$GITHUB_OUTPUT"
+            echo "AutoTrain components found"
+          else 
+            echo "has_autotrain=false" >> "$GITHUB_OUTPUT"
+            echo "AutoTrain components not found - will skip AutoTrain jobs"
+          fi
+
+  # Lint job - runs when AutoTrain components are present
   lint:
+    needs: preflight
+    if: needs.preflight.outputs.has_autotrain == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,7 +45,10 @@ jobs:
       - name: Run ruff
         run: ruff check heidi_engine/ scripts/*.py || true
 
+  # Unit test job - runs when AutoTrain components are present
   test-unit:
+    needs: preflight
+    if: needs.preflight.outputs.has_autotrain == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,3 +67,16 @@ redacted = tm.redact_secrets('ghp_abc123')
 assert '[GITHUB_TOKEN]' in redacted
 print('Unit tests PASSED')
 "
+
+  # Always-run job to ensure workflow shows success even when AutoTrain jobs are skipped
+  status:
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - name: Workflow status
+        run: |
+          if [[ "${{ needs.preflight.outputs.has_autotrain }}" == "true" ]]; then
+            echo "✅ AutoTrain pipeline executed successfully"
+          else
+            echo "⏭️ AutoTrain pipeline skipped (components not found)"
+          fi

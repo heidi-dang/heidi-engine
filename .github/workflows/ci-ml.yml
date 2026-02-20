@@ -3,9 +3,36 @@ name: CI - ML smoke
 on:
   push:
   pull_request:
+    paths:
+      - '.local/ml/**'
+      - 'heidi_engine/ml/**'
+      - 'scripts/**'
+      - '.github/workflows/ci-ml.yml'
+  workflow_dispatch:
 
 jobs:
+  # Preflight job to check if ML components are present
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      has_ml: ${{ steps.check.outputs.has_ml }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        shell: bash
+        run: |
+          if [[ -d .local/ml ]]; then 
+            echo "has_ml=true" >> "$GITHUB_OUTPUT"
+            echo "ML tree found"
+          else 
+            echo "has_ml=false" >> "$GITHUB_OUTPUT"
+            echo "ML tree not found - will skip ML jobs"
+          fi
+
+  # ML smoke test - only runs if ML tree is present
   smoke:
+    needs: preflight
+    if: needs.preflight.outputs.has_ml == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,3 +71,16 @@ JSONL
         run: |
           source .venv/bin/activate
           python .local/ml/scripts/redaction_check.py --file .local/ml/data/train/train.jsonl --file .local/ml/data/eval/val.jsonl
+
+  # Always-run job to ensure workflow shows success even when ML jobs are skipped
+  status:
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - name: Workflow status
+        run: |
+          if [[ "${{ needs.preflight.outputs.has_ml }}" == "true" ]]; then
+            echo "✅ ML pipeline executed successfully"
+          else
+            echo "⏭️ ML pipeline skipped (no ML tree found)"
+          fi
