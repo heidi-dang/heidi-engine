@@ -87,9 +87,10 @@ GPU_POLL_INTERVAL = int(os.environ.get("GPU_POLL_INTERVAL", "5"))
 # TUNABLE: Adjust based on screen size
 MAX_EVENTS = int(os.environ.get("DASHBOARD_MAX_EVENTS", "20"))
 
-# Base directory for heidi_engine outputs
-# TUNABLE: Change if heidi_engine is in different location
-AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi_engine"))
+# Canonical AUTOTRAIN_DIR - MUST use ~/.local/heidi-engine
+from heidi_engine.state_machine import CANONICAL_AUTOTRAIN_DIR
+
+AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", str(CANONICAL_AUTOTRAIN_DIR))
 
 # Console width (auto-detected if not set)
 CONSOLE_WIDTH = int(os.environ.get("CONSOLE_WIDTH", "0"))
@@ -1229,8 +1230,7 @@ def main():
     global run_id, current_view
 
     parser = argparse.ArgumentParser(
-        prog="heidi-engine dashboard",
-        description="Heidi Engine Real-Time Dashboard"
+        prog="heidi-engine dashboard", description="Heidi Engine Real-Time Dashboard"
     )
     parser.add_argument("--run", "-r", help="Run ID to monitor")
     parser.add_argument(

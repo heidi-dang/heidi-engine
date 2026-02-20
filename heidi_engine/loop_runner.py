@@ -58,9 +58,10 @@ class PythonLoopRunner(LoopRunner):
     """
 
     def __init__(self, config_path: Optional[str] = None):
-        # We simulate reading from config or environment variables
+        from heidi_engine.state_machine import CANONICAL_AUTOTRAIN_DIR
+
         self.config_path = config_path
-        self.out_dir = Path(os.environ.get("OUT_DIR", os.path.expanduser("~/.local/heidi_engine")))
+        self.out_dir = Path(os.environ.get("OUT_DIR", str(CANONICAL_AUTOTRAIN_DIR)))
         self.rounds = int(os.environ.get("ROUNDS", 3))
         self.samples_per_round = int(os.environ.get("SAMPLES_PER_ROUND", 50))
         self.run_unit_tests = os.environ.get("RUN_UNIT_TESTS", "0") == "1"
@@ -87,7 +88,9 @@ class PythonLoopRunner(LoopRunner):
     def _check_interrupts(self) -> bool:
         """Return True if we should stop."""
         if self.stop_requested or telemetry.check_stop_requested(self.run_id):
-            telemetry.emit_event("pipeline_stop", "Stop requested by user", "pipeline", self.current_round)
+            telemetry.emit_event(
+                "pipeline_stop", "Stop requested by user", "pipeline", self.current_round
+            )
             telemetry.set_status("stopped", self.current_state, self.current_round)
             self.current_state = "IDLE"
             return True
@@ -113,62 +116,83 @@ class PythonLoopRunner(LoopRunner):
             return self.get_status()
 
         if self.current_state == "COLLECTING":
-            telemetry.emit_event("round_start", f"Starting round {self.current_round}", "round", self.current_round)
-            telemetry.emit_event("stage_start", "Starting teacher generation", "generate", self.current_round)
-            
+            telemetry.emit_event(
+                "round_start", f"Starting round {self.current_round}", "round", self.current_round
+            )
+            telemetry.emit_event(
+                "stage_start", "Starting teacher generation", "generate", self.current_round
+            )
+
             # Here we simulate the bash script calling 01_teacher_generate.py
             output_file = self.out_dir / "data" / f"raw_round_{self.current_round}.jsonl"
             output_file.parent.mkdir(parents=True, exist_ok=True)
-            
+
             cmd = [
-                sys.executable, str(Path(__file__).parent.parent / "scripts" / "01_teacher_generate.py"),
-                "--samples", str(self.samples_per_round),
-                "--output", str(output_file),
-                "--round", str(self.current_round)
+                sys.executable,
+                str(Path(__file__).parent.parent / "scripts" / "01_teacher_generate.py"),
+                "--samples",
+                str(self.samples_per_round),
+                "--output",
+                str(output_file),
+                "--round",
+                str(self.current_round),
             ]
             self._run_cmd(cmd, "Teacher generation failed")
 
-            telemetry.emit_event("stage_end", f"Generated {self.samples_per_round} samples", "generate", self.current_round)
+            telemetry.emit_event(
+                "stage_end",
+                f"Generated {self.samples_per_round} samples",
+                "generate",
+                self.current_round,
+            )
             self._set_state("VALIDATING", stage="validate")
 
         elif self.current_state == "VALIDATING":
-            telemetry.emit_event("stage_start", "Starting validation", "validate", self.current_round)
-            
+            telemetry.emit_event(
+                "stage_start", "Starting validation", "validate", self.current_round
+            )
+
             input_file = self.out_dir / "data" / f"raw_round_{self.current_round}.jsonl"
             output_file = self.out_dir / "data" / f"clean_round_{self.current_round}.jsonl"
-            
+
             cmd = [
-                sys.executable, str(Path(__file__).parent.parent / "scripts" / "02_validate_clean.py"),
-                "--input", str(input_file),
-                "--output", str(output_file)
+                sys.executable,
+                str(Path(__file__).parent.parent / "scripts" / "02_validate_clean.py"),
+                "--input",
+                str(input_file),
+                "--output",
+                str(output_file),
             ]
             self._run_cmd(cmd, "Validation failed")
-            
+
             telemetry.emit_event("stage_end", "Validated samples", "validate", self.current_round)
-            
+
             if self.run_unit_tests:
                 self._set_state("TESTING", stage="test")
             else:
                 if self.mode == "full":
                     self._set_state("FINALIZING", stage="train")
                 else:
-                    self._set_state("IDLE") # Wait for train-now or next step
+                    self._set_state("IDLE")  # Wait for train-now or next step
 
         elif self.current_state == "TESTING":
             telemetry.emit_event("stage_start", "Starting unit tests", "test", self.current_round)
-            
+
             input_file = self.out_dir / "data" / f"clean_round_{self.current_round}.jsonl"
             output_file = self.out_dir / "data" / f"tested_round_{self.current_round}.jsonl"
-            
+
             cmd = [
-                sys.executable, str(Path(__file__).parent.parent / "scripts" / "03_unit_test_gate.py"),
-                "--input", str(input_file),
-                "--output", str(output_file)
+                sys.executable,
+                str(Path(__file__).parent.parent / "scripts" / "03_unit_test_gate.py"),
+                "--input",
+                str(input_file),
+                "--output",
+                str(output_file),
             ]
             self._run_cmd(cmd, "Unit test gate failed")
-            
+
             telemetry.emit_event("stage_end", "Completed unit tests", "test", self.current_round)
-            
+
             if self.mode == "full":
                 self._set_state("FINALIZING", stage="train")
             else:
@@ -176,50 +200,60 @@ class PythonLoopRunner(LoopRunner):
 
         elif self.current_state == "FINALIZING":
             telemetry.emit_event("stage_start", "Starting training", "train", self.current_round)
-            
+
             # Simplification: split logic and training script simulation
             train_file = self.out_dir / "data" / f"train_round_{self.current_round}.jsonl"
             val_file = self.out_dir / "data" / f"val_round_{self.current_round}.jsonl"
             output_dir = self.out_dir / f"out_lora_round_{self.current_round}"
-            
-            # In a real run, split occurs here, and then 04_train_qlora.py is called. 
+
+            # In a real run, split occurs here, and then 04_train_qlora.py is called.
             # We assume it succeeds for the sake of orchestrating.
             # In tests, we mock this.
             self._mock_split(train_file, val_file)
-            
+
             cmd = [
-                sys.executable, str(Path(__file__).parent.parent / "scripts" / "04_train_qlora.py"),
-                "--data", str(train_file),
-                "--val-data", str(val_file),
-                "--output", str(output_dir)
+                sys.executable,
+                str(Path(__file__).parent.parent / "scripts" / "04_train_qlora.py"),
+                "--data",
+                str(train_file),
+                "--val-data",
+                str(val_file),
+                "--output",
+                str(output_dir),
             ]
             self._run_cmd(cmd, "Training failed")
-            
+
             telemetry.emit_event("stage_end", "Training complete", "train", self.current_round)
             self._set_state("EVALUATING", stage="eval")
 
         elif self.current_state == "EVALUATING":
             telemetry.emit_event("stage_start", "Starting evaluation", "eval", self.current_round)
-            
+
             val_file = self.out_dir / "data" / f"val_round_{self.current_round}.jsonl"
             adapter_dir = self.out_dir / f"out_lora_round_{self.current_round}" / "final"
             report_file = self.out_dir / "eval" / f"report_round_{self.current_round}.json"
-            
+
             cmd = [
-                sys.executable, str(Path(__file__).parent.parent / "scripts" / "05_eval.py"),
-                "--adapter", str(adapter_dir),
-                "--data", str(val_file),
-                "--output", str(report_file)
+                sys.executable,
+                str(Path(__file__).parent.parent / "scripts" / "05_eval.py"),
+                "--adapter",
+                str(adapter_dir),
+                "--data",
+                str(val_file),
+                "--output",
+                str(report_file),
             ]
-            self._run_cmd(cmd, "Evaluation failed", check=False) # Eval can fail gracefully
-            
+            self._run_cmd(cmd, "Evaluation failed", check=False)  # Eval can fail gracefully
+
             telemetry.emit_event("stage_end", "Evaluation complete", "eval", self.current_round)
-            
+
             if self.current_round < self.rounds:
                 self.current_round += 1
                 self._set_state("COLLECTING", stage="generate")
             else:
-                telemetry.emit_event("pipeline_complete", "Training pipeline finished", "pipeline", self.rounds)
+                telemetry.emit_event(
+                    "pipeline_complete", "Training pipeline finished", "pipeline", self.rounds
+                )
                 self._set_state("IDLE", stage="complete")
 
         return self.get_status()
@@ -234,7 +268,7 @@ class PythonLoopRunner(LoopRunner):
             telemetry.emit_event("pipeline_error", msg, "pipeline", self.current_round)
             self.current_state = "ERROR"
             raise RuntimeError(msg)
-            
+
     def _mock_split(self, train_file: Path, val_file: Path):
         """Simplistic split for the orchestrator simulation if files don't exist"""
         if not train_file.exists():
@@ -263,8 +297,9 @@ class PythonLoopRunner(LoopRunner):
             "state": self.current_state,
             "round": self.current_round,
             "mode": self.mode,
-            "run_id": self.run_id
+            "run_id": self.run_id,
         }
+
 
 try:
     import heidi_cpp
@@ -273,6 +308,7 @@ try:
         """
         C++ implementation of the LoopRunner, wrapping the heidi_cpp.Core extension.
         """
+
         def __init__(self, config_path: Optional[str] = None):
             self.config_path = config_path
             self.core = heidi_cpp.Core()
@@ -286,7 +322,7 @@ try:
             return json.loads(status_json)
 
         def pause(self) -> None:
-            pass # P2 does not have pause yet natively 
+            pass  # P2 does not have pause yet natively
 
         def resume(self) -> None:
             pass

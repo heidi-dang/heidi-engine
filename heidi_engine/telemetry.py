@@ -81,10 +81,10 @@ _remote_states: Dict[str, Any] = {}
 # CONFIGURATION - Adjust these for your needs
 # =============================================================================
 
-# Base directory for all heidi_engine outputs
-# TUNABLE: Change to custom path if needed
-# NOTE: Default changed to .local/heidi_engine to avoid polluting repo root
-AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi_engine"))
+# Canonical AUTOTRAIN_DIR - MUST use ~/.local/heidi-engine
+from heidi_engine.state_machine import get_autotrain_dir, CANONICAL_AUTOTRAIN_DIR
+
+AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", str(CANONICAL_AUTOTRAIN_DIR))
 
 # Unique run identifier - set by loop.sh or menu.py
 # TUNABLE: Auto-generated if not provided
@@ -252,6 +252,9 @@ _lock = threading.RLock()
 
 # Whether telemetry has been initialized
 _initialized = False
+
+# StateMachine instance for structured state transitions (Phase 2)
+_state_machine: Optional[Any] = None
 
 
 # =============================================================================
@@ -573,7 +576,19 @@ def init_telemetry(
     RAISES:
         ValueError: If config validation fails
     """
-    global _initialized, RUN_ID
+    global _initialized, RUN_ID, _state_machine
+
+    # Initialize StateMachine if available (Phase 2)
+    try:
+        from heidi_engine.state_machine import StateMachine, Mode
+
+        if _state_machine is None:
+            _state_machine = StateMachine(run_id=run_id)
+            RUN_ID = _state_machine.run_id
+        elif run_id and _state_machine.run_id != run_id:
+            _state_machine = StateMachine(run_id=run_id)
+    except ImportError:
+        pass
 
     # Validate config if provided
     if config:
@@ -865,6 +880,76 @@ def set_status(
         state["current_round"] = round_num
 
     save_state(state, run_id)
+
+
+def sm_apply_event(event_name: str, **kwargs) -> Optional[str]:
+    """
+    Apply a StateMachine event (Phase 2 integration).
+
+    This is the single writer for state transitions - all state changes
+    should go through here when StateMachine is available.
+
+    ARGS:
+        event_name: Name of the event (START_FULL, START_COLLECT, TRAIN_NOW, etc.)
+        **kwargs: Additional arguments for the event
+
+    RETURNS:
+        New phase name or None if StateMachine not available
+    """
+    global _state_machine
+
+    if _state_machine is None:
+        return None
+
+    try:
+        from heidi_engine.state_machine import Event, Mode
+
+        event = Event[event_name]
+        new_phase = _state_machine.apply(event, **kwargs)
+        return new_phase.name
+    except (KeyError, ValueError) as e:
+        print(f"[WARN] Invalid state machine event {event_name}: {e}", file=sys.stderr)
+        return None
+
+
+def sm_set_mode(mode_name: str) -> None:
+    """
+    Set the operating mode via StateMachine (Phase 2).
+
+    Modes: IDLE, COLLECT, TRAIN
+
+    ARGS:
+        mode_name: Name of the mode
+    """
+    global _state_machine
+
+    if _state_machine is None:
+        return
+
+    try:
+        from heidi_engine.state_machine import Mode
+
+        mode = Mode[mode_name]
+        _state_machine.set_mode(mode)
+    except (KeyError, ValueError) as e:
+        print(f"[WARN] Invalid mode {mode_name}: {e}", file=sys.stderr)
+
+
+def sm_can_train() -> bool:
+    """
+    Check if training is allowed in current mode/phase (Phase 2).
+
+    In COLLECT mode, training is only allowed from COMPLETE or INITIALIZING phases.
+
+    RETURNS:
+        True if training is allowed
+    """
+    global _state_machine
+
+    if _state_machine is None:
+        return True  # Default to allowing if no StateMachine
+
+    return _state_machine.can_train()
 
 
 def request_stop(run_id: Optional[str] = None) -> None:
