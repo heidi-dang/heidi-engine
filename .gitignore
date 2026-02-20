@@ -46,6 +46,14 @@ __pycache__/
 .eggs/
 *.egg
 
+# C++ Build artifacts
+build/
+*.so
+*.o
+*.obj
+*.dll
+*.dylib
+
 # Virtual environments
 venv/
 env/
