@@ -4,13 +4,19 @@ project(heidi-engine VERSION 0.2.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Find system libcurl using find_library
+set(CURL_LIBRARY /usr/lib/x86_64-linux-gnu/libcurl.so.4 CACHE FILEPATH "libcurl library")
+message(STATUS "Using libcurl: ${CURL_LIBRARY}")
+
 # Add heidi-kernel as a subdirectory
 add_subdirectory(submodules/heidi-kernel)
 
 # Include directories
 include_directories(
     heidi_engine/cpp/include
+    heidi_engine/cpp/core
     submodules/heidi-kernel/include
+    deps/include
 )
 
 # Build heidid daemon
@@ -27,6 +33,7 @@ target_link_libraries(heidid
         heidi-kernel-governor
         heidi-kernel-lib
         z
+        ${CURL_LIBRARY}
 )
 
 # Optional: Build Python extension using CMake if desired, 
@@ -48,10 +55,11 @@ add_executable(cpp_core_tests
     heidi_engine/cpp/core/status_writer.cpp
     heidi_engine/cpp/core/subprocess.cpp
     heidi_engine/cpp/core/provider.cpp
+    heidi_engine/cpp/core/mock_provider.cpp
     heidi_engine/cpp/core/async_collector.cpp
     heidi_engine/cpp/core/core.cpp
 )
 
 target_include_directories(cpp_core_tests PRIVATE heidi_engine/cpp)
-target_link_libraries(cpp_core_tests PRIVATE gtest_main crypto pthread)
+target_link_libraries(cpp_core_tests PRIVATE gtest_main crypto pthread ${CURL_LIBRARY})
 add_test(NAME CoreTest COMMAND cpp_core_tests)
