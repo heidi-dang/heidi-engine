@@ -106,7 +106,7 @@ void Core::start(const std::string& mode) {
         if (!key || !keystore) {
              emit_event("gatekeeper_failed", "REAL mode refused: Missing signing key or keystore path", "init", "critical");
              set_state("ERROR", "error");
-             return;
+            throw std::runtime_error("REAL mode refused: Missing signing key or keystore path");
         }
     }
 
