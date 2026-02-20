@@ -370,7 +370,7 @@ def main():
     # Load samples
     enforce_containment(args.input, os.getcwd())
     enforce_containment(args.output, os.getcwd())
-    samples = load_jsonl(args.input)
+    samples = load_jsonl(args.input, validate_telemetry=False)
     
     for sample in samples:
         try:

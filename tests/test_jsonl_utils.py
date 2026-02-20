@@ -63,13 +63,19 @@ class TestJSONLUtils:
 
     def test_load_handles_invalid_json(self, test_file, capsys):
         """Test that load_jsonl skips invalid JSON lines and prints a warning to stderr."""
-        # NOTE: load_jsonl current implementation exits on JSON parse error if it's strict.
-        # Since we are sticking to product behavior, we expect it to EXIT if it encounters invalid JSON.
         import json
         test_file.write_text(json.dumps(get_valid_sample("1")) + '\n{invalid}\n' + json.dumps(get_valid_sample("2")) + '\n')
 
+        # Non-strict mode: should skip and warn
+        loaded = load_jsonl(str(test_file), validate_telemetry=False)
+        assert len(loaded) == 2
+
+        captured = capsys.readouterr()
+        assert "[WARN] Line 2: JSON parse error" in captured.err
+
+        # Strict mode: should exit
         with pytest.raises(SystemExit) as e:
-            load_jsonl(str(test_file))
+            load_jsonl(str(test_file), validate_telemetry=True)
         assert e.value.code == 1
 
     def test_save_current_directory(self, tmp_path, monkeypatch):

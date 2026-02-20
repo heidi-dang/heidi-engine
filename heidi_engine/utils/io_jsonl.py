@@ -11,9 +11,10 @@ REQUIRED_KEYS = {
     "artifact_paths", "prev_hash"
 }
 
-def load_jsonl(path: str) -> List[Dict[str, Any]]:
+def load_jsonl(path: str, validate_telemetry: bool = True) -> List[Dict[str, Any]]:
     """
-    Load samples from JSONL file with Phase 6 Zero-Trust validation.
+    Load samples from JSONL file.
+    If validate_telemetry is True, performs Phase 6 Zero-Trust validation for telemetry events.
     """
     samples = []
 
@@ -26,20 +27,24 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
             try:
                 sample = json.loads(line)
                 
-                # Zero-Trust Validation (Lane D)
-                missing = REQUIRED_KEYS - set(sample.keys())
-                if missing:
-                    print(f"[FATAL] Line {line_num}: Missing keys: {missing}", file=sys.stderr)
-                    sys.exit(1)
-                
-                if sample["event_version"] != SCHEMA_VERSION:
-                    print(f"[FATAL] Line {line_num}: Unsupported schema version {sample['event_version']}", file=sys.stderr)
-                    sys.exit(1)
+                if validate_telemetry:
+                    # Zero-Trust Validation (Lane D)
+                    missing = REQUIRED_KEYS - set(sample.keys())
+                    if missing:
+                        print(f"[FATAL] Line {line_num}: Missing keys: {missing}", file=sys.stderr)
+                        sys.exit(1)
+
+                    if sample.get("event_version") != SCHEMA_VERSION:
+                        print(f"[FATAL] Line {line_num}: Unsupported schema version {sample.get('event_version')}", file=sys.stderr)
+                        sys.exit(1)
                 
                 samples.append(sample)
             except json.JSONDecodeError as e:
-                print(f"[FATAL] Line {line_num}: JSON parse error: {e}", file=sys.stderr)
-                sys.exit(1)
+                if validate_telemetry:
+                    print(f"[FATAL] Line {line_num}: JSON parse error: {e}", file=sys.stderr)
+                    sys.exit(1)
+                else:
+                    print(f"[WARN] Line {line_num}: JSON parse error: {e}", file=sys.stderr)
 
     return samples
 

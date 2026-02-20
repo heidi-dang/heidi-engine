@@ -189,7 +189,15 @@ Examples:
     return parser.parse_args()
 
 
+def validate_schema(sample: Dict[str, Any]) -> Tuple[bool, str]:
+    """
+    Validate that sample has all required fields.
+    """
+    for field in REQUIRED_FIELDS:
+        if field not in sample:
+            return False, f"missing field: {field}"
     return True, "ok"
+
 
 def enforce_strict_clean_schema(sample: Dict[str, Any]):
     """Lane D: Strict Schema enforcement."""
@@ -420,7 +428,7 @@ def main():
     enforce_containment(args.output, os.getcwd())
 
     # Load raw samples
-    raw_samples = load_jsonl(args.input)
+    raw_samples = load_jsonl(args.input, validate_telemetry=False)
     print(f"[INFO] Loaded {len(raw_samples)} raw samples")
 
     # Process samples
