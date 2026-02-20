@@ -12,11 +12,10 @@ AUTOTRAIN_DIR: ~/.local/heidi-engine (canonical path - MUST NOT default to ./hei
 import json
 import os
 import stat
+from datetime import datetime
 from enum import Enum, auto
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
-from datetime import datetime
-
 
 CANONICAL_AUTOTRAIN_DIR = Path("~/.local/heidi-engine").expanduser()
 

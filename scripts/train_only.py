@@ -23,7 +23,8 @@ try:
 except ImportError:
     HAS_HEIDI_CPP = False
 
-import heidi_engine.telemetry as tel
+import heidi_engine.telemetry as tel  # noqa: E402
+from heidi_engine.utils.io_jsonl import load_jsonl, save_jsonl  # noqa: E402
 
 # Defaults
 DEFAULT_BASE_MODEL = "microsoft/phi-2"
@@ -51,7 +52,8 @@ def run_trial(trial, args, script_dir, out_dir, train_file, val_file):
                     print(f"[HPO] Trial {trial_idx} skipped: Low VRAM ({free_mem_mb:.0f}MB < {DEFAULT_VRAM_THRESHOLD_MB}MB)")
                     raise optuna.TrialPruned()
         except Exception as e:
-            if isinstance(e, optuna.TrialPruned): raise
+            if isinstance(e, optuna.TrialPruned):
+                raise
             print(f"[HPO] GPU check failed: {e}")
 
     trial_out = out_dir / f"trial_{trial_idx}"
@@ -164,28 +166,25 @@ def main():
 
     # 1. Split Train/Val
     print(f"[INFO] Preparing dataset: {data_path}")
-    with open(data_path, 'r') as f:
-        lines = [line.strip() for line in f if line.strip()]
+    samples = load_jsonl(str(data_path))
 
     random.seed(args.seed)
-    random.shuffle(lines)
+    random.shuffle(samples)
 
-    total = len(lines)
+    total = len(samples)
     val_size = max(1, int(total * args.val_ratio))
     train_size = total - val_size
 
-    train_lines = lines[:train_size]
-    val_lines = lines[train_size:]
+    train_samples = samples[:train_size]
+    val_samples = samples[train_size:]
 
     train_file = out_dir / "train.jsonl"
     val_file = out_dir / "val.jsonl"
 
-    with open(train_file, 'w') as f:
-        f.write('\n'.join(train_lines) + '\n')
-    with open(val_file, 'w') as f:
-        f.write('\n'.join(val_lines) + '\n')
+    save_jsonl(train_samples, str(train_file))
+    save_jsonl(val_samples, str(val_file))
 
-    print(f"       Train: {len(train_lines)} samples, Val: {len(val_lines)} samples")
+    print(f"       Train: {len(train_samples)} samples, Val: {len(val_samples)} samples")
 
     # 2. Run Training or HPO
     if args.optuna:

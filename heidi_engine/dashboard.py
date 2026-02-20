@@ -88,7 +88,7 @@ GPU_POLL_INTERVAL = int(os.environ.get("GPU_POLL_INTERVAL", "5"))
 MAX_EVENTS = int(os.environ.get("DASHBOARD_MAX_EVENTS", "20"))
 
 # Canonical AUTOTRAIN_DIR - MUST use ~/.local/heidi-engine
-from heidi_engine.state_machine import CANONICAL_AUTOTRAIN_DIR
+from heidi_engine.state_machine import CANONICAL_AUTOTRAIN_DIR  # noqa: E402
 
 AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", str(CANONICAL_AUTOTRAIN_DIR))
 

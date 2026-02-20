@@ -1,0 +1,5 @@
+if(EXISTS "/app/build/submodules/heidi-kernel/tests/integration/integration_tests[1]_tests.cmake")
+  include("/app/build/submodules/heidi-kernel/tests/integration/integration_tests[1]_tests.cmake")
+else()
+  add_test(integration_tests_NOT_BUILT integration_tests_NOT_BUILT)
+endif()

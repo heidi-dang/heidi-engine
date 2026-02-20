@@ -1,0 +1,2 @@
+/usr/bin/ar qc libheidi-kernel-governor.a "CMakeFiles/heidi-kernel-governor.dir/resource_governor.cpp.o"
+/usr/bin/ranlib libheidi-kernel-governor.a

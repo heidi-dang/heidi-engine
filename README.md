@@ -1,189 +1,137 @@
-# Heidi Engine: Autonomous Coding Agent
+# Heidi Engine
 
-Heidi Engine is a research project focused on building an autonomous coding agent through iterative self-improvement, leveraging teacher-student distillation and advanced data pipelines.
-
----
-
-## Table of Contents
-
-1. [Overview](#overview)
-2. [Installation](#installation)
-3. [Data Collection Pipeline](#data-collection-pipeline)
-4. [Model Training](#model-training)
-5. [Monitoring & Dashboard](#monitoring--dashboard)
-6. [C++ Core Optimizations](#c-core-optimizations)
-7. [Hyperparameter Optimization (HPO)](#hyperparameter-optimization-hpo)
-8. [System Requirements](#system-requirements)
-9. [Troubleshooting](#troubleshooting)
-
----
+Autonomous Data Collection and Training Orchestration Engine
 
 ## Overview
 
-Heidi Engine automates the process of collecting, cleaning, and validating code data, then trains and evaluates models in a closed loop. It supports multi-language validation, distributed monitoring, and high-performance C++ extensions for efficiency.
+Heidi Engine is a production-grade orchestration system designed to collect, validate, and train high-quality datasets for fine-tuning large language models.
 
----
+The system enforces a zero-trust lifecycle:
+raw -> clean -> verified -> train
+
+It includes:
+- Local dashboard (TUI)
+- HTTP control surface (localhost-only)
+- Dataset validation and provenance verification
+- Signed receipt verification
+- Deterministic event journal with replay
+- Manual or programmatic training triggers
+- Strict security gating before training
+
+Heidi Engine is designed to run locally (WSL/Linux-first) and is suitable for QLoRA-based workflows and autonomous coding agent pipelines.
+
+## Architecture
+
+Core components:
+- Dashboard: Interactive runtime monitoring
+- HTTP Server: Local control API
+- Runtime Engine: State management and orchestration
+- Dataset Lifecycle Manager
+- Trainer Firewall (verified-only enforcement)
+- Event Journal (hash-chained)
+- Security Validation Layer
+
+Runtime path:
+`~/.local/heidi-engine`
+
+## Supported Environment
+
+- WSL Ubuntu 22.04+
+- Python 3.10+
+- Optional NVIDIA GPU (CUDA-compatible)
+- Linux-first deployment model
 
 ## Installation
-
-Clone the repository and install dependencies:
 
 ```bash
 git clone https://github.com/heidi-dang/heidi-engine.git
 cd heidi-engine
+python -m venv .venv
+source .venv/bin/activate
 pip install -e .
 ```
 
----
-
-## Data Collection Pipeline
-
-The core data pipeline is managed by `loop_repos.sh`, which automates:
-
-- Scraping GitHub repositories
-- Generating and validating synthetic training data
-- Filtering and deduplication
-
-**Key Features:**
-
-- **Stack Presets:**
-  - `--stack python` (Python: `.py`, `.ipynb`)
-  - `--stack cpp` (C++: `.cpp`, `.h`)
-  - `--stack vite` (Modern frontend: `.ts`, `.tsx`, `.vue`, `.svelte`)
-  - `--stack web` (Web: `.js`, `.ts`)
-  - `--stack go` (Go: `.go`)
-- **Smart Filtering:** Excludes homework-like repos, checks for permissive licenses, and limits file sizes.
-- **Golden Repos:** Add curated, high-quality repos with `--golden`.
-- **Resume Support:** Continue previous runs with `--resume`.
-- **Global Deduplication:** Merge and deduplicate with `--dedupe`.
-
-**Default:** Each round processes up to 33 samples. Override with `--rounds` and `--samples`.
-
-**Example:**
-
+Verify installation:
 ```bash
-./scripts/loop_repos.sh \
-  --stack python \
-  --max 100 \
-  --rounds 1 \
-  --samples 1000 \
-  --resume \
-  --golden \
-  --dedupe
+python -m heidi_engine.dashboard --help
+python -m heidi_engine.http --help
 ```
 
-**Upload to Hugging Face:**
+## Running the Engine
 
+### Start Dashboard
 ```bash
-./scripts/loop_repos.sh --stack python --max 100 --push-to-hub my-org/my-dataset
+python -m heidi_engine.dashboard
 ```
 
----
-
-## Model Training
-
-Train models as part of the data loop (`--full`), or standalone for more control:
-
+### Start HTTP Server
 ```bash
-./scripts/train_only.py \
-  --data ./autotrain_repos/merged_dataset.jsonl \
-  --base-model microsoft/phi-2 \
-  --steps 1000 \
-  --out-dir ./my_model_output
+python -m heidi_engine.http
 ```
 
----
+HTTP binds to: `127.0.0.1` only.
 
-## Monitoring & Dashboard
+## Collect Mode (Overnight Workflow)
 
-Track progress in real time with two dashboard options:
-
-### 1. Terminal Dashboard (Recommended)
+Collects and validates data without triggering training.
 
 ```bash
-./scripts/dashboard.sh
+python -m heidi_engine.collect --mode collect
 ```
 
-### 2. Web Dashboard
-
-Start the telemetry server:
-
+If available:
 ```bash
-python3 -m heidi_engine.telemetry init --server
+./scripts/night_run.sh
 ```
-Access at: [http://127.0.0.1:7779/](http://127.0.0.1:7779/)
 
-**Features:**
+This mode:
+- Generates samples
+- Validates samples
+- Stores verified results
+- Does not train until explicitly triggered
 
-- Real-time stats: generation, validation, failure rates
-- Training metrics: loss, steps
-- GPU VRAM monitoring
-- API cost estimates
-- Dark mode
+## Trigger Training
 
-### Multi-Machine Monitoring
+From dashboard:
+Press: `f`
 
-Monitor distributed training from a single dashboard:
-
-**On Dashboard Machine:**
-
+Or via HTTP:
 ```bash
-python3 -m heidi_engine.telemetry init --server
-```
-View at [http://127.0.0.1:7779/](http://127.0.0.1:7779/)
-
-**On Worker Machines:**
-
-```bash
-./scripts/loop_repos.sh --stack python --monitor http://<dashboard-ip>:7779
+curl -X POST http://127.0.0.1:<port>/actions/train-now
 ```
 
----
+## Runtime Directory
 
-## C++ Core Optimizations
+Default runtime path: `~/.local/heidi-engine`
 
-High-performance C++ extensions accelerate data processing and resource management:
+Contains:
+- `state.json`
+- `datasets/`
+- `logs/`
+- `receipts/`
+- `journal/`
 
-- **Speed:** Deduplication and transpose up to 3.4x faster than Python
-- **Efficiency:** Arena allocation, vectorized compression
-- **Kernel Integration:** Submodule linking with [heidi-kernel](https://github.com/heidi-dang/heidi-kernel)
-- **Monitoring:** Real-time GPU VRAM tracking via CUDA
+## Security Model
 
-See [docs/cpp_optimizations.md](docs/cpp_optimizations.md) for details.
+- HTTP server binds to localhost only
+- Verified-only training gate
+- Signed receipts required
+- Hash-chain journal
+- No plaintext secret storage
+- Strict configuration validation
 
----
+## CI & Governance
 
-## Hyperparameter Optimization (HPO)
+- No direct pushes to main
+- PR required
+- Green CI required before merge
+- Linear history enforced
+- Security checks required
 
-Integrated Optuna-powered sweeps for optimal training parameters:
+## Ecosystem
 
-- **Automated Search:** Explores `learning_rate`, `batch_size`, `lora_r`
-- **Resource Awareness:** Skips trials if GPU VRAM <1GB
-- **Dashboard Integration:** Broadcasts best params in real time
-- **Fail-Safe:** Infinite-loss fallback for OOM or script crashes
+Related repositories:
+- [heidi-kernel](https://github.com/heidi-dang/heidi-kernel)
+- [chatgpt-github-workflow](https://github.com/heidi-dang/chatgpt-github-workflow)
 
-**Example:**
-
-```bash
-./scripts/train_only.py --data dataset.jsonl --optuna --n-trials 20
-```
-
----
-
-## System Requirements
-
-**Compiler Requirements for Validation:**
-
-- `g++` (C++)
-- `node` (JavaScript/TypeScript)
-- `go` (Go)
-
----
-
-## Troubleshooting
-
-- **Connection Issues:** Check firewall and telemetry server status
-- **Authentication Errors:** Set `TELEMETRY_PASS` environment variable
-- **Validation Failures:** Ensure compilers are installed; fallback logging is enabled
-
-For more, see [docs/walkthrough_v1.md](docs/walkthrough_v1.md).
+Additional components may be linked here as ecosystem expands.
