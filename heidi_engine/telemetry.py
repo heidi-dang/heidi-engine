@@ -82,7 +82,7 @@ _remote_states: Dict[str, Any] = {}
 # =============================================================================
 
 # Canonical AUTOTRAIN_DIR - MUST use ~/.local/heidi-engine
-from heidi_engine.state_machine import get_autotrain_dir, CANONICAL_AUTOTRAIN_DIR
+from heidi_engine.state_machine import CANONICAL_AUTOTRAIN_DIR  # noqa: E402
 
 AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", str(CANONICAL_AUTOTRAIN_DIR))
 
@@ -580,7 +580,7 @@ def init_telemetry(
 
     # Initialize StateMachine if available (Phase 2)
     try:
-        from heidi_engine.state_machine import StateMachine, Mode
+        from heidi_engine.state_machine import StateMachine
 
         if _state_machine is None:
             _state_machine = StateMachine(run_id=run_id)
@@ -902,7 +902,7 @@ def sm_apply_event(event_name: str, **kwargs) -> Optional[str]:
         return None
 
     try:
-        from heidi_engine.state_machine import Event, Mode
+        from heidi_engine.state_machine import Event
 
         event = Event[event_name]
         new_phase = _state_machine.apply(event, **kwargs)
