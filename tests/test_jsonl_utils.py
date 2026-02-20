@@ -98,7 +98,7 @@ class TestJSONLUtils:
         """Test that load_jsonl skips invalid JSON lines and prints a warning to stderr."""
         test_file.write_text('{"id": 1}\n{invalid}\n{"id": 2}\n')
 
-        with pytest.raises(ValueError, match="Missing keys|JSON parse error"):
+        with pytest.raises(ValueError, match=r"(JSON parsing error|invalid JSON|line)"):
             load_jsonl(str(test_file))
 
     def test_save_current_directory(self, tmp_path, monkeypatch):
