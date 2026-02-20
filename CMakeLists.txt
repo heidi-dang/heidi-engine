@@ -26,6 +26,7 @@ add_executable(heidid
     heidi_engine/cpp/core/subprocess.cpp
     heidi_engine/cpp/core/mock_provider.cpp
     heidi_engine/cpp/core/async_collector.cpp
+    heidi_engine/cpp/core/manifest.cpp
 )
 
 target_link_libraries(heidid
@@ -61,8 +62,9 @@ add_executable(cpp_core_tests
     heidi_engine/cpp/core/mock_provider.cpp
     heidi_engine/cpp/core/async_collector.cpp
     heidi_engine/cpp/core/core.cpp
+    heidi_engine/cpp/core/manifest.cpp
 )
 
 target_include_directories(cpp_core_tests PRIVATE heidi_engine/cpp)
-target_link_libraries(cpp_core_tests PRIVATE gtest_main crypto pthread heidi-metrics)
+target_link_libraries(cpp_core_tests PRIVATE gtest_main crypto pthread heidi-metrics heidi-kernel-governor)
 add_test(NAME CoreTest COMMAND cpp_core_tests)

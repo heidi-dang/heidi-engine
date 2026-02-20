@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "../heidi_engine/cpp/core/journal_writer.h"
 #include "../heidi_engine/cpp/core/core.h"
+#include "../heidi_engine/cpp/core/manifest.h"
 #include <heidi-kernel/resource_governor.h>
 #include <fstream>
 #include <cstdio>
@@ -123,4 +124,33 @@ TEST(JournalWriterTest, StrictSchemaValidation) {
     // 4. Correct schema
     std::string good_json = "{\"event_version\":\"1.0\",\"ts\":\"now\",\"run_id\":\"123\",\"round\":1,\"stage\":\"s\",\"level\":\"i\",\"event_type\":\"e\",\"message\":\"m\",\"counters_delta\":{},\"usage_delta\":{},\"artifact_paths\":[],\"prev_hash\":\"h\"}";
     EXPECT_NO_THROW(heidi::core::JournalWriter::validate_strict(good_json));
+}
+
+TEST(ManifestTest, CanonicalSerialization) {
+    heidi::core::Manifest m;
+    m.dataset_hash = "sha256:abc";
+    m.record_count = 100;
+    m.created_at = "2026-02-20T10:00:00Z";
+    m.replay_hash = "sha256:replay";
+    m.guardrail_snapshot["max_cpu"] = "80";
+
+    std::string json = m.to_canonical_json();
+    // Verify sorted alphabetical order of keys to ensure stability
+    EXPECT_TRUE(json.find("\"created_at\"") < json.find("\"dataset_hash\""));
+    EXPECT_TRUE(json.find("\"dataset_hash\"") < json.find("\"guardrail_snapshot\""));
+}
+
+TEST(SignatureTest, HMACVerification) {
+    std::string data = "{\"test\":true}";
+    std::string key = "super-secret-key";
+    
+    std::string sig = heidi::core::SignatureUtil::hmac_sha256(data, key);
+    EXPECT_FALSE(sig.empty());
+    EXPECT_TRUE(heidi::core::SignatureUtil::verify(data, sig, key));
+    
+    // Negative test: wrong key
+    EXPECT_FALSE(heidi::core::SignatureUtil::verify(data, sig, "wrong-key"));
+    
+    // Negative test: tampered data
+    EXPECT_FALSE(heidi::core::SignatureUtil::verify(data + " ", sig, key));
 }
