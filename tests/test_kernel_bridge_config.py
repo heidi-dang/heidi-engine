@@ -4,7 +4,6 @@ Unit tests for kernel bridge configuration.
 
 import pytest
 import os
-from pydantic import ValidationError
 from heidi_engine.kernel_bridge.config import KernelBridgeConfig
 
 
@@ -61,7 +60,7 @@ class TestKernelBridgeConfig:
     
     def test_unix_socket_endpoint_invalid(self):
         """Test invalid unix socket endpoint."""
-        with pytest.raises(ValidationError, match="Unix socket path must be absolute"):
+        with pytest.raises(ValueError, match="Unix socket path must be absolute"):
             KernelBridgeConfig(endpoint="unix://relative/path.sock")
     
     def test_http_endpoint_localhost(self):
@@ -74,12 +73,12 @@ class TestKernelBridgeConfig:
     
     def test_http_endpoint_invalid(self):
         """Test invalid HTTP endpoint."""
-        with pytest.raises(ValidationError, match="HTTP endpoint must be localhost only"):
+        with pytest.raises(ValueError, match="HTTP endpoint must be localhost only"):
             KernelBridgeConfig(endpoint="http://example.com:8080")
     
     def test_invalid_endpoint_format(self):
         """Test invalid endpoint format."""
-        with pytest.raises(ValidationError, match="Endpoint must be unix:// or http"):
+        with pytest.raises(ValueError, match="Endpoint must be unix:// or http"):
             KernelBridgeConfig(endpoint="invalid://endpoint")
     
     def test_timeout_bounds(self):
@@ -89,10 +88,10 @@ class TestKernelBridgeConfig:
         KernelBridgeConfig(timeout_ms=30000)
         
         # Invalid bounds
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValueError):
             KernelBridgeConfig(timeout_ms=50)  # Too low
         
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValueError):
             KernelBridgeConfig(timeout_ms=50000)  # Too high
     
     def test_max_inflight_bounds(self):
@@ -102,8 +101,8 @@ class TestKernelBridgeConfig:
         KernelBridgeConfig(max_inflight=10)
         
         # Invalid bounds
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValueError):
             KernelBridgeConfig(max_inflight=0)  # Too low
         
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValueError):
             KernelBridgeConfig(max_inflight=20)  # Too high
