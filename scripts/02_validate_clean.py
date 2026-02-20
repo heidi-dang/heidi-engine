@@ -189,6 +189,13 @@ Examples:
     return parser.parse_args()
 
 
+def validate_schema(sample: Dict[str, Any]) -> Tuple[bool, str]:
+    """
+    Validate JSON schema (required fields).
+    """
+    for field in REQUIRED_FIELDS:
+        if field not in sample:
+            return False, f"missing field: {field}"
     return True, "ok"
 
 def enforce_strict_clean_schema(sample: Dict[str, Any]):

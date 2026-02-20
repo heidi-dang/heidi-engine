@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 
+import importlib.util
 from heidi_engine.loop_runner import PythonLoopRunner
 try:
     from heidi_engine.loop_runner import CppLoopRunner
@@ -30,7 +31,9 @@ def temp_out_dir(tmp_path, monkeypatch):
 
 def get_runner_classes():
     runners = [PythonLoopRunner]
-    if CppLoopRunner is not None:
+    # Check if heidi_cpp is actually available before including CppLoopRunner
+    # to avoid errors when CppLoopRunner is a dummy placeholder.
+    if CppLoopRunner is not None and importlib.util.find_spec("heidi_cpp") is not None:
         runners.append(CppLoopRunner)
     return runners
 
