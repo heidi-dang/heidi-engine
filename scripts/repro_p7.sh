@@ -13,6 +13,7 @@ cd "$WORKDIR"
 echo "[p7] clone (clean)"
 git clone --filter=blob:none --no-tags "https://github.com/${REPO}.git" repo
 cd repo
+git submodule update --init --recursive
 HEAD_SHA="$(git rev-parse HEAD)"
 echo "HEAD_SHA=$HEAD_SHA"
 
@@ -34,10 +35,9 @@ chmod +x scripts/verify_p6.sh
 mkdir -p "$RUNTIME/pending" "$RUNTIME/verified" "$RUNTIME/tmp"
 
 log "1) REAL-mode refusal (Fail-Closed check)"
-# Using actual entrypoint as requested
-# We expect this to either exit non-zero or show ERROR in status if we initialize the core.
-# The user's template suggests checking if it refuses a REAL run.
-( HEIDI_MODE=real python3 -m heidi_engine.http --port 8888 2>&1 | grep -i "error" ) || log "Refusal message/state validated."
+# Attempt to initialize C++ Core in REAL mode without required env vars
+# It should set state to ERROR and remain idle/fail-closed.
+( python3 -c "import heidi_cpp; import json; c = heidi_cpp.Core(); c.start('real'); s=json.loads(c.get_status_json()); exit(0 if s.get('state') == 'ERROR' else 1)" ) && log "PASSED: REAL mode refused start (Fail-Closed state reached)." || { error "REAL mode did NOT reach ERROR state without keys!"; exit 1; }
 
 log "2) pending->trainer access (must refuse)"
 echo '{"id":"1","instruction":"i","input":"in","output":"out","metadata":{}}' > "$RUNTIME/pending/attack.jsonl"
