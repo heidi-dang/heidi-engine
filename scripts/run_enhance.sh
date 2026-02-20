@@ -161,7 +161,7 @@ if os.path.exists(f):
             d = json.load(j)
             if "counters" not in d: d["counters"] = {}
             d["counters"][key] = d["counters"].get(key, 0) + 1
-            d["last_update"] = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+            d["last_update"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             j.seek(0); json.dump(d, j, indent=2); j.truncate()
         except Exception as e:
             sys.stderr.write(f"State update failed: {e}\n")
@@ -827,7 +827,7 @@ if os.path.exists(f):
             fcntl.flock(j, fcntl.LOCK_EX)
             d = json.load(j)
             d['target_repos'] = int(tot)
-            d['last_update'] = __import__('datetime').datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+            d['last_update'] = __import__('datetime').datetime.now(__import__('datetime').timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             j.seek(0); json.dump(d, j, indent=2); j.truncate()
         except Exception:
             pass
