@@ -1,23 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from heidi_engine.pipeline import check_health as pipeline_check_health
+
 # Keep imports narrow and explicit to avoid circulars.
 # Adjust these imports to match your actual module function names.
 from heidi_engine.pipeline import get_status as pipeline_get_status
-from heidi_engine.pipeline import check_health as pipeline_check_health
-
 from heidi_engine.pipeline.receipt import (
-    verify_receipt,
     export_receipt,
+    verify_receipt,
 )
-
-from heidi_engine.pipeline.trainer_firewall import VerificationStatus
-
 
 MAX_RECEIPT_BYTES = 256 * 1024  # 256KB hard cap
 

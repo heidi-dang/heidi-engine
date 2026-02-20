@@ -33,20 +33,21 @@ NOTE:
 """
 
 import argparse
-import json
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Any, Dict, List, Tuple
 from pathlib import Path
+from typing import Any, Dict, List, Tuple
 
 # Add project root to sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from heidi_engine.utils.io_jsonl import load_jsonl, save_jsonl  # noqa: E402
 
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
@@ -345,33 +346,6 @@ def test_sample(
     }
 
     return sample
-
-
-def load_jsonl(path: str) -> List[Dict[str, Any]]:
-    """Load samples from JSONL file."""
-    samples = []
-
-    with open(path, "r") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                samples.append(json.loads(line))
-            except json.JSONDecodeError as e:
-                print(f"[WARN] JSON parse error: {e}", file=sys.stderr)
-                continue
-
-    return samples
-
-
-def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
-    """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-
-    with open(path, "w") as f:
-        for sample in samples:
-            f.write(json.dumps(sample) + "\n")
 
 
 def main():

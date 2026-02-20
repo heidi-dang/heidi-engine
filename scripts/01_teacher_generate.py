@@ -32,7 +32,6 @@ SAFETY:
 
 import argparse
 import hashlib
-import json
 import os
 import random
 import re
@@ -52,6 +51,8 @@ try:
     HAS_SECURITY = True
 except ImportError:
     HAS_SECURITY = False
+
+from heidi_engine.utils.io_jsonl import save_jsonl  # noqa: E402
 
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
@@ -406,24 +407,6 @@ def generate_dataset(
     return samples
 
 
-def save_jsonl(samples: List[Dict[str, Any]], output_path: str) -> None:
-    """
-    Save samples to JSONL file.
-
-    HOW IT WORKS:
-        - Writes one JSON object per line
-        - Creates parent directories if needed
-    """
-    dirname = os.path.dirname(output_path)
-    if dirname:
-        os.makedirs(dirname, exist_ok=True)
-
-    with open(output_path, "w") as f:
-        for sample in samples:
-            f.write(json.dumps(sample) + "\n")
-
-    print(f"[OK] Saved {len(samples)} samples to {output_path}")
-
 
 def main():
     """
@@ -459,6 +442,7 @@ def main():
 
     # Save to file
     save_jsonl(samples, args.output)
+    print(f"[OK] Saved {len(samples)} samples to {args.output}")
 
     print("[OK] Dataset generation complete!")
     return 0

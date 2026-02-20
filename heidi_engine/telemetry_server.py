@@ -1,10 +1,8 @@
-from flask import Flask, request, jsonify
-from flask_socketio import SocketIO
-from flask_httpauth import HTTPBasicAuth
 import os
-import json
-import hashlib
-from pathlib import Path
+
+from flask import Flask, jsonify, request
+from flask_httpauth import HTTPBasicAuth
+from flask_socketio import SocketIO
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
@@ -16,7 +14,7 @@ _remote_states = {}
 @auth.verify_password
 def verify(username, password):
     # Get password from environment for security
-    expected_pass = os.environ.get('TELEMETRY_PASS', 'admin') 
+    expected_pass = os.environ.get('TELEMETRY_PASS', 'admin')
     return username == 'admin' and password == expected_pass
 
 @app.route('/health')
@@ -31,13 +29,13 @@ def report():
         run_id = data.get("run_id")
         if not run_id:
             return jsonify({"error": "missing run_id"}), 400
-        
+
         # Store state
         _remote_states[run_id] = data
-        
+
         # Broadcast via WebSocket for real-time dashboard updates
         socketio.emit('state_update', data)
-        
+
         return jsonify({"status": "ok"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -52,11 +50,11 @@ def get_status():
     run_id = request.args.get('run_id')
     if not run_id:
         return jsonify({"error": "missing run_id"}), 400
-    
+
     state = _remote_states.get(run_id)
     if not state:
         return jsonify({"error": "run not found"}), 404
-        
+
     return jsonify(state)
 
 @socketio.on('connect')
