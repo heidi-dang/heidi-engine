@@ -13,6 +13,7 @@ std::string Clock::now_iso8601() const {
     std::tm bt = *std::gmtime(&timer);
 
     std::ostringstream oss;
+    oss.imbue(std::locale::classic());
     oss << std::put_time(&bt, "%Y-%m-%dT%H:%M:%S");
     oss << '.' << std::setfill('0') << std::setw(3) << ms.count() << 'Z';
 

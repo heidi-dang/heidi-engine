@@ -5,6 +5,7 @@
 #include <vector>
 #include <thread>
 #include <chrono>
+#include <stdexcept>
 
 namespace heidi {
 namespace core {
@@ -78,7 +79,7 @@ void Core::start(const std::string& mode) {
         if (!governor_) {
             emit_event("gatekeeper_failed", "REAL mode refused: Resource Governor (guardrails) NOT initialized", "init", "critical");
             set_state("ERROR", "error");
-            return;
+            throw std::runtime_error("REAL mode refused: Resource Governor NOT initialized");
         }
 
         // Internal call to heidi doctor --strict (Lane C requirement)
@@ -94,7 +95,7 @@ void Core::start(const std::string& mode) {
         if (doctor_status != 0) {
             emit_event("gatekeeper_failed", "REAL mode refused: " + output_summary, "init", "critical");
             set_state("ERROR", "error");
-            return;
+            throw std::runtime_error("REAL mode refused: " + output_summary);
         }
 
         emit_event("gatekeeper_passed", output_summary, "init", "info");
