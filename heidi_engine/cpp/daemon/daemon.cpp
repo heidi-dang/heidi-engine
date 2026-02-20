@@ -6,6 +6,9 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <cstdlib>
+#include <nlohmann/json.hpp>
+#include <chrono>
+#include <filesystem>
 
 namespace heidi {
 namespace daemon {
@@ -13,7 +16,8 @@ namespace daemon {
 Daemon::Daemon(const DaemonConfig& config)
     : config_(config), 
       svr_(std::make_unique<httplib::Server>()),
-      core_(std::make_unique<heidi::core::Core>()) {
+      core_(std::make_unique<heidi::core::Core>()),
+      rpc_server_(std::make_unique<RPCServer>()) {
 }
 
 Daemon::~Daemon() {
@@ -104,15 +108,113 @@ void Daemon::start() {
     });
     engine_thread.detach();
 
+    // Determine RPC socket path
+    const char* home = std::getenv("HEIDI_HOME");
+    std::string runtime_dir = home ? std::string(home) + "/runtime" : [&]() {
+        const char* u_home = std::getenv("HOME");
+        return u_home ? std::string(u_home) + "/.local/heidi-engine/runtime" : std::string("/tmp/heidi-engine/runtime");
+    }();
+    
+    // Ensure runtime directory exists
+    std::error_code ec;
+    std::filesystem::create_directories(runtime_dir, ec);
+    if (ec) {
+        std::cerr << "Warning: Failed to create runtime directory: " << ec.message() << std::endl;
+    }
+    
+    std::string sock_path = runtime_dir + "/heidid.sock";
+    
+    auto dispatch = [this](const std::string& req_json) -> std::string {
+        return this->rpc_dispatch(req_json);
+    };
+    
+    if (!rpc_server_->start(sock_path, dispatch)) {
+        throw std::runtime_error("RPCServer failed to start on " + sock_path);
+    }
+
     std::cout << "Starting heidid listening on " << config_.host << ":" << config_.port << std::endl;
     if (!svr_->listen(config_.host.c_str(), config_.port)) {
         std::cerr << "Failed to start HTTP server." << std::endl;
     }
 }
 
+std::string Daemon::rpc_dispatch(const std::string& req_json) {
+    using json = nlohmann::json;
+    try {
+        json req = json::parse(req_json);
+        if (!req.contains("method") || !req.contains("id")) {
+            return "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32600,\"message\":\"Invalid Request\"},\"id\":null}";
+        }
+        std::string method = req["method"];
+        auto id = req["id"];
+        if (method != "provider.generate") {
+            json resp = {{"jsonrpc", "2.0"}, {"error", {{"code", -32601}, {"message", "Method not found"}}}, {"id", id}};
+            return resp.dump();
+        }
+        
+        json params = req.value("params", json::object());
+        
+        bool wants_real = params.value("real_network_enabled", false);
+#ifndef HAVE_CURL
+        if (wants_real) {
+            json resp = {{"jsonrpc", "2.0"}, {"error", {{"code", -32001}, {"message", "E_TRANSPORT_UNAVAILABLE: curl not built"}}}, {"id", id}};
+            return resp.dump();
+        }
+#endif
+        
+        std::string model = params.value("model", "dummy");
+        
+        if (!provider_ || provider_->name() != params.value("provider", "openai")) {
+            heidi::core::ProviderConfig pcfg;
+            pcfg.type = heidi::core::parseProviderType(params.value("provider", "openai"));
+            pcfg.model = model;
+            pcfg.api_key = "dummy";
+            pcfg.real_network_enabled = wants_real;
+            provider_ = heidi::core::createProvider(pcfg);
+        }
+        
+        heidi::core::GenerationParams gparams;
+        gparams.temperature = params.value("temperature", 0.7);
+        gparams.max_tokens = params.value("max_tokens", 512);
+        
+        std::vector<heidi::core::Message> msgs;
+        if (params.contains("messages") && params["messages"].is_array()) {
+            for (const auto& m : params["messages"]) {
+                msgs.push_back({m.value("role", "user"), m.value("content", "")});
+            }
+        }
+        
+        auto start_t = std::chrono::steady_clock::now();
+        heidi::core::ApiResponse api_resp = provider_->generate(msgs, gparams);
+        auto end_t = std::chrono::steady_clock::now();
+        int latency = std::chrono::duration_cast<std::chrono::milliseconds>(end_t - start_t).count();
+        
+        json result = {
+            {"output", api_resp.content},
+            {"usage", {
+                {"prompt_tokens", api_resp.usage_prompt_tokens},
+                {"completion_tokens", api_resp.usage_completion_tokens},
+                {"total_tokens", api_resp.usage_total_tokens}
+            }},
+            {"provider_latency_ms", latency},
+            {"transport_status", "OK"}
+        };
+        
+        json resp = {{"jsonrpc", "2.0"}, {"result", result}, {"id", id}};
+        return resp.dump();
+
+    } catch (const std::exception& e) {
+        json resp = {{"jsonrpc", "2.0"}, {"error", {{"code", -32603}, {"message", std::string("Internal error: ") + e.what()}}}, {"id", nullptr}};
+        return resp.dump();
+    }
+}
+
 void Daemon::stop() {
     if (svr_) {
         svr_->stop();
+    }
+    if (rpc_server_) {
+        rpc_server_->stop();
     }
     if (core_) {
         core_->shutdown();

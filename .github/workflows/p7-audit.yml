@@ -1,0 +1,71 @@
+name: p7-audit
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  p7_audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: System deps (C++ build + locales)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          build-essential cmake ninja-build pkg-config \
+          locales tzdata
+        sudo locale-gen en_AU.UTF-8
+        sudo update-locale
+
+    - name: Install project (build heidi_cpp)
+      run: |
+        python -m pip install -U pip wheel setuptools
+        python -m pip install -U scikit-build-core pybind11
+        python -m pip install -e '.[dev]' || python -m pip install -e .
+
+    - name: Verify heidi_cpp import
+      run: |
+        python -c "import heidi_cpp; print('heidi_cpp OK:', getattr(heidi_cpp,'__file__',None))"
+
+    - name: Phase 7 audit (3 permutations)
+      env:
+        PYTHONUNBUFFERED: '1'
+      run: |
+        set -euo pipefail
+        chmod +x scripts/repro_p7.sh
+
+        export LC_ALL=C TZ=UTC
+        echo "[p7] LC_ALL=$LC_ALL TZ=$TZ"
+        ./scripts/repro_p7.sh | tee /tmp/p7_C_UTC.log
+
+        export LC_ALL=en_AU.UTF-8 TZ=Australia/Melbourne
+        echo "[p7] LC_ALL=$LC_ALL TZ=$TZ"
+        ./scripts/repro_p7.sh | tee /tmp/p7_AU_MEL.log
+
+        export LC_ALL=C TZ=America/New_York
+        echo "[p7] LC_ALL=$LC_ALL TZ=$TZ"
+        ./scripts/repro_p7.sh | tee /tmp/p7_C_NY.log
+
+    - name: Upload audit logs (always)
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: p7-audit-logs
+        path: |
+          /tmp/p7_C_UTC.log
+          /tmp/p7_AU_MEL.log
+          /tmp/p7_C_NY.log
+          /tmp/heidi_p7_*
+        if-no-files-found: ignore

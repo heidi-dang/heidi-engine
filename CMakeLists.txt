@@ -60,6 +60,7 @@ include_directories(
 add_executable(heidid
     heidi_engine/cpp/daemon/main.cpp
     heidi_engine/cpp/daemon/daemon.cpp
+    heidi_engine/cpp/daemon/rpc_server.cpp
     heidi_engine/cpp/core/core.cpp
     heidi_engine/cpp/core/clock.cpp
     heidi_engine/cpp/core/config.cpp
@@ -67,6 +68,7 @@ add_executable(heidid
     heidi_engine/cpp/core/run_id.cpp
     heidi_engine/cpp/core/status_writer.cpp
     heidi_engine/cpp/core/subprocess.cpp
+    heidi_engine/cpp/core/provider.cpp
     heidi_engine/cpp/core/mock_provider.cpp
     heidi_engine/cpp/core/async_collector.cpp
     heidi_engine/cpp/core/manifest.cpp
@@ -129,8 +131,8 @@ target_include_directories(cpp_core_tests PRIVATE heidi_engine/cpp)
 if(HEIDI_HAS_CURL)
     target_compile_definitions(cpp_core_tests PRIVATE HAVE_CURL)
     target_include_directories(cpp_core_tests PRIVATE ${CURL_INCLUDE_DIR})
-    target_link_libraries(cpp_core_tests PRIVATE gtest_main crypto pthread ${CURL_LIB_TARGET})
+    target_link_libraries(cpp_core_tests PRIVATE gtest_main crypto pthread ${CURL_LIB_TARGET} heidi-metrics heidi-kernel-job heidi-kernel-governor heidi-kernel-lib heidi-ipc z)
 else()
-    target_link_libraries(cpp_core_tests PRIVATE gtest_main crypto pthread)
+    target_link_libraries(cpp_core_tests PRIVATE gtest_main crypto pthread heidi-metrics heidi-kernel-job heidi-kernel-governor heidi-kernel-lib heidi-ipc z)
 endif()
 add_test(NAME CoreTest COMMAND cpp_core_tests)
