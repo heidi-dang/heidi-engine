@@ -58,7 +58,7 @@ class UnixSocketTransport(Transport):
         length = struct.unpack('!I', header)[0]
         
         # Validate length to prevent hanging reads
-        if length > 1024 * 1024:  # 1MB max
+        if length > 64 * 1024:  # 64KB max response
             raise ConnectionError(f"Response too large: {length} bytes")
         
         # Read response data
@@ -91,6 +91,14 @@ class UnixSocketTransport(Transport):
                     
                     # Convert to JSON bytes
                     data = json.dumps(request).encode('utf-8')
+                    
+                    # Validate request size
+                    if len(data) > 8 * 1024:  # 8KB max request
+                        return KernelBridgeResult.error_result(
+                            reason=f"Request too large: {len(data)} bytes",
+                            latency_ms=int((time.time() - start_time) * 1000),
+                            retry_count=retry_count
+                        )
                     
                     # Send request and receive response
                     self._send_request(sock, data)
