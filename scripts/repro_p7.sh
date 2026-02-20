@@ -83,16 +83,10 @@ else
 fi
 
 log "4) locale/timezone invariance check (full replay digest)"
-run_with_locale() {
-  local locale=$1 tz=$2
-  local out_dir="$RUNTIME/tmp/locale_${locale//\//_}_${tz//\//_}"
-  mkdir -p "$out_dir"
-  LC_ALL="$locale" TZ="$tz" python3 -c "
-import os
-import sys
-import hashlib
-import json
-os.environ['OUT_DIR'] = '$out_dir'
+# Generate a deterministic journal first (single run)
+export OUT_DIR="$RUNTIME/tmp/deterministic"
+export RUN_ID="deterministic"
+python3 -c "
 import heidi_cpp
 c = heidi_cpp.Core()
 c.init()
@@ -100,12 +94,19 @@ c.start('collect')
 c.tick(3)
 c.shutdown()
 "
-  local journal="$out_dir/events.jsonl"
-  python3 scripts/replay_journal.py "$journal" >/dev/null 2>&1 || true
+JOURNAL="$RUNTIME/tmp/deterministic/events.jsonl"
+# Test replay determinism across locales (not journal generation)
+run_replay_with_locale() {
+  local locale=$1 tz=$2
+  local out_dir="$RUNTIME/tmp/replay_${locale//\//_}_${tz//\//_}"
+  mkdir -p "$out_dir"
+  # Copy journal to avoid modification
+  cp "$JOURNAL" "$out_dir/events.jsonl"
+  LC_ALL="$locale" TZ="$tz" python3 scripts/replay_journal.py "$out_dir/events.jsonl" 2>/dev/null || true
   python3 -c "
 import hashlib
 import os
-journal = '$journal'
+journal = '$out_dir/events.jsonl'
 digest = hashlib.sha256(open(journal).read().encode()).hexdigest()
 chain_head = open(journal).readlines()[0] if os.path.exists(journal) and open(journal).read() else ''
 chain_hash = hashlib.sha256(chain_head.encode()).hexdigest()[:16]
@@ -113,9 +114,9 @@ print(digest + ':' + chain_hash)
 "
 }
 
-DIGEST_C=$(run_with_locale "C" "UTC")
-DIGEST_AU=$(run_with_locale "en_AU.UTF-8" "Australia/Melbourne")
-DIGEST_TZ=$(run_with_locale "C" "America/New_York")
+DIGEST_C=$(run_replay_with_locale "C" "UTC")
+DIGEST_AU=$(run_replay_with_locale "en_AU.UTF-8" "Australia/Melbourne")
+DIGEST_TZ=$(run_replay_with_locale "C" "America/New_York")
 
 if [ "$DIGEST_C" == "$DIGEST_AU" ] && [ "$DIGEST_C" == "$DIGEST_TZ" ]; then
   log "PASSED: Full replay digest invariant across locales/TZ ($DIGEST_C)."
