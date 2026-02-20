@@ -25,6 +25,20 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .[dev]
+      - name: macOS diagnostic: report heidi_cpp import
+        if: runner.os == 'macOS'
+        run: |
+          python - <<'PY'
+import sys, importlib
+print('PY', sys.version)
+print('PATH', sys.path)
+try:
+    import heidi_cpp
+    print('heidi_cpp OK', getattr(heidi_cpp, '__file__', 'no __file__'))
+except Exception as e:
+    print('heidi_cpp FAIL', type(e).__name__, e)
+    # do not fail CI here; diagnostic only
+PY
       - name: Build optional C++ extension (Linux only)
         if: runner.os == 'Linux'
         run: |
