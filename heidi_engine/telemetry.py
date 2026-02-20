@@ -84,7 +84,7 @@ _remote_states: Dict[str, Any] = {}
 # Base directory for all heidi_engine outputs
 # TUNABLE: Change to custom path if needed
 # NOTE: Default changed to .local/heidi_engine to avoid polluting repo root
-AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi_engine"))
+AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi-engine"))
 
 # Unique run identifier - set by loop.sh or menu.py
 # TUNABLE: Auto-generated if not provided

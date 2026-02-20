@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG "CMakeFiles/heidi-kernel-daemon.dir/main.cpp.o" "CMakeFiles/heidi-kernel-daemon.dir/daemon.cpp.o" -o heidi-kernel-daemon  ../ipc/libheidi-ipc.a ../metrics/libheidi-metrics.a ../job/libheidi-kernel-job.a ../governor/libheidi-kernel-governor.a ../libheidi-kernel-lib.a 

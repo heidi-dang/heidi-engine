@@ -42,13 +42,19 @@ void Core::emit_event(const std::string& event_type, const std::string& message,
 void Core::set_state(const std::string& new_state, const std::string& stage) {
     current_state_ = new_state;
     if (status_) {
-        // Simple serialization since we don't have json.hpp handy
+        // Enhanced state.json to match dashboard contract
         std::ostringstream ss;
         ss << "{";
         ss << "\"run_id\":\"" << config_.run_id << "\",";
         ss << "\"status\":\"" << (new_state == "IDLE" ? "completed" : "running") << "\",";
         ss << "\"current_round\":" << current_round_ << ",";
-        ss << "\"current_stage\":\"" << stage << "\"";
+        ss << "\"current_stage\":\"" << stage << "\",";
+        ss << "\"total_rounds\":" << config_.rounds << ",";
+        ss << "\"mode\":\"" << mode_ << "\",";
+        ss << "\"samples_per_round\":" << config_.samples_per_round << ",";
+        ss << "\"teacher_generated\":0,";
+        ss << "\"validated_clean\":0,";
+        ss << "\"last_update\":\"" << clock_->now_iso8601() << "\"";
         ss << "}";
         status_->write(ss.str());
     }

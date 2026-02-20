@@ -1,0 +1,2 @@
+/usr/bin/ar qc libheidi-ipc.a "CMakeFiles/heidi-ipc.dir/ipc.cpp.o"
+/usr/bin/ranlib libheidi-ipc.a

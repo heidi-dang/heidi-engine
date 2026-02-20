@@ -60,7 +60,7 @@ class PythonLoopRunner(LoopRunner):
     def __init__(self, config_path: Optional[str] = None):
         # We simulate reading from config or environment variables
         self.config_path = config_path
-        self.out_dir = Path(os.environ.get("OUT_DIR", os.path.expanduser("~/.local/heidi_engine")))
+        self.out_dir = Path(os.environ.get("OUT_DIR", os.path.expanduser("~/.local/heidi-engine")))
         self.rounds = int(os.environ.get("ROUNDS", 3))
         self.samples_per_round = int(os.environ.get("SAMPLES_PER_ROUND", 50))
         self.run_unit_tests = os.environ.get("RUN_UNIT_TESTS", "0") == "1"

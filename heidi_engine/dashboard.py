@@ -89,7 +89,7 @@ MAX_EVENTS = int(os.environ.get("DASHBOARD_MAX_EVENTS", "20"))
 
 # Base directory for heidi_engine outputs
 # TUNABLE: Change if heidi_engine is in different location
-AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi_engine"))
+AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi-engine"))
 
 # Console width (auto-detected if not set)
 CONSOLE_WIDTH = int(os.environ.get("CONSOLE_WIDTH", "0"))

@@ -4,6 +4,10 @@
 #include <string>
 #include <chrono>
 #include <thread>
+#include <cstdlib>
+#include <filesystem>
+
+extern std::atomic<bool> shutdown_requested;
 
 namespace heidi {
 
@@ -21,8 +25,9 @@ void EngineDaemon::run() {
     // Start the runner
     job_runner_->start();
 
-    // Prepare shell command
-    std::string cmd = "./scripts/loop_repos.sh --config " + config_path_;
+    // Prepare shell command with repo-root resolved path
+    std::filesystem::path repo_root = std::filesystem::current_path();
+    std::string cmd = (repo_root / "scripts" / "loop_repos.sh").string() + " --config " + config_path_;
 
     // Submit job
     JobLimits limits;
@@ -67,6 +72,13 @@ void EngineDaemon::run() {
 
         if (!finished) {
             std::this_thread::sleep_for(std::chrono::seconds(2));
+        }
+        
+        // Check for shutdown request
+        if (shutdown_requested) {
+            std::cout << "[INFO] Shutdown requested, cancelling job..." << std::endl;
+            job_runner_->cancel_job(job_id);
+            break;
         }
     }
 

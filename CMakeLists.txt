@@ -37,6 +37,11 @@ set_target_properties(heidid PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY
 
 # Add Tests
 enable_testing()
+
+# Option to run integration tests (default OFF for CI stability)
+option(HEIDI_RUN_INTEGRATION_TESTS "Run integration tests that may be flaky" OFF)
+
+# Core C++ tests
 add_executable(cpp_core_tests
     tests/test_cpp_core.cpp
     heidi_engine/cpp/core/journal_writer.cpp
@@ -51,3 +56,9 @@ add_executable(cpp_core_tests
 target_include_directories(cpp_core_tests PRIVATE heidi_engine/cpp)
 target_link_libraries(cpp_core_tests PRIVATE gtest gtest_main crypto pthread)
 add_test(NAME CoreTest COMMAND cpp_core_tests)
+
+# Only run integration tests if explicitly enabled
+if(HEIDI_RUN_INTEGRATION_TESTS)
+    add_test(NAME IntegrationTests COMMAND integration_tests)
+    add_test(NAME UnitTests COMMAND unit_tests)
+endif()
