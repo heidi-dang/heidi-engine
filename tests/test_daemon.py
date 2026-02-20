@@ -58,9 +58,16 @@ def daemon_process():
     process = subprocess.Popen([bin_path, "-p", str(port)], env=test_env)
 
     # Give the server a moment to bind and start listening
-    time.sleep(0.5)
+    deadline = time.time() + 5.0
+ while time.time() < deadline:
+ if check_port(port):
+ break
+ time.sleep(0.05)
+ else:
+ process.terminate()
+ raise RuntimeError("heidid did not bind within 5s")
 
-    yield port
+yield port
 
     # Teardown: terminate the process gently
     process.terminate()
