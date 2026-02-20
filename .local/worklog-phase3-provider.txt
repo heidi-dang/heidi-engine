@@ -1,0 +1,49 @@
+2026-02-20 20:30:00 UTC - Phase-3 provider pre-merge worklog
+
+What I changed:
+- Implemented portable libcurl discovery in `CMakeLists.txt`: prefer `find_package(CURL QUIET)` and `CURL::libcurl`, fall back to pkg-config and `find_library`.
+- Added conditional include-path discovery for `curl/curl.h` to help find headers on non-standard systems.
+- Added `heidi_engine/cpp/core/provider.{h,cpp}` (provider layer with multiple providers) as part of the rebase resolution.
+- Removed vendored `deps/include/curl/**` headers from the branch to avoid shipping system headers in the PR.
+- Kept vendored `deps/include/nlohmann/json.hpp` as a fallback and added it to the tree.
+- Fixed merge conflicts and cleaned merge markers in `tests/test_cpp_async.cpp`.
+- Committed CMake conflict resolution and test fixes.
+
+What I verified (commands run):
+- git fetch origin && git switch dev/phase-3-provider && git rebase origin/main (rebase performed, conflicts resolved)
+- cmake -S . -B build
+- cmake --build build -j 2
+- ctest --test-dir build --output-on-failure
+
+Results:
+- Rebase completed successfully (branch rebased onto origin/main).
+- CMake now prefers `CURL::libcurl` but falls back; CMake reported `Using libcurl from find_library: /usr/lib/x86_64-linux-gnu/libcurl.so.4` on this machine.
+- Build: `heidid` built successfully; `cpp_core_tests` fails to compile because `curl/curl.h` is not present on this system (linker errors when curl library present but headers missing).
+- Verified `deps/include/curl/**` are not tracked; `deps/include/nlohmann/json.hpp` is tracked as a fallback.
+
+Next recommended actions (pick one):
+1) (Recommended) Make provider network code conditionally compile when curl headers are missing (guard includes + provide no-network stubs) so tests can build in minimal environments.
+2) Install libcurl development headers on CI/this machine so provider.cpp compiles and tests pass.
+3) Vendor curl headers (not recommended) into `deps/include/curl` to force compilation; I removed these to keep the repo clean.
+
+
+2026-02-20 21:40:00 UTC - Final sanity checks before merge
+
+Dual-mode builds performed:
+
+1) Auto-detect (default):
+- Command: cmake -S . -B build
+- Observation: CMake found libcurl library (/usr/lib/x86_64-linux-gnu/libcurl.so.4) but did not find curl headers in standard include paths; as a result HEIDI_HAS_CURL was OFF and the stub transport was selected.
+- Build: cmake --build build -j 2
+- Result: Build succeeded; `cpp_core_tests` and `heidid` built using the stub transport. No network IO occurred during tests.
+
+2) Explicit curl-less mode (simulate minimal environment):
+- Command: cmake -S . -B build-no-curl -DHEIDI_HAS_CURL=OFF
+- Observation: CMake configured with HEIDI_HAS_CURL=OFF (explicit). Messages indicated using stub transport.
+- Build: cmake --build build-no-curl -j 2
+- Result: Build succeeded; tests and binaries built with stub transport.
+
+Notes:
+- Provider transport is gated: real transport is compiled/linked only when both lib and headers are available (HEIDI_HAS_CURL=ON). Otherwise a stub is used that throws a clear error when network is attempted and preserves fail-closed semantics.
+- nlohmann/json.hpp remains vendored as fallback to avoid adding a required external dependency before merge.
+
