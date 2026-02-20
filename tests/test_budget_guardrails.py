@@ -1,5 +1,5 @@
 import pytest
-import heidi_cpp
+heidi_cpp = pytest.importorskip("heidi_cpp")
 import time
 import json
 import os

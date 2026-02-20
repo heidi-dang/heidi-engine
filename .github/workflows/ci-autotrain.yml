@@ -38,3 +38,17 @@ redacted = tm.redact_secrets('ghp_abc123')
 assert '[GITHUB_TOKEN]' in redacted
 print('Unit tests PASSED')
 "
+
+  ci-complete:
+    needs: [lint, test-unit]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check status
+        run: |
+          if [[ "${{ needs.lint.result }}" == "success" || "${{ needs.lint.result }}" == "skipped" ]] && \
+             [[ "${{ needs.test-unit.result }}" == "success" || "${{ needs.test-unit.result }}" == "skipped" ]]; then
+            exit 0
+          else
+            exit 1
+          fi

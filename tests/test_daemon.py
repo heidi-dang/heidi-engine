@@ -23,6 +23,10 @@ def daemon_process():
     test_env["HEIDI_MOCK_SUBPROCESSES"] = "1"
     
     bin_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'build', 'bin', 'heidid'))
+    if not os.path.exists(bin_path):
+        pytest.skip("heidid binary not found. Skipping daemon integration tests.")
+    if not os.access(bin_path, os.X_OK):
+        pytest.skip("heidid binary is not executable. Skipping daemon integration tests.")
     process = subprocess.Popen([bin_path, "-p", str(port)], env=test_env)
     
     # Give the server a moment to bind and start listening

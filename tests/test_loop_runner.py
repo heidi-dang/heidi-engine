@@ -5,10 +5,7 @@ from unittest.mock import patch, MagicMock
 from pathlib import Path
 
 from heidi_engine.loop_runner import PythonLoopRunner
-try:
-    from heidi_engine.loop_runner import CppLoopRunner
-except ImportError:
-    CppLoopRunner = None
+from heidi_engine.loop_runner import CppLoopRunner
 from heidi_engine import telemetry
 
 @pytest.fixture
@@ -25,18 +22,12 @@ def temp_out_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("OUT_DIR", str(tmp_path))
     monkeypatch.setenv("ROUNDS", "1")
     monkeypatch.setenv("RUN_ID", "test_run_123")
-    monkeypatch.setenv("RUN_ID", "test_run_123")
     return tmp_path
 
-def get_runner_classes():
-    runners = [PythonLoopRunner]
-    if CppLoopRunner is not None:
-        runners.append(CppLoopRunner)
-    return runners
-
-@pytest.fixture(params=get_runner_classes())
+@pytest.fixture(params=[PythonLoopRunner, CppLoopRunner])
 def runner_class(request, monkeypatch):
-    if CppLoopRunner and request.param == CppLoopRunner:
+    if request.param == CppLoopRunner:
+        pytest.importorskip("heidi_cpp")
         monkeypatch.setenv("HEIDI_MOCK_SUBPROCESSES", "1")
     return request.param
 
@@ -132,4 +123,3 @@ def test_loop_runner_with_tests(mock_run, temp_out_dir, mock_telemetry, monkeypa
         assert mock_run.call_count == 5
         tests_call = str(mock_run.mock_calls[2])
         assert "03_unit_test_gate.py" in tests_call
-
