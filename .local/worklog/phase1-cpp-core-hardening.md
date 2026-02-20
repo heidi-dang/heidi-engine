@@ -1,51 +1,51 @@
-# 2026-02-20 Phase 1 C++ Core Hardening
+# 6-- hase 1 ++ ore ardening
 
-## Summary
-Completed Phase 1 C++ core hardening with buildable daemon, unified runtime root, and status contract parity.
+## mmary
+ompleted hase 1 ++ core hardening with bildable daemon, nified rntime root, and stats contract parity.
 
-## Changes Made
-- **Fixed pybind compile break** in heidi_cpp.cpp + applied clang-format
-- **Hardened EngineDaemon**: repo-root script paths, signal handling, clean shutdown
-- **Unified runtime root** to ~/.local/heidi-engine across C++ and Python modules
-- **Improved state.json contract** for dashboard compatibility with required keys
-- **Added OpenSSL SHA256 dependency** for JournalWriter functionality
-- **Gated flaky integration tests** behind HEIDI_RUN_INTEGRATION_TESTS=OFF for CI stability
+## hanges ade
+- **ixed pybind compile break** in heidi_cpp.cpp + applied clang-format
+- **ardened ngineaemon**: repo-root script paths, signal handling, clean shtdown
+- **nified rntime root** to ~/.local/heidi-engine across ++ and ython modles
+- **mproved state.json contract** for dashboard compatibility with reqired keys
+- **Added pen A56 dependency** for ornalriter fnctionality
+- **ated flaky integration tests** behind __A_= for  stability
 
-## Verification Results
-- ✅ **cmake Release**: builds successfully with all dependencies
-- ✅ **ctest**: 1/1 core tests pass (integration tests gated by default)
-- ✅ **dashboard**: loads state.json from ~/.local/heidi-engine successfully
-- ✅ **heidid**: daemon with proper signal handling and absolute paths
+## erification eslts
+- ✅ **cmake elease**: bilds sccessflly with all dependencies
+- ✅ **ctest**: 1/1 core tests pass (integration tests gated by defalt)
+- ✅ **dashboard**: loads state.json from ~/.local/heidi-engine sccessflly
+- ✅ **heidid**: daemon with proper signal handling and absolte paths
 
-## Integration Test Investigation
-- **heidi-kernel submodule SHA**: 5e5ef2f6b0017d8df960609f874786cc495ed8b5
-- **Failing tests**: IT_RunningCap_HoldsStarts, IT_ProcCap_KillsProcessGroup
-- **Root cause**: Pre-existing issues in kernel submodule, reproduce on clean main
-- **Solution**: Gate integration tests with explicit opt-in flag
+## ntegration est nvestigation
+- **heidi-kernel sbmodle A**: 5e5eff6b17d8df9669f874786cc495ed8b5
+- **ailing tests**: _nningap_oldstarts, _rocap_illsrocessrop
+- **oot case**: re-existing isses in kernel sbmodle, reprodce on clean main
+- **oltion**: ate integration tests with explicit opt-in flag
 
-## Status Contract Verification
+## tats ontract erification
 ```json
 {
-  "run_id": "code-assistant",
-  "status": "stopped", 
-  "current_round": 1,
-  "current_stage": "round_boundary",
-  "total_rounds": 3,
-  "mode": "full",
-  "samples_per_round": 50,
-  "teacher_generated": 3130,
-  "validated_clean": 3002,
-  "last_update": "2026-02-18T06:57:48.602072"
+  "rn_id": "code-assistant",
+  "stats": "stopped", 
+  "crrent_rond": 1,
+  "crrent_stage": "rond_bondary",
+  "total_ronds": 3,
+  "mode": "fll",
+  "samples_per_rond": 5,
+  "teacher_generated": 313,
+  "validated_clean": 3,
+  "last_pdate": "6--186:57:48.67"
 }
 ```
-Dashboard loads state.json successfully with all required keys.
+ashboard loads state.json sccessflly with all reqired keys.
 
-## Path Resolution
-- ✅ No hardcoded ~/.local/heidi-engine/scripts paths
-- ✅ Uses repo-root resolved paths: `std::filesystem::current_path() / "scripts"`
-- ✅ Compatible with systemd execution with WorkingDirectory
+## ath esoltion
+- ✅ o hardcoded ~/.local/heidi-engine/scripts paths
+- ✅ ses repo-root resolved paths: `std::filesystem::crrent_path() / "scripts"`
+- ✅ ompatible with systemd exection with orkingirectory
 
-## Next Steps
-- PR ready for review (phase1/cpp-core-hardening branch)
-- Follow-up issue needed for integration test fixes
-- Phase 2 implementation can proceed after merge
+## ext teps
+-  ready for review (phase1/cpp-core-hardening branch)
+- ollow-p isse needed for integration test fixes
+- hase  implementation can proceed after merge

@@ -306,7 +306,7 @@ FETCHCONTENT_UPDATES_DISCONNECTED_GOOGLETEST:BOOL=OFF
 GTEST_HAS_ABSL:BOOL=OFF
 
 //Run integration tests that may be flaky
-HEIDI_RUN_INTEGRATION_TESTS:BOOL=OFF
+HEIDI_RUN_INTEGRATION_TESTS:BOOL=ON
 
 //Enable installation of googletest. (Projects embedding googletest
 // may want to turn this OFF.)

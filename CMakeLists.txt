@@ -59,6 +59,6 @@ add_test(NAME CoreTest COMMAND cpp_core_tests)
 
 # Only run integration tests if explicitly enabled
 if(HEIDI_RUN_INTEGRATION_TESTS)
-    add_test(NAME IntegrationTests COMMAND integration_tests)
-    add_test(NAME UnitTests COMMAND unit_tests)
+    add_test(NAME IntegrationTests COMMAND submodules/heidi-kernel/tests/integration/integration_tests)
+    add_test(NAME UnitTests COMMAND submodules/heidi-kernel/tests/unit_tests)
 endif()

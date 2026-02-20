@@ -1,2 +1,48 @@
-CoreTest 1 0.00600318
+CoreTest 1 0.00600853
+IntegrationTests 0 0
+UnitTests 1 0.0101364
+ConfigParserTest.DefaultValues 1 0.0031647
+ConfigParserTest.HelpFlag 1 0.00404072
+ConfigParserTest.VersionFlag 1 0.00301555
+ConfigParserTest.LogLevel 1 0.00420083
+ConfigParserTest.ConfigPath 1 0.00309094
+ConfigParserTest.MixedArgs 1 0.00327491
+ConfigParserTest.UnknownPositionalArg 1 0.00354826
+ConfigParserTest.IncompleteFlags 1 0.00321036
+ConfigParserTest.UnknownFlagIgnored 1 0.00358568
+ConfigParserTest.VersionString 1 0.00313389
+IpcProtocolTest.SerializePing 1 0.00397727
+IpcProtocolTest.DeserializePong 1 0.00441897
+MetricsSamplerTest.SampleCpu 1 0.00340833
+MetricsSamplerTest.SampleMem 1 0.00386315
+JobTest.SubmitJobReturnsValidId 1 0.00325603
+JobTest.GetJobStatusAfterSubmit 1 0.00342818
+JobTest.JobCompletesSuccessfully 1 0.00338663
+JobTest.ProcCap_TriggersProcLimit 1 0.00338663
+JobTest.ProcCap_DoesNotTriggerAtLimit 1 0.00397824
+JobTest.Determinism_RepeatedTicksSameInputsSameOutputs 1 0.00325126
+ResourceGovernorTest.DefaultPolicy 1 0.00395839
+ResourceGovernorTest.StartNowWhenAllGood 1 0.00307043
+ResourceGovernorTest.RejectWhenQueueFull 1 0.00351311
+ResourceGovernorTest.HoldWhenRunningLimitReached 1 0.00381564
+ResourceGovernorTest.HoldWhenCpuHigh 1 0.00343653
+ResourceGovernorTest.HoldWhenMemHigh 1 0.0040609
+ResourceGovernorTest.PriorityOrder_QueueFullTakesPrecedence 1 0.00350584
+ResourceGovernorTest.PriorityOrder_RunningLimitBeforeResourceChecks 1 0.00474157
+ResourceGovernorTest.UpdatePolicy 1 0.00424704
+ResourceGovernorTest.ValidateAndUpdate_ValidUpdate 1 0.00374513
+ResourceGovernorTest.ValidateAndUpdate_InvalidRange 1 0.00458667
+ResourceGovernorTest.ValidateAndUpdate_InvalidType 1 0.00318379
+ResourceGovernorTest.ValidateAndUpdate_MultipleErrors 1 0.00494767
+PolicyStoreTest.LoadMissingFile 1 0.00326796
+PolicyStoreTest.SaveAndLoad 1 0.00904696
+PolicyStoreTest.InvalidJsonFallback 1 0.00413466
+PolicyStoreTest.InvalidRangeFallback 1 0.00406112
+IntegrationTest.IT_QueueFull_RejectedOrHeld 1 0.00321058
+IntegrationTest.IT_RunningCap_HoldsStarts 0 0
+IntegrationTest.IT_Timeout_KillsProcessGroup 1 0.0162726
+IntegrationTest.IT_ProcCap_KillsProcessGroup 0 0
 ---
+IntegrationTests
+IntegrationTest.IT_RunningCap_HoldsStarts
+IntegrationTest.IT_ProcCap_KillsProcessGroup

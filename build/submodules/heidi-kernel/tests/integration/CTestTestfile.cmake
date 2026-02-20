@@ -4,3 +4,4 @@
 # 
 # This file includes the relevant testing commands required for 
 # testing this directory and lists subdirectories to be tested as well.
+include("/home/ubuntu/heidi-engine/build/submodules/heidi-kernel/tests/integration/integration_tests[1]_include.cmake")
