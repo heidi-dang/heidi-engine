@@ -1,28 +1,28 @@
-import pytest
-import sys
 import platform
-
-# Skip C++ integration tests on non-Linux platforms
-if platform.system() != 'Linux':
-    pytest.skip("C++ integration tests only run on Linux")
-
-import heidi_cpp
 import time
 
-def test_async_collector_parallelism():
-    # Provide a mock provider with 100ms delay per sample
-    provider = heidi_cpp.MockProvider(100)
+import pytest
+
+# These tests require the C++ extension module.
+# Keep collection safe on non-Linux runners and on Linux where the extension isn't built.
+if platform.system() != "Linux":
+    pytest.skip("C++ integration tests only run on Linux", allow_module_level=True)
+
+heidi_cpp = pytest.importorskip("heidi_cpp", reason="C++ extension not built/available")
+
+
+def test_async_collector_parallelism() -> None:
+    """
+    Verifies AsyncCollector runs requests concurrently.
+    If sequential: 10 * 100ms = 1.0s. We enforce < 0.5s to confirm parallelism.
+    """
+    provider = heidi_cpp.MockProvider(100)  # 100ms per sample
     collector = heidi_cpp.AsyncCollector(provider)
-    
+
     start_time = time.time()
     results = collector.generate_n("Write me a Python script", 10)
-    end_time = time.time()
-    
-    duration = end_time - start_time
-    
+    duration = time.time() - start_time
+
     assert len(results) == 10
     assert "Mock generation completed." in results[0]
-    
-    # Assert they ran concurrently. If sequential, it would be 10 * 100ms = 1s.
-    # Time should be ~0.1s + overhead. We enforce < 0.5s securely ensuring parallelism
     assert duration < 0.5
