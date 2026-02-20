@@ -84,6 +84,7 @@ fi
 
 log "4) locale/timezone invariance check (full replay digest)"
 # Generate a deterministic journal first (single run)
+mkdir -p "$RUNTIME/tmp/deterministic"
 export OUT_DIR="$RUNTIME/tmp/deterministic"
 export RUN_ID="deterministic"
 python3 -c "
