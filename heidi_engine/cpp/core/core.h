@@ -36,6 +36,7 @@ private:
     void emit_event(const std::string& event_type, const std::string& message, 
                     const std::string& stage, const std::string& level = "info");
     void set_state(const std::string& new_state, const std::string& stage);
+    bool run_script(const std::string& script_name, const std::string& stage);
 };
 
 } // namespace core

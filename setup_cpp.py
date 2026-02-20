@@ -36,6 +36,7 @@ ext_modules = [
             "heidi_engine/cpp/core/rlimit.cpp",
             "heidi_engine/cpp/core/run_id.cpp",
             "heidi_engine/cpp/core/status_writer.cpp",
+            "heidi_engine/cpp/core/subprocess.cpp",
             "submodules/heidi-kernel/src/governor/resource_governor.cpp",
         ],
         include_dirs=include_dirs,

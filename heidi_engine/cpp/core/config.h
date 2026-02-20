@@ -20,6 +20,7 @@ struct Config {
     int lora_r = 64;
     std::string seed;
     bool run_unit_tests = false;
+    bool mock_subprocesses = false;
 
     // Load from environment or python dictionary equiv. 
     // For now we keep it simple for P1 integration.

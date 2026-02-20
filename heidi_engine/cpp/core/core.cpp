@@ -1,6 +1,8 @@
 #include "core.h"
+#include "subprocess.h"
 #include <iostream>
 #include <sstream>
+#include <vector>
 
 namespace heidi {
 namespace core {
@@ -62,19 +64,62 @@ void Core::start(const std::string& mode) {
     set_state("COLLECTING", "initializing");
 }
 
+bool Core::run_script(const std::string& script_name, const std::string& stage) {
+    if (stop_requested_) return false;
+
+    if (config_.mock_subprocesses) {
+        return true;
+    }
+
+    std::vector<std::string> args;
+    args.push_back("python3"); // Assumption: the environment has python3 in PATH
+    
+    // Simplification for brevity in cpp orchestrator: we just pass args 
+    // We assume cwd is the repo root for now.
+    args.push_back("scripts/" + script_name);
+    
+    // Map current parameters that the script needs.
+    // In full implementation we might pass `--output` etc.
+    args.push_back("--round");
+    args.push_back(std::to_string(current_round_));
+    
+    std::string output;
+    try {
+        int status = Subprocess::execute(args, output);
+        if (status != 0) {
+            std::string err_msg = script_name + " failed with exit code " + std::to_string(status) + ":\n" + output.substr(0, 200);
+            emit_event("pipeline_error", err_msg, "pipeline", "error");
+            set_state("ERROR", "error");
+            return false;
+        }
+    } catch (const std::exception& e) {
+        std::string err_msg = "Subprocess exception for " + script_name + ": " + e.what();
+        emit_event("pipeline_error", err_msg, "pipeline", "error");
+        set_state("ERROR", "error");
+        return false;
+    }
+    return true;
+}
+
 std::string Core::tick(int max_steps) {
-    if (current_state_ == "IDLE" || stop_requested_) {
+    if (current_state_ == "IDLE" || current_state_ == "ERROR" || stop_requested_) {
         return get_status_json();
     }
     
-    // Simulate one state transition per tick for testing pybind
     if (current_state_ == "COLLECTING") {
+        emit_event("round_start", "Starting round " + std::to_string(current_round_), "round");
         emit_event("stage_start", "Starting teacher generation", "generate");
+        
+        if (!run_script("01_teacher_generate.py", "generate")) return get_status_json();
+        
         emit_event("stage_end", "Generated samples", "generate");
         set_state("VALIDATING", "validate");
     } 
     else if (current_state_ == "VALIDATING") {
         emit_event("stage_start", "Starting validation", "validate");
+        
+        if (!run_script("02_validate_clean.py", "validate")) return get_status_json();
+        
         emit_event("stage_end", "Validated samples", "validate");
         if (config_.run_unit_tests) {
             set_state("TESTING", "test");
@@ -86,6 +131,9 @@ std::string Core::tick(int max_steps) {
     } 
     else if (current_state_ == "TESTING") {
         emit_event("stage_start", "Starting unit tests", "test");
+        
+        if (!run_script("03_unit_test_gate.py", "test")) return get_status_json();
+        
         emit_event("stage_end", "Completed unit tests", "test");
         if (mode_ == "full") {
             set_state("FINALIZING", "train");
@@ -95,11 +143,17 @@ std::string Core::tick(int max_steps) {
     } 
     else if (current_state_ == "FINALIZING") {
         emit_event("stage_start", "Starting training", "train");
+        
+        if (!run_script("04_train_qlora.py", "train")) return get_status_json();
+        
         emit_event("stage_end", "Training complete", "train");
         set_state("EVALUATING", "eval");
     } 
     else if (current_state_ == "EVALUATING") {
         emit_event("stage_start", "Starting evaluation", "eval");
+        
+        run_script("05_eval.py", "eval"); // allowed to fail without taking down pipeline
+        
         emit_event("stage_end", "Evaluation complete", "eval");
         
         if (current_round_ < config_.rounds) {

@@ -26,6 +26,10 @@ Config Config::load_from_env() {
     if (const char* env_p = std::getenv("RUN_UNIT_TESTS")) {
         c.run_unit_tests = (std::string(env_p) == "1");
     }
+    
+    if (const char* env_p = std::getenv("HEIDI_MOCK_SUBPROCESSES")) {
+        c.mock_subprocesses = (std::string(env_p) == "1");
+    }
 
     return c;
 }

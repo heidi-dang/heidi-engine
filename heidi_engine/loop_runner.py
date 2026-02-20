@@ -266,6 +266,45 @@ class PythonLoopRunner(LoopRunner):
             "run_id": self.run_id
         }
 
+try:
+    import heidi_cpp
+
+    class CppLoopRunner(LoopRunner):
+        """
+        C++ implementation of the LoopRunner, wrapping the heidi_cpp.Core extension.
+        """
+        def __init__(self, config_path: Optional[str] = None):
+            self.config_path = config_path
+            self.core = heidi_cpp.Core()
+            self.core.init(config_path or "")
+
+        def start(self, mode: str = "full") -> None:
+            self.core.start(mode)
+
+        def tick(self, max_steps: int = 1) -> Dict[str, Any]:
+            status_json = self.core.tick(max_steps)
+            return json.loads(status_json)
+
+        def pause(self) -> None:
+            pass # P2 does not have pause yet natively 
+
+        def resume(self) -> None:
+            pass
+
+        def shutdown(self) -> None:
+            self.core.shutdown()
+
+        def action_train_now(self) -> None:
+            self.core.action_train_now()
+
+        def get_status(self) -> Dict[str, Any]:
+            status_json = self.core.get_status_json()
+            return json.loads(status_json)
+
+except ImportError:
+    pass
+
+
 if __name__ == "__main__":
     runner = PythonLoopRunner()
     runner.start()
