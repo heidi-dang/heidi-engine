@@ -14,8 +14,11 @@
 #include <sys/resource.h>
 #include <heidi-kernel/resource_governor.h>
 
+#include "core/status_writer.h"
 #include "core/core.h"
 #include "core/rlimit.h"
+#include "core/mock_provider.h"
+#include "core/async_collector.h"
 
 #ifdef HAS_CUDA
 #include <cuda_runtime.h>
@@ -262,4 +265,12 @@ PYBIND11_MODULE(heidi_cpp, m) {
         .def("shutdown", &heidi::core::Core::shutdown)
         .def("get_status_json", &heidi::core::Core::get_status_json)
         .def("action_train_now", &heidi::core::Core::action_train_now);
+
+    py::class_<heidi::core::MockProvider, std::shared_ptr<heidi::core::MockProvider>>(m, "MockProvider")
+        .def(py::init<int>(), py::arg("simulated_delay_ms") = 10);
+
+    py::class_<heidi::core::AsyncCollector>(m, "AsyncCollector")
+        .def(py::init<std::shared_ptr<heidi::core::MockProvider>>())
+        .def("generate_batch", &heidi::core::AsyncCollector::generate_batch, py::arg("prompts"))
+        .def("generate_n", &heidi::core::AsyncCollector::generate_n, py::arg("base_prompt"), py::arg("n"));
 }
