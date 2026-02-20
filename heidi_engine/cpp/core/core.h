@@ -6,10 +6,13 @@
 #include "status_writer.h"
 #include <memory>
 #include <atomic>
+<<<<<<< HEAD
 #include <map>
 #include <string_view>
 #include "heidi-kernel/metrics.h"
 #include "heidi-kernel/resource_governor.h"
+=======
+>>>>>>> origin/main
 
 namespace heidi {
 namespace core {
@@ -36,6 +39,7 @@ private:
     std::unique_ptr<Clock> clock_;
     std::unique_ptr<JournalWriter> journal_;
     std::unique_ptr<StatusWriter> status_;
+<<<<<<< HEAD
     std::unique_ptr<heidi::MetricsSampler> sampler_;
     std::unique_ptr<heidi::ResourceGovernor> governor_;
     
@@ -44,6 +48,13 @@ private:
                     const std::map<std::string, int>& usage_delta = {});
     void set_state(std::string_view new_state, std::string_view stage);
     bool run_script(const std::string& script_name, std::string_view stage);
+=======
+    
+    void emit_event(const std::string& event_type, const std::string& message, 
+                    const std::string& stage, const std::string& level = "info");
+    void set_state(const std::string& new_state, const std::string& stage);
+    bool run_script(const std::string& script_name, const std::string& stage);
+>>>>>>> origin/main
 };
 
 } // namespace core

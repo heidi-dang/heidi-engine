@@ -12,7 +12,11 @@ namespace core {
 std::string Event::to_json(const std::string& prev_hash) const {
     std::ostringstream ss;
     ss << "{";
+<<<<<<< HEAD
     ss << "\"event_version\":\"" << SCHEMA_VERSION << "\",";
+=======
+    ss << "\"event_version\":\"1.0\",";
+>>>>>>> origin/main
     ss << "\"ts\":\"" << ts << "\",";
     ss << "\"run_id\":\"" << run_id << "\",";
     ss << "\"round\":" << round << ",";
@@ -47,6 +51,15 @@ std::string Event::to_json(const std::string& prev_hash) const {
         first = false;
     }
     ss << "],";
+<<<<<<< HEAD
+=======
+    
+    if (error.empty()) {
+        ss << "\"error\":null,";
+    } else {
+        ss << "\"error\":\"" << error << "\",";
+    }
+>>>>>>> origin/main
 
     ss << "\"prev_hash\":\"" << prev_hash << "\"";
     ss << "}";
@@ -74,6 +87,7 @@ std::string JournalWriter::compute_sha256(const std::string& data) const {
 }
 
 std::string JournalWriter::sanitize(const std::string& input) const {
+<<<<<<< HEAD
     // Redact sensitive patterns BEFORE JSON escaping to avoid backslash interference
     std::string safe = std::regex_replace(input, std::regex("ghp_[a-zA-Z0-9]{36}"), "[GITHUB_TOKEN]");
     safe = std::regex_replace(safe, std::regex("sk-[a-zA-Z0-9]{20,}"), "[OPENAI_KEY]");
@@ -138,6 +152,25 @@ void JournalWriter::validate_strict(const std::string& json_line) {
 void JournalWriter::write(const Event& event) {
     Event safe_event = event;
     safe_event.message = sanitize(event.message);
+=======
+    std::string safe = std::regex_replace(input, std::regex("\n"), "\\n");
+    safe = std::regex_replace(safe, std::regex("\r"), "\\r");
+    safe = std::regex_replace(safe, std::regex("\""), "\\\"");
+    
+    // Pattern redaction (minimal P1 approximation)
+    safe = std::regex_replace(safe, std::regex("ghp_[a-zA-Z0-9]{36}"), "[GITHUB_TOKEN]");
+    safe = std::regex_replace(safe, std::regex("sk-[a-zA-Z0-9]{20,}"), "[OPENAI_KEY]");
+    safe = std::regex_replace(safe, std::regex("Bearer\\s+[\\w\\-]{20,}"), "[BEARER_TOKEN]");
+    return safe;
+}
+
+void JournalWriter::write(const Event& event) {
+    Event safe_event = event;
+    safe_event.message = sanitize(event.message);
+    if (!event.error.empty()) {
+        safe_event.error = sanitize(event.error);
+    }
+>>>>>>> origin/main
     
     std::string json_line = safe_event.to_json(last_hash_);
     std::string line_with_newline = json_line + "\n";

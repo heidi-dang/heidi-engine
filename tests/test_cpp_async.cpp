@@ -1,17 +1,28 @@
 #include <gtest/gtest.h>
+<<<<<<< HEAD
 #include "../heidi_engine/cpp/core/mock_provider.h"
+=======
+>>>>>>> origin/main
 #include "../heidi_engine/cpp/core/async_collector.h"
 #include <chrono>
 
 using namespace heidi::core;
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/main
 TEST(AsyncCollectorTest, GenerateParallel) {
     auto start_time = std::chrono::steady_clock::now();
 
     // 100ms delay for each call simulated
+<<<<<<< HEAD
     auto provider = std::make_shared<heidi::core::MockProvider>(100);
     heidi::core::AsyncCollector collector(provider);
+=======
+    auto provider = std::make_shared<MockProvider>(100);
+    AsyncCollector collector(provider);
+>>>>>>> origin/main
 
     // Give it 10 prompts
     std::vector<std::string> prompts;

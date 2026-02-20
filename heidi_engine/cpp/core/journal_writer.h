@@ -19,10 +19,16 @@ struct Event {
     std::map<std::string, int> counters_delta;
     std::map<std::string, int> usage_delta;
     std::vector<std::string> artifact_paths;
+<<<<<<< HEAD
 
     std::string to_json(const std::string& prev_hash) const;
     static constexpr const char* SCHEMA_VERSION = "1.0";
     static constexpr size_t MAX_PAYLOAD_BYTES = 1024 * 1024; // 1MB limit for safety
+=======
+    std::string error;
+
+    std::string to_json(const std::string& prev_hash) const;
+>>>>>>> origin/main
 };
 
 class JournalWriter {
@@ -32,6 +38,7 @@ public:
 
     void write(const Event& event);
     std::string current_hash() const { return last_hash_; }
+<<<<<<< HEAD
     std::string sanitize(const std::string& input) const;
     
     /**
@@ -46,6 +53,12 @@ public:
     std::string compute_sha256(const std::string& data) const;
 
 private:
+=======
+
+private:
+    std::string compute_sha256(const std::string& data) const;
+    std::string sanitize(const std::string& input) const;
+>>>>>>> origin/main
     
     std::string journal_path_;
     std::string last_hash_;

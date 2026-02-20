@@ -10,9 +10,12 @@ Config Config::load_from_env() {
     if (const char* env_p = std::getenv("OUT_DIR")) c.out_dir = env_p;
     else c.out_dir = std::string(std::getenv("HOME")) + "/.local/heidi_engine";
     
+<<<<<<< HEAD
     if (const char* env_p = std::getenv("HEIDI_REPO_ROOT")) c.repo_root = env_p;
     else c.repo_root = "."; // Default assumes we are in the source tree, users should set HEIDI_REPO_ROOT in prod
     
+=======
+>>>>>>> origin/main
     if (const char* env_p = std::getenv("BASE_MODEL")) c.base_model = env_p;
     if (const char* env_p = std::getenv("TEACHER_MODEL")) c.teacher_model = env_p;
     
@@ -34,11 +37,14 @@ Config Config::load_from_env() {
         c.mock_subprocesses = (std::string(env_p) == "1");
     }
 
+<<<<<<< HEAD
     if (const char* env_p = std::getenv("MAX_WALL_TIME_MINUTES")) c.max_wall_time_minutes = std::stoi(env_p);
     if (const char* env_p = std::getenv("MAX_DISK_MB")) c.max_disk_mb = std::stoi(env_p);
     if (const char* env_p = std::getenv("MAX_CPU_PCT")) c.max_cpu_pct = std::stod(env_p);
     if (const char* env_p = std::getenv("MAX_MEM_PCT")) c.max_mem_pct = std::stod(env_p);
 
+=======
+>>>>>>> origin/main
     return c;
 }
 
