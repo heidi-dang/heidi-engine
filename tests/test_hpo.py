@@ -61,12 +61,8 @@ class TestHPO(unittest.TestCase):
         mock_run.assert_called_once()
 
     def test_run_trial_low_vram(self):
-        try:
-            import heidi_cpp
-        except ImportError:
-            import unittest
-
-            raise unittest.SkipTest("heidi_cpp extension not built")
+        import pytest
+        heidi_cpp = pytest.importorskip("heidi_cpp")
 
         with patch("heidi_cpp.get_free_gpu_memory") as mock_gpu:
             # Mock low VRAM

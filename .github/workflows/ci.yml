@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
       - id: check
         run: |
-          if [ -f "setup_cpp.py" ]; then
+          if [ -f "setup_cpp.py" ] && [ -f "heidi_engine/cpp/heidi_cpp.cpp" ]; then
             echo "has_cpp=true" >> $GITHUB_OUTPUT
           else
             echo "has_cpp=false" >> $GITHUB_OUTPUT
