@@ -66,7 +66,7 @@ try:
 except ImportError:
     HAS_SECURITY_VALIDATOR = False
 
-from heidi_engine.utils.io_jsonl import load_jsonl, save_jsonl
+from heidi_engine.utils.io_jsonl import load_jsonl_best_effort, save_jsonl
 from heidi_engine.utils.security_util import enforce_containment
 
 # Lane B: Boundary Control
@@ -427,7 +427,7 @@ def main():
     enforce_containment(args.output, os.getcwd())
 
     # Load raw samples
-    raw_samples = load_jsonl(args.input)
+    raw_samples = load_jsonl_best_effort(args.input)
     print(f"[INFO] Loaded {len(raw_samples)} raw samples")
 
     # Process samples

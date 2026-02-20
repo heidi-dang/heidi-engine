@@ -47,7 +47,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from heidi_engine.utils.io_jsonl import load_jsonl, save_jsonl
+from heidi_engine.utils.io_jsonl import load_jsonl_best_effort, save_jsonl
 from heidi_engine.utils.security_util import enforce_containment
 
 def enforce_strict_clean_schema(sample: Dict[str, Any]):
@@ -370,7 +370,7 @@ def main():
     # Load samples
     enforce_containment(args.input, os.getcwd())
     enforce_containment(args.output, os.getcwd())
-    samples = load_jsonl(args.input)
+    samples = load_jsonl_best_effort(args.input)
     
     for sample in samples:
         try:

@@ -3,8 +3,16 @@ Unit tests for JSONL IO utilities.
 """
 
 import os
+import json
 import pytest
-from heidi_engine.utils.io_jsonl import load_jsonl, save_jsonl
+from heidi_engine.utils.io_jsonl import (
+    load_jsonl,
+    load_jsonl_strict,
+    load_jsonl_best_effort,
+    save_jsonl,
+    REQUIRED_KEYS,
+    SCHEMA_VERSION
+)
 
 class TestJSONLUtils:
     """Test JSONL loading and saving utilities."""
@@ -22,7 +30,8 @@ class TestJSONLUtils:
         ]
         save_jsonl(samples, str(test_file))
 
-        loaded = load_jsonl(str(test_file))
+        # use best_effort for general data
+        loaded = load_jsonl_best_effort(str(test_file))
         assert samples == loaded
 
     def test_save_creates_directories(self, tmp_path):
@@ -32,14 +41,14 @@ class TestJSONLUtils:
         save_jsonl(samples, str(nested_path))
 
         assert nested_path.exists()
-        loaded = load_jsonl(str(nested_path))
+        loaded = load_jsonl_best_effort(str(nested_path))
         assert samples == loaded
 
     def test_load_skips_blank_lines(self, test_file):
         """Test that load_jsonl ignores empty or whitespace-only lines."""
         test_file.write_text('{"id": 1}\n\n   \n{"id": 2}\n')
 
-        loaded = load_jsonl(str(test_file))
+        loaded = load_jsonl_best_effort(str(test_file))
         assert len(loaded) == 2
         assert loaded[0]["id"] == 1
         assert loaded[1]["id"] == 2
@@ -48,7 +57,7 @@ class TestJSONLUtils:
         """Test that load_jsonl skips invalid JSON lines and prints a warning to stderr."""
         test_file.write_text('{"id": 1}\n{invalid}\n{"id": 2}\n')
 
-        loaded = load_jsonl(str(test_file))
+        loaded = load_jsonl_best_effort(str(test_file))
 
         assert len(loaded) == 2
         assert loaded[0]["id"] == 1
@@ -67,10 +76,33 @@ class TestJSONLUtils:
 
         save_jsonl(samples, local_name)
         assert os.path.exists(local_name)
-        loaded = load_jsonl(local_name)
+        loaded = load_jsonl_best_effort(local_name)
         assert samples == loaded
 
-        # Cleanup is handled by tmp_path and monkeypatch.chdir automatically when test ends,
-        # but we can explicitly remove the file if we want to be clean within the test.
         if os.path.exists(local_name):
             os.remove(local_name)
+
+    def test_load_jsonl_strict_success(self, test_file):
+        """Test that load_jsonl_strict succeeds with valid journal data."""
+        valid_journal_entry = {k: "val" for k in REQUIRED_KEYS}
+        valid_journal_entry["event_version"] = SCHEMA_VERSION
+        valid_journal_entry["round"] = 1
+
+        save_jsonl([valid_journal_entry], str(test_file))
+
+        loaded = load_jsonl_strict(str(test_file))
+        assert len(loaded) == 1
+        assert loaded[0]["event_version"] == SCHEMA_VERSION
+
+    def test_load_jsonl_strict_fails_missing_keys(self, test_file):
+        """Test that load_jsonl_strict exits on missing keys."""
+        invalid_entry = {"event_version": SCHEMA_VERSION}
+        save_jsonl([invalid_entry], str(test_file))
+
+        with pytest.raises(SystemExit) as e:
+            load_jsonl_strict(str(test_file))
+        assert e.value.code == 1
+
+    def test_load_jsonl_alias_is_strict(self, test_file):
+        """Verify that load_jsonl is an alias to load_jsonl_strict."""
+        assert load_jsonl is load_jsonl_strict

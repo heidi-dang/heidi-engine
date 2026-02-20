@@ -11,10 +11,10 @@ REQUIRED_KEYS = {
     "artifact_paths", "prev_hash"
 }
 
-def load_jsonl(path: str, is_journal: bool = False) -> List[Dict[str, Any]]:
+def load_jsonl_strict(path: str) -> List[Dict[str, Any]]:
     """
-    Load samples from JSONL file.
-    If is_journal=True, enforces Phase 6 Zero-Trust Journal validation (12 keys).
+    Load samples from JSONL file with Phase 6 Zero-Trust validation.
+    Strictly enforces journal schema and exits on any JSON error.
     """
     samples = []
 
@@ -27,31 +27,49 @@ def load_jsonl(path: str, is_journal: bool = False) -> List[Dict[str, Any]]:
             try:
                 sample = json.loads(line)
 
-                if is_journal:
-                    # Zero-Trust Validation (Lane D)
-                    missing = REQUIRED_KEYS - set(sample.keys())
-                    if missing:
-                        print(f"[FATAL] Line {line_num}: Missing keys: {missing}", file=sys.stderr)
-                        sys.exit(1)
+                # Zero-Trust Validation (Lane D)
+                missing = REQUIRED_KEYS - set(sample.keys())
+                if missing:
+                    print(f"[FATAL] Line {line_num}: Missing keys: {missing}", file=sys.stderr)
+                    sys.exit(1)
 
-                    if sample["event_version"] != SCHEMA_VERSION:
-                        print(
-                            f"[FATAL] Line {line_num}: Unsupported schema version {sample['event_version']}",
-                            file=sys.stderr,
-                        )
-                        sys.exit(1)
+                if sample["event_version"] != SCHEMA_VERSION:
+                    print(f"[FATAL] Line {line_num}: Unsupported schema version {sample['event_version']}", file=sys.stderr)
+                    sys.exit(1)
 
                 samples.append(sample)
             except json.JSONDecodeError as e:
-                level = "[FATAL]" if is_journal else "[WARN]"
-                print(f"{level} Line {line_num}: JSON parse error: {e}", file=sys.stderr)
-                if is_journal:
-                    sys.exit(1)
-                else:
-                    # Non-journal files skip invalid lines gracefully
-                    continue
+                print(f"[FATAL] Line {line_num}: JSON parse error: {e}", file=sys.stderr)
+                sys.exit(1)
 
     return samples
+
+
+def load_jsonl_best_effort(path: str) -> List[Dict[str, Any]]:
+    """
+    Load samples from JSONL file gracefully.
+    Skips invalid JSON lines and does not enforce journal schema.
+    """
+    samples = []
+
+    with open(path, "r") as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+
+            try:
+                sample = json.loads(line)
+                samples.append(sample)
+            except json.JSONDecodeError as e:
+                print(f"[WARN] Line {line_num}: JSON parse error: {e}", file=sys.stderr)
+                continue
+
+    return samples
+
+
+# Default to strict for security (backward compatibility for journal paths)
+load_jsonl = load_jsonl_strict
 
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:

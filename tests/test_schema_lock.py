@@ -23,7 +23,7 @@ def test_schema_violation_missing_keys(tmp_path):
     bad_jsonl.write_text(json.dumps(bad_data) + "\n")
     
     with pytest.raises(SystemExit) as e:
-        load_jsonl(str(bad_jsonl), is_journal=True)
+        load_jsonl(str(bad_jsonl))
     assert e.value.code == 1
 
 def test_schema_violation_bad_version(tmp_path):
@@ -45,7 +45,7 @@ def test_schema_violation_bad_version(tmp_path):
     bad_jsonl.write_text(json.dumps(bad_data) + "\n")
     
     with pytest.raises(SystemExit) as e:
-        load_jsonl(str(bad_jsonl), is_journal=True)
+        load_jsonl(str(bad_jsonl))
     assert e.value.code == 1
 
 def test_schema_violation_oversized(tmp_path):
@@ -56,5 +56,5 @@ def test_schema_violation_oversized(tmp_path):
     bad_jsonl.write_text("not a json\n")
     
     with pytest.raises(SystemExit) as e:
-        load_jsonl(str(bad_jsonl), is_journal=True)
+        load_jsonl(str(bad_jsonl))
     assert e.value.code == 1
