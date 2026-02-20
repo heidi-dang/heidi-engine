@@ -52,24 +52,21 @@ def daemon_process():
     test_env = os.environ.copy()
     test_env["HEIDI_MOCK_SUBPROCESSES"] = "1"
 
-    bin_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "build", "bin", "heidid")
-    )
-    process = subprocess.Popen([bin_path, "-p", str(port)], env=test_env)
+    process = subprocess.Popen([str(heidid_path), "-p", str(port)], env=test_env)
 
-    # Give the server a moment to bind and start listening
+    # Wait for the daemon process to bind to the specified port (bounded polling)
     deadline = time.time() + 5.0
- while time.time() < deadline:
- if check_port(port):
- break
- time.sleep(0.05)
- else:
- process.terminate()
- raise RuntimeError("heidid did not bind within 5s")
+    while time.time() < deadline:
+        if check_port(port):
+            break
+        time.sleep(0.05)
+    else:
+        process.terminate()
+        raise RuntimeError("heidid did not bind within 5 seconds")
 
-yield port
+    yield port
 
-    # Teardown: terminate the process gently
+    # Teardown: terminate the process
     process.terminate()
     process.wait(timeout=2)
 
