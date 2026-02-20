@@ -4,9 +4,23 @@ project(heidi-engine VERSION 0.2.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Find system libcurl using find_library
-set(CURL_LIBRARY /usr/lib/x86_64-linux-gnu/libcurl.so.4 CACHE FILEPATH "libcurl library")
-message(STATUS "Using libcurl: ${CURL_LIBRARY}")
+# Find system libcurl using pkg-config (portable)
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(CURL QUIET IMPORTED_TARGET libcurl)
+endif()
+# Fallback to find_library
+if(NOT CURL_FOUND)
+    find_library(CURL_LIBRARY NAMES curl libcurl-4 libcurl4 libcurl.so.4 PATHS /usr/lib/x86_64-linux-gnu /usr/lib /usr/local/lib NO_DEFAULT_PATH)
+    if(CURL_LIBRARY)
+        set(CURL_FOUND TRUE)
+        set(CURL_LIBRARIES ${CURL_LIBRARY})
+    endif()
+endif()
+if(NOT CURL_FOUND)
+    message(FATAL_ERROR "libcurl not found. Install libcurl4-openssl-dev or libcurl4-gnutls-dev")
+endif()
+message(STATUS "Found libcurl: ${CURL_LIBRARIES}")
 
 # Add heidi-kernel as a subdirectory
 add_subdirectory(submodules/heidi-kernel)
