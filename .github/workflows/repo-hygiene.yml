@@ -14,3 +14,18 @@ jobs:
             echo "$bad" >&2
             exit 1
           fi
+
+  forbid-hidden-unicode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if hidden/bidirectional Unicode chars exist
+        run: |
+          set -euo pipefail
+          # Zero-width characters: BOM, ZWJ, ZWNJ, LRM, RLM
+          # Bidirectional controls: LRO, RLO, LRE, RLE, PDF, LRI, RLI, FSI, PDI
+          # Hidden characters: LRM, RLM, ZWJ, ZWNJ
+          if git grep -nI -P '[\x{200B}-\x{200D}\x{FEFF}\x{202A}-\x{202E}\x{2066}-\x{2069}\x{200E}\x{200F}]' -- .; then
+            echo "Hidden/bidirectional Unicode detected"
+            exit 1
+          fi
