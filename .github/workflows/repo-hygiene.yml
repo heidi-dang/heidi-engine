@@ -25,4 +25,7 @@ jobs:
           # Zero-width characters: BOM, ZWJ, ZWNJ, LRM, RLM
           # Bidirectional controls: LRO, RLO, LRE, RLE, PDF, LRI, RLI, FSI, PDI
           # Hidden characters: LRM, RLM, ZWJ, ZWNJ
-          ! grep -RInP '[\\x{200B}-\\x{200D}\\x{FEFF}\\x{202A}-\\x{202E}\\x{2066}-\\x{2069}\\x{200E}\\x{200F}]' . || (echo "Hidden/bidirectional Unicode detected" && exit 1)
+          if git grep -nI -P '[\x{200B}-\x{200D}\x{FEFF}\x{202A}-\x{202E}\x{2066}-\x{2069}\x{200E}\x{200F}]' -- .; then
+            echo "Hidden/bidirectional Unicode detected"
+            exit 1
+          fi
