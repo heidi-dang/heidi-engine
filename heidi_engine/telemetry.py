@@ -358,12 +358,20 @@ def get_run_dir(run_id: Optional[str] = None) -> Path:
         Creates runs/<run_id>/ directory structure.
         All run-specific files go here.
 
+    SECURITY:
+        - Uses Path(run_id).name to sanitize input and prevent path traversal
+        - Ensures run directory is always inside AUTOTRAIN_DIR/runs/
+
     TUNABLE:
         - Modify directory structure by changing path construction
     """
     if run_id is None:
         run_id = get_run_id()
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+
+    # Hardening: use only the name part of run_id to prevent path traversal
+    # If run_id is "../../etc/passwd", safe_run_id becomes "passwd"
+    safe_run_id = Path(run_id).name
+    return Path(AUTOTRAIN_DIR) / "runs" / safe_run_id
 
 
 def get_events_path(run_id: Optional[str] = None) -> Path:
@@ -656,7 +664,7 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     HOW IT WORKS:
         - Reads state.json file
         - Returns empty state if file doesn't exist
-    
+
     ARGS:
         run_id: Run to read (defaults to current run)
 
@@ -687,44 +695,44 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
 def resolve_status(state: Dict[str, Any]) -> str:
     """
     Resolve run status from on-disk metadata.
-    
+
     STATUS VALUES:
         - idle: No active run, or run_id present but no events
         - running: Worker active / stop not requested / still processing
         - stopped: stop_requested=true or pipeline complete
         - error: last_error present or health degraded
-    
+
     HOW IT WORKS:
         - Checks stop_requested flag
         - Checks status field
         - Checks for error indicators
-    
+
     ARGS:
         state: State dictionary from state.json
-    
+
     RETURNS:
         Status string: idle, running, stopped, error
     """
     # Explicit stop requested
     if state.get("stop_requested", False):
         return "stopped"
-    
+
     # Check explicit status first
     status = state.get("status", "")
     if status in ("running", "completed", "stopped", "error"):
         return status
-    
+
     # Check for errors
     if state.get("last_error") or state.get("health") == "degraded":
         return "error"
-    
+
     # Check if there's an active run_id but no recent activity
     run_id = state.get("run_id")
     if run_id:
         # Has run_id - check for activity
         counters = state.get("counters", {})
         usage = state.get("usage", {})
-        
+
         # If there's any activity, consider it running
         if counters.get("teacher_generated", 0) > 0:
             return "running"
@@ -732,10 +740,10 @@ def resolve_status(state: Dict[str, Any]) -> str:
             return "running"
         if counters.get("train_step", 0) > 0:
             return "running"
-        
+
         # No activity - idle
         return "idle"
-    
+
     # Default to idle if no run_id
     return "idle"
 
@@ -1141,7 +1149,20 @@ def _rotate_events_log(events_file: Path) -> None:
     HOW IT WORKS:
         - Renames current log to .1, .2, etc.
         - Deletes oldest if over retention limit
+
+    SECURITY:
+        - Validates that rotation target is within the runs directory
+        - Prevents path traversal via malicious events_file path
     """
+    # Resolve paths for security validation
+    runs_root = (Path(AUTOTRAIN_DIR) / "runs").resolve()
+    resolved_file = events_file.resolve()
+
+    # Defense in depth: ensure the file being rotated is actually inside the runs directory
+    if runs_root not in resolved_file.parents:
+        print(f"[ERROR] Security violation: Attempted to rotate file outside runs directory: {resolved_file}", file=sys.stderr)
+        return
+
     run_dir = events_file.parent
 
     # Remove oldest if at limit
@@ -1517,7 +1538,7 @@ def main():
         python -m heidi_engine.telemetry emit <type> <message>
     """
     import argparse
-    
+
     parser = argparse.ArgumentParser(prog="heidi-engine telemetry")
     subparsers = parser.add_subparsers(dest="command")
 
