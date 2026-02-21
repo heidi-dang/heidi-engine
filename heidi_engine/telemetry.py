@@ -56,12 +56,14 @@ CONFIG VALIDATION:
 """
 
 import atexit
+import copy
 import json
 import os
 import re
 import stat
 import sys
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
@@ -98,6 +100,10 @@ PRICING_CONFIG_PATH = os.environ.get("PRICING_CONFIG_PATH", "")
 EVENT_LOG_MAX_SIZE_MB = int(os.environ.get("EVENT_LOG_MAX_SIZE_MB", "100"))
 # Number of rotated log files to keep
 EVENT_LOG_RETENTION = int(os.environ.get("EVENT_LOG_RETENTION", "5"))
+
+# Status cache TTL in seconds
+# TUNABLE: Increase to reduce IO/CPU, decrease for more real-time updates
+HEIDI_STATUS_TTL_S = float(os.environ.get("HEIDI_STATUS_TTL_S", "0.5"))
 
 # =============================================================================
 # EVENT SCHEMA VERSION (FROZEN - DO NOT CHANGE)
@@ -263,6 +269,58 @@ _lock = threading.RLock()
 
 # Whether telemetry has been initialized
 _initialized = False
+
+
+class StateCache:
+    """
+    Thread-safe cache for state.json to avoid redundant IO.
+    BOLT OPTIMIZATION: Uses st_mtime_ns and st_size for validation.
+    """
+
+    _instance = None
+    _lock = threading.Lock()
+
+    def __init__(self):
+        self.cache: Dict[str, Any] = {}
+        self.mtime = 0
+        self.size = 0
+        self.last_fetched = 0
+        self.ttl = HEIDI_STATUS_TTL_S
+
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
+
+    def get_state(self, state_file: Path) -> Optional[Dict[str, Any]]:
+        now = time.time()
+
+        with self._lock:
+            if not state_file.exists():
+                self.cache = {}
+                return None
+
+            try:
+                stat_result = state_file.stat()
+                if (
+                    stat_result.st_mtime_ns == self.mtime
+                    and stat_result.st_size == self.size
+                    and (now - self.last_fetched) < self.ttl
+                ):
+                    return copy.deepcopy(self.cache)
+
+                with open(state_file) as f:
+                    state = json.load(f)
+                    self.cache = state
+                    self.mtime = stat_result.st_mtime_ns
+                    self.size = stat_result.st_size
+                    self.last_fetched = now
+                    return copy.deepcopy(state)
+            except Exception:
+                return None
 
 
 # =============================================================================
@@ -654,7 +712,7 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     Load current state from state.json.
 
     HOW IT WORKS:
-        - Reads state.json file
+        - Reads state.json file (with caching)
         - Returns empty state if file doesn't exist
     
     ARGS:
@@ -665,9 +723,18 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     """
     state_file = get_state_path(run_id)
 
+    # BOLT OPTIMIZATION: Use StateCache for status queries to avoid redundant IO.
+    # We only use cache for the current run to simplify multi-run support.
+    is_current = run_id is None or run_id == get_run_id()
+    if is_current:
+        state = StateCache.get_instance().get_state(state_file)
+        if state:
+            state["status"] = resolve_status(state)
+            return state
+
     if not state_file.exists():
         return {
-            "run_id": get_run_id(),
+            "run_id": run_id or get_run_id(),
             "status": "idle",
             "counters": get_default_counters(),
             "usage": get_default_usage(),
@@ -1292,6 +1359,107 @@ def stage_context(stage: str, round_num: int, message: str, **kwargs):
 
 
 # =============================================================================
+# HTTP STATUS HELPERS (CACHED)
+# =============================================================================
+
+_gpu_summary_cache = {"data": None, "last_polled": 0}
+GPU_SUMMARY_TTL = 5.0
+
+_last_event_ts_cache = {"data": None, "last_polled": 0}
+LAST_EVENT_TS_TTL = 1.0
+
+
+def get_gpu_summary() -> Dict[str, Any]:
+    """
+    Get minimal GPU info without exposing sensitive data.
+    BOLT OPTIMIZATION: Cached for 5s to avoid expensive nvidia-smi calls.
+    """
+    global _gpu_summary_cache
+    now = time.time()
+
+    if _gpu_summary_cache["data"] and (now - _gpu_summary_cache["last_polled"]) < GPU_SUMMARY_TTL:
+        return _gpu_summary_cache["data"]
+
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.used,memory.total,utilization.gpu",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            parts = result.stdout.strip().split(",")
+            if len(parts) >= 2:
+                data = {
+                    "vram_used_mb": int(parts[0].strip()),
+                    "vram_total_mb": int(parts[1].strip()),
+                    "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
+                }
+                _gpu_summary_cache = {"data": data, "last_polled": now}
+                return data
+    except Exception:
+        pass
+
+    data = {"available": False}
+    _gpu_summary_cache = {"data": data, "last_polled": now}
+    return data
+
+
+def get_last_event_ts() -> Optional[str]:
+    """
+    Get timestamp of last event.
+    BOLT OPTIMIZATION: Cached for 1s to reduce redundant file reads.
+    """
+    global _last_event_ts_cache
+    now = time.time()
+
+    if (
+        _last_event_ts_cache["data"]
+        and (now - _last_event_ts_cache["last_polled"]) < LAST_EVENT_TS_TTL
+    ):
+        return _last_event_ts_cache["data"]
+
+    try:
+        events_file = get_events_path()
+        if events_file.exists():
+            file_size = events_file.stat().st_size
+            if file_size > 0:
+                with open(events_file, "rb") as f:
+                    # BOLT OPTIMIZATION: Safely seek even for small files
+                    f.seek(-min(500, file_size), 2)
+                    lines = f.read().decode().strip().split("\n")
+                    if lines:
+                        last_line = lines[-1]
+                        event = json.loads(last_line)
+                        ts = event.get("ts")
+                        _last_event_ts_cache = {"data": ts, "last_polled": now}
+                        return ts
+    except Exception:
+        pass
+
+    return None
+
+
+def redact_state(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Redact state to only allowed fields."""
+    redacted = {}
+    for key in ALLOWED_STATUS_FIELDS:
+        if key in state:
+            value = state[key]
+            # Sanitize any nested secrets
+            if isinstance(value, dict):
+                value = {k: sanitize_for_log(v, 100) for k, v in value.items()}
+            redacted[key] = value
+    return redacted
+
+
+# =============================================================================
 # HTTP STATUS SERVER (OPTIONAL)
 # =============================================================================
 
@@ -1324,61 +1492,6 @@ def start_http_server(port: int = 7779) -> None:
     except ImportError:
         print("[WARN] HTTP server not available", file=sys.stderr)
         return
-
-    def get_gpu_summary() -> Dict[str, Any]:
-        """Get minimal GPU info without exposing sensitive data."""
-        try:
-            import subprocess
-
-            result = subprocess.run(
-                [
-                    "nvidia-smi",
-                    "--query-gpu=memory.used,memory.total,utilization.gpu",
-                    "--format=csv,noheader,nounits",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                parts = result.stdout.strip().split(",")
-                if len(parts) >= 2:
-                    return {
-                        "vram_used_mb": int(parts[0].strip()),
-                        "vram_total_mb": int(parts[1].strip()),
-                        "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
-                    }
-        except Exception:
-            pass
-        return {"available": False}
-
-    def get_last_event_ts() -> Optional[str]:
-        """Get timestamp of last event."""
-        try:
-            events_file = get_events_path()
-            if events_file.exists() and events_file.stat().st_size > 0:
-                with open(events_file, "rb") as f:
-                    f.seek(-500, 2)  # Read last 500 bytes
-                    lines = f.read().decode().strip().split("\n")
-                    if lines:
-                        last_line = lines[-1]
-                        event = json.loads(last_line)
-                        return event.get("ts")
-        except Exception:
-            pass
-        return None
-
-    def redact_state(state: Dict[str, Any]) -> Dict[str, Any]:
-        """Redact state to only allowed fields."""
-        redacted = {}
-        for key in ALLOWED_STATUS_FIELDS:
-            if key in state:
-                value = state[key]
-                # Sanitize any nested secrets
-                if isinstance(value, dict):
-                    value = {k: sanitize_for_log(v, 100) for k, v in value.items()}
-                redacted[key] = value
-        return redacted
 
     class StateHandler(BaseHTTPRequestHandler):
         """HTTP handler with security restrictions."""
