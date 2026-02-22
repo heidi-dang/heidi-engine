@@ -358,12 +358,25 @@ def get_run_dir(run_id: Optional[str] = None) -> Path:
         Creates runs/<run_id>/ directory structure.
         All run-specific files go here.
 
+    SECURITY:
+        - Hardened against path traversal by using Path(run_id).name
+        - Ensures all run directories stay within the runs/ subdirectory
+
     TUNABLE:
         - Modify directory structure by changing path construction
     """
     if run_id is None:
         run_id = get_run_id()
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+
+    # SECURITY: Sanitize run_id to prevent path traversal.
+    # We take only the name component. If run_id is "../../etc/passwd",
+    # Path(run_id).name becomes "passwd".
+    safe_run_id = Path(run_id).name
+    if not safe_run_id or safe_run_id in (".", ".."):
+        # Fallback if name extraction yields something unsafe
+        safe_run_id = "default_run"
+
+    return Path(AUTOTRAIN_DIR) / "runs" / safe_run_id
 
 
 def get_events_path(run_id: Optional[str] = None) -> Path:
@@ -1141,7 +1154,21 @@ def _rotate_events_log(events_file: Path) -> None:
     HOW IT WORKS:
         - Renames current log to .1, .2, etc.
         - Deletes oldest if over retention limit
+
+    SECURITY:
+        - Validates that the rotation target is within the expected runs directory
     """
+    # SECURITY: Ensure rotation target is within the resolved runs directory
+    runs_dir = (Path(AUTOTRAIN_DIR) / "runs").resolve()
+    events_file_resolved = events_file.resolve()
+
+    if runs_dir not in events_file_resolved.parents:
+        print(
+            f"[ERROR] Security violation: Attempted log rotation outside of {runs_dir}",
+            file=sys.stderr,
+        )
+        return
+
     run_dir = events_file.parent
 
     # Remove oldest if at limit
