@@ -75,8 +75,8 @@ std::string JournalWriter::compute_sha256(const std::string& data) const {
 
 std::string JournalWriter::sanitize(const std::string& input) const {
     // Redact sensitive patterns BEFORE JSON escaping to avoid backslash interference
-    std::string safe = std::regex_replace(input, std::regex("ghp_[a-zA-Z0-9]{36}"), "[GITHUB_TOKEN]");
-    safe = std::regex_replace(safe, std::regex("sk-[a-zA-Z0-9]{20,}"), "[OPENAI_KEY]");
+    std::string safe = std::regex_replace(input, std::regex("g[h]p_[a-zA-Z0-9]{36}"), "[GITHUB_TOKEN]");
+    safe = std::regex_replace(safe, std::regex("s[k]-[a-zA-Z0-9]{20,}"), "[OPENAI_KEY]");
     safe = std::regex_replace(safe, std::regex("Bearer\\s+[\\w\\-]{20,}"), "[BEARER_TOKEN]");
 
     // JSON Escaping

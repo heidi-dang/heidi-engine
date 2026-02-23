@@ -70,6 +70,8 @@ from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
+from heidi_engine.state_machine import CANONICAL_AUTOTRAIN_DIR
+
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
 # =============================================================================
@@ -86,9 +88,6 @@ GPU_POLL_INTERVAL = int(os.environ.get("GPU_POLL_INTERVAL", "5"))
 # Maximum events to show in event log panel
 # TUNABLE: Adjust based on screen size
 MAX_EVENTS = int(os.environ.get("DASHBOARD_MAX_EVENTS", "20"))
-
-# Canonical AUTOTRAIN_DIR - MUST use ~/.local/heidi-engine
-from heidi_engine.state_machine import CANONICAL_AUTOTRAIN_DIR
 
 AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", str(CANONICAL_AUTOTRAIN_DIR))
 

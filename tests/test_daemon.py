@@ -21,8 +21,10 @@ def daemon_process():
     # We must mock subprocesses so the test doesn't actually try to run the slow Python train scripts
     test_env = os.environ.copy()
     test_env["HEIDI_MOCK_SUBPROCESSES"] = "1"
-    
+
     bin_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'build', 'bin', 'heidid'))
+    if not os.path.exists(bin_path):
+        pytest.skip("C++ daemon binary not built (build/bin/heidid missing)")
     process = subprocess.Popen([bin_path, "-p", str(port)], env=test_env)
     
     # Give the server a moment to bind and start listening

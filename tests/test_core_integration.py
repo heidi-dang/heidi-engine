@@ -1,5 +1,6 @@
 import pytest
-import heidi_cpp
+
+heidi_cpp = pytest.importorskip("heidi_cpp")
 import time
 
 def test_async_collector_parallelism():

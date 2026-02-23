@@ -37,6 +37,7 @@ def get_runner_classes():
 @pytest.fixture(params=get_runner_classes())
 def runner_class(request, monkeypatch):
     if CppLoopRunner and request.param == CppLoopRunner:
+        pytest.importorskip("heidi_cpp")
         monkeypatch.setenv("HEIDI_MOCK_SUBPROCESSES", "1")
     return request.param
 
@@ -132,4 +133,3 @@ def test_loop_runner_with_tests(mock_run, temp_out_dir, mock_telemetry, monkeypa
         assert mock_run.call_count == 5
         tests_call = str(mock_run.mock_calls[2])
         assert "03_unit_test_gate.py" in tests_call
-

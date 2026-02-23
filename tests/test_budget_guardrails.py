@@ -1,5 +1,6 @@
 import pytest
-import heidi_cpp
+
+heidi_cpp = pytest.importorskip("heidi_cpp")
 import time
 import json
 import os
@@ -30,7 +31,12 @@ def test_engine_throttles_high_cpu_spike():
     
     # Create dummy script so it doesn't actually train things
     os.makedirs("scripts", exist_ok=True)
-    with open("scripts/01_teacher_generate.py", "w") as f:
+    script_path = os.path.join("scripts", "01_teacher_generate.py")
+    original_script = None
+    if os.path.exists(script_path):
+        with open(script_path, "r", encoding="utf-8") as f:
+            original_script = f.read()
+    with open(script_path, "w", encoding="utf-8") as f:
         f.write("print('dummy')")
     
     # Force extreme budget bounds (0% CPU allowed means it will instantly throttle)
@@ -71,4 +77,8 @@ def test_engine_throttles_high_cpu_spike():
     
     # Cleanup
     shutil.rmtree(test_dir)
-    os.remove("scripts/01_teacher_generate.py")
+    if original_script is None:
+        os.remove(script_path)
+    else:
+        with open(script_path, "w", encoding="utf-8") as f:
+            f.write(original_script)

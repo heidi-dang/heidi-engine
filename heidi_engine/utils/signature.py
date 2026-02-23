@@ -1,7 +1,8 @@
-import hmac
 import hashlib
+import hmac
 import json
-from typing import Dict, Any
+from typing import Any, Dict
+
 
 class SignatureUtil:
     @staticmethod

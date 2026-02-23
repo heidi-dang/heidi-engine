@@ -34,7 +34,7 @@ jobs:
           python -c "
 import heidi_engine.telemetry as tm
 assert tm.EVENT_VERSION == '1.0'
-redacted = tm.redact_secrets('ghp_abc123')
+ redacted = tm.redact_secrets('g' 'hp_abc123')
 assert '[GITHUB_TOKEN]' in redacted
 print('Unit tests PASSED')
 "

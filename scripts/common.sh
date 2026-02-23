@@ -46,7 +46,10 @@ export AUTOTRAIN_DIR="${AUTOTRAIN_DIR:-$HOME/.local/heidi_engine}"
 export ROUNDS="${ROUNDS:-3}"                          # Number of training rounds
 export SAMPLES_PER_ROUND="${SAMPLES_PER_ROUND:-200}"    # Samples to generate per round
 export BASE_MODEL="${BASE_MODEL:-microsoft/phi-2}"    # Base model to fine-tune
-export TEACHER_MODEL="${TEACHER_MODEL:-gpt-4o-mini}"  # Teacher model for generation
+export TEACHER_BACKEND="${TEACHER_BACKEND:-legacy}"    # legacy|openhei
+export TEACHER_MODEL="${TEACHER_MODEL:-gpt-4o-mini}"   # For openhei: provider/model
+export OPENHEI_ATTACH="${OPENHEI_ATTACH:-}"            # Optional: http://127.0.0.1:4096
+export OPENHEI_AGENT="${OPENHEI_AGENT:-general}"       # OpenHei agent name
 export VAL_RATIO="${VAL_RATIO:-0.05}"                  # Validation split ratio (5%)
 export OUT_DIR="${OUT_DIR:-$AUTOTRAIN_DIR}"            # Output directory
 

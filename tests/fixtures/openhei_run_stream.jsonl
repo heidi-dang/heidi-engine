@@ -1,0 +1,6 @@
+{"type":"session","timestamp":"2026-02-23T00:00:00Z","session":{"id":"sess_123"}}
+{"type":"text","timestamp":"2026-02-23T00:00:01Z","part":{"text":"{\"instruction\":\"Do thing\",","time":{"end":"2026-02-23T00:00:01Z"}}}
+{"type":"text","timestamp":"2026-02-23T00:00:01Z","part":{"text":"IGNORED","time":{"start":"2026-02-23T00:00:01Z"}}}
+{"type":"text","timestamp":"2026-02-23T00:00:02Z","part":{"text":"\"input\":\"Some input\",","time":{"end":"2026-02-23T00:00:02Z"}}}
+{"type":"tool","timestamp":"2026-02-23T00:00:03Z","tool":{"name":"bash"}}
+{"type":"text","timestamp":"2026-02-23T00:00:04Z","part":{"text":"\"output\":\"Some output\"}","time":{"end":"2026-02-23T00:00:04Z"}}}

@@ -1,12 +1,11 @@
-import os
-import sys
-import shutil
 import hashlib
-from typing import Dict, Any
-from heidi_engine.utils.io_jsonl import load_jsonl
-from heidi_engine.utils.signature import SignatureUtil, canonicalize_manifest
+import os
+import shutil
+import sys
 
 from heidi_engine.utils.security_util import enforce_containment
+from heidi_engine.utils.signature import SignatureUtil, canonicalize_manifest
+
 
 class Finalizer:
     """
@@ -32,7 +31,7 @@ class Finalizer:
             for line in f:
                 sha256.update(line)
                 record_count += 1
-        
+
         digest = sha256.hexdigest()
 
         # 2. Create Manifest (Exactly 12 keys, Lane D/A)
@@ -54,7 +53,7 @@ class Finalizer:
         # Lane A: Verify exact 12 key count and no floats before calling canonicalize
         if len(manifest) != 12:
             raise ValueError(f"Finalizer Error: Expected 12 manifest keys, got {len(manifest)}")
-        
+
         for k, v in manifest.items():
             if isinstance(v, float):
                 raise TypeError(f"Finalizer Error: Floating point detected in manifest key '{k}'")
@@ -90,7 +89,7 @@ if __name__ == "__main__":
     if len(sys.argv) < 4:
         print("Usage: finalizer.py <pending_dir> <verified_dir> <run_id>")
         sys.exit(1)
-    
+
     key = os.getenv("HEIDI_SIGNING_KEY", "default-dev-key")
     f = Finalizer(sys.argv[1], sys.argv[2], key)
     f.finalize(sys.argv[3])

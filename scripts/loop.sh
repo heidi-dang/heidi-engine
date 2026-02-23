@@ -619,8 +619,10 @@ run_teacher_generate() {
         --samples "$SAMPLES_PER_ROUND" \
         --output "$output_file" \
         --teacher "$TEACHER_MODEL" \
+        --backend "${TEACHER_BACKEND:-legacy}" \
         --round "$round_num" \
         --language "${LANGUAGE:-python}" \
+        --repo-dir "$OUT_DIR" \
         --seed "$SEED" 1>&2 || {
             echo "[ERROR] Teacher generation failed" >&2
             exit 1
