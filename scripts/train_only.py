@@ -26,7 +26,7 @@ except ImportError:
 import heidi_engine.telemetry as tel  # noqa: E402
 
 # Defaults
-DEFAULT_BASE_MODEL = "microsoft/phi-2"
+DEFAULT_BASE_MODEL = "mistralai/Mistral-7B-Instruct-v0.2"
 DEFAULT_STEPS = 500
 DEFAULT_LR = 2e-4
 DEFAULT_VAL_RATIO = 0.1

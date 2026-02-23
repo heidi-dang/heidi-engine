@@ -472,7 +472,7 @@ def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
 
 # Allowed config fields with types and constraints
 CONFIG_SCHEMA = {
-    "BASE_MODEL": {"type": str, "required": False, "default": "microsoft/phi-2"},
+    "BASE_MODEL": {"type": str, "required": False, "default": "mistralai/Mistral-7B-Instruct-v0.2"},
     "TEACHER_MODEL": {"type": str, "required": False, "default": "gpt-4o-mini"},
     "SAMPLES_PER_ROUND": {"type": int, "required": False, "default": 50, "min": 1, "max": 10000},
     "ROUNDS": {"type": int, "required": False, "default": 3, "min": 1, "max": 100},

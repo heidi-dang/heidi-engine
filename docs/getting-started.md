@@ -86,7 +86,7 @@ All parameters can be configured via environment variables:
 |----------|---------|-------------|
 | `ROUNDS` | 3 | Number of training rounds |
 | `SAMPLES_PER_ROUND` | 50 | Samples generated per round |
-| `BASE_MODEL` | microsoft/phi-2 | Base model for fine-tuning |
+| `BASE_MODEL` | mistralai/Mistral-7B-Instruct-v0.2 | Base model for fine-tuning |
 | `SEQ_LEN` | 2048 | Maximum sequence length |
 | `TRAIN_STEPS` | 500 | Training steps per round |
 | `AUTOTRAIN_DIR` | ~/.local/heidi_engine | Output directory |

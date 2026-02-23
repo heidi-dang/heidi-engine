@@ -24,16 +24,17 @@ Environment:
 
 - `export TEACHER_BACKEND=openhei`
 - `export TEACHER_MODEL='openai/gpt-5-mini'`  (must be `provider/model`)
-- Optional: `export OPENHEI_AGENT=general`
+- Optional: `export OPENHEI_AGENT=build`  (must be a primary agent; do not use subagents like `general`)
 
 Example (collect mode across repos):
 
-`./scripts/loop_repos.sh --stack python --max 50 --rounds 2 --samples 9000 --collect --resume --dedupe`
+`./scripts/loop_repos.sh --stack python --max 50 --rounds 2 --samples 25 --collect --resume --dedupe`
 
 Notes:
 
 - No API keys are required in the heidi-engine environment; OpenHei manages credentials.
 - The teacher must return strict JSON with keys `instruction`, `input`, `output`.
+- `--samples` is per repo per round (it is not a global total).
 
 ## Local smoke
 

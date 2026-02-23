@@ -10,6 +10,13 @@
 # DATA & OUTPUTS
 # -----------------------------------------------------------------------------
 # Training outputs - these can be large and are regenerated
+# Repo collection outputs (cloned repos + per-repo artifacts)
+autotrain_repos/
+# Pump runs (merged dataset, adapters, eval reports)
+runs/
+# Default adapter output directory
+trained_output/
+
 # Local ML runtime — keep docs & scripts tracked; only ignore runtime artifacts
 .local/ml/data/**
 .local/ml/runs/**

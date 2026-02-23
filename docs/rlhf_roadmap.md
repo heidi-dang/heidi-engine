@@ -17,7 +17,7 @@ To align the model's code generation with human preferences for readability, cor
 - **Goal**: Train a model to predict human scores.
 - **Component**: `scripts/07_train_reward_model.py`
 - **Architecture**:
-  - Base: `microsoft/phi-2` or a smaller scalar-head classifier.
+  - Base: `mistralai/Mistral-7B-Instruct-v0.2` or a smaller scalar-head classifier.
   - Loss: Pairwise ranking loss.
   - Feature: Use `heidi_cpp` to accelerate batch processing of code metrics as additional features for the RM.
 

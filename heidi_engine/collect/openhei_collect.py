@@ -9,7 +9,7 @@ from typing import Any, Dict, List
 from heidi_engine.teacher.base import TeacherRegistry
 
 
-def _validate_strict_sample(obj: Dict[str, Any]) -> Dict[str, str]:
+def _validate_strict_sample(obj: Dict[str, Any]) -> Dict[str, Any]:
     for key in ("instruction", "input", "output"):
         if key not in obj or not isinstance(obj[key], str):
             raise ValueError(f"Invalid sample: missing/invalid {key}")
@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
         default=os.environ.get("TEACHER_MODEL", ""),
         help="Model id in provider/model format (or TEACHER_MODEL env var)",
     )
-    p.add_argument("--agent", default=os.environ.get("OPENHEI_AGENT", "general"))
+    p.add_argument("--agent", default=os.environ.get("OPENHEI_AGENT", ""))
     p.add_argument("--attach", default=os.environ.get("OPENHEI_ATTACH"))
     return p.parse_args()
 

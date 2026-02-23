@@ -423,6 +423,7 @@ while true; do
     fi
 
     echo "\n--- ($idx) Processing: $repo -> $target_dir ---"
+    echo "[INFO] Repo $idx/$repos_count: $safe_name (rounds=$ROUNDS)"
 
     if [[ "$repo" =~ ^https?:// ]] || [[ "$repo" =~ \.git$ ]]; then
         # Resilient Cloning: partial + shallow + progress
@@ -547,7 +548,7 @@ while true; do
 
     echo "Running pipeline for $safe_name (RUN_ID=$RUN_ID, OUT_DIR=$OUT_DIR)"
 
-    if bash "$SCRIPT_DIR/loop.sh" --rounds "$ROUNDS" --samples "$SAMPLES" \
+    if with_heartbeat bash "$SCRIPT_DIR/loop.sh" --rounds "$ROUNDS" --samples "$SAMPLES" \
         $( [ "$PIPELINE_MODE" = "collect" ] && echo --collect ) \
         $( [ "$OPTUNA" = true ] && echo --optuna ) \
         --n-trials "$N_TRIALS"; then

@@ -20,9 +20,18 @@ import json
 import os
 import random
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
+
+
+def _ensure_repo_root_on_sys_path() -> None:
+    # Allow running this script directly from a source checkout.
+    repo_root = Path(__file__).resolve().parents[1]
+    repo_root_str = str(repo_root)
+    if repo_root_str not in sys.path:
+        sys.path.insert(0, repo_root_str)
 
 PROMPT_TEMPLATES: List[Dict[str, str]] = [
     {
@@ -119,6 +128,7 @@ def generate_one(
     input_text = build_prompt(template, code, language)
 
     if backend == "openhei":
+        _ensure_repo_root_on_sys_path()
         if not repo_dir:
             raise SystemExit("TEACHER_BACKEND=openhei requires --repo-dir (or OUT_DIR)")
         if "/" not in teacher_model:
@@ -135,7 +145,7 @@ def generate_one(
             repo_dir=repo_dir,
             prompt=prompt,
             model_id=teacher_model,
-            agent=os.environ.get("OPENHEI_AGENT", "general"),
+            agent=os.environ.get("OPENHEI_AGENT", ""),
             attach_url=os.environ.get("OPENHEI_ATTACH") or None,
         )
 
@@ -183,20 +193,110 @@ def main() -> int:
     args = parse_args()
     random.seed(args.seed)
 
-    rows: List[Dict[str, Any]] = []
-    for i in range(args.samples):
-        rows.append(
-            generate_one(
-                idx=i,
-                round_num=args.round,
-                backend=args.backend,
-                teacher_model=args.teacher,
-                language=args.language,
-                repo_dir=args.repo_dir,
+    verbose = os.environ.get("VERBOSE", "").strip().lower() in {"1", "true", "yes", "y", "on"}
+    backend = args.backend
+
+    progress = None
+    progress_task_id = None
+    use_rich = False
+    if backend == "openhei":
+        _ensure_repo_root_on_sys_path()
+
+        from heidi_engine.teacher.openhei_teacher import OpenHeiTeacherError, validate_openhei_attach_url
+
+        attach_url = (os.environ.get("OPENHEI_ATTACH") or "").strip()
+        if attach_url:
+            try:
+                validate_openhei_attach_url(attach_url)
+            except OpenHeiTeacherError as e:
+                raise SystemExit(
+                    "OPENHEI_ATTACH validation failed. "
+                    "Ensure OPENHEI_ATTACH points at a running OpenHei serve API (not a stale instance). "
+                    f"OPENHEI_ATTACH={attach_url!r}. Error: {e}"
+                )
+            print(f"[INFO] OpenHei attach: {attach_url} (OK)", file=sys.stderr)
+        else:
+            print("[INFO] OpenHei attach: (DISABLED)", file=sys.stderr)
+
+    # Rich progress bar (TTY only); otherwise fall back to periodic text lines.
+    if sys.stderr.isatty():
+        try:
+            from rich.progress import (
+                BarColumn,
+                MofNCompleteColumn,
+                Progress,
+                TaskProgressColumn,
+                TextColumn,
+                TimeElapsedColumn,
+                TimeRemainingColumn,
             )
-        )
-        if (i + 1) % 10 == 0:
-            print(f"[INFO] Generated {i + 1}/{args.samples}", file=sys.stderr)
+
+            progress = Progress(
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                TaskProgressColumn(show_speed=True),
+                TimeElapsedColumn(),
+                TimeRemainingColumn(),
+                transient=False,
+                refresh_per_second=10,
+            )
+            progress_task_id = progress.add_task("Teacher generation", total=args.samples)
+            use_rich = True
+        except Exception:
+            progress = None
+            progress_task_id = None
+            use_rich = False
+
+    rows: List[Dict[str, Any]] = []
+
+    start = time.monotonic()
+
+    if use_rich and progress is not None:
+        with progress:
+            for i in range(args.samples):
+                rows.append(
+                    generate_one(
+                        idx=i,
+                        round_num=args.round,
+                        backend=args.backend,
+                        teacher_model=args.teacher,
+                        language=args.language,
+                        repo_dir=args.repo_dir,
+                    )
+                )
+                progress.update(progress_task_id, advance=1)
+                if verbose and (i + 1) % 10 == 0:
+                    print(f"[INFO] Generated {i + 1}/{args.samples}", file=sys.stderr)
+    else:
+        # Non-TTY / no-rich fallback: periodic, non-ANSI status lines.
+        last_print_t = 0.0
+        for i in range(args.samples):
+            rows.append(
+                generate_one(
+                    idx=i,
+                    round_num=args.round,
+                    backend=args.backend,
+                    teacher_model=args.teacher,
+                    language=args.language,
+                    repo_dir=args.repo_dir,
+                )
+            )
+
+            now = time.monotonic()
+            should_print = verbose or ((i + 1) % 10 == 0) or (now - last_print_t >= 15.0)
+            if should_print:
+                elapsed = max(1e-6, now - start)
+                done = i + 1
+                rate = done / elapsed
+                remaining = args.samples - done
+                eta = int(remaining / rate) if rate > 0 else 0
+                pct = (done / args.samples * 100.0) if args.samples else 100.0
+                print(
+                    f"[INFO] Generated {done}/{args.samples} ({pct:.0f}%) | {rate:.2f} it/s | ETA {eta}s",
+                    file=sys.stderr,
+                )
+                last_print_t = now
 
     write_jsonl(args.output, rows)
     print(f"[OK] Wrote {len(rows)} samples to {args.output}", file=sys.stderr)

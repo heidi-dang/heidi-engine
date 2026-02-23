@@ -16,7 +16,7 @@ HOW IT WORKS:
     5. Saves adapter weights for later evaluation/merging
 
 TUNABLE PARAMETERS (via environment variables):
-    - BASE_MODEL: Base model to fine-tune (default: microsoft/phi-2)
+    - BASE_MODEL: Base model to fine-tune (default: mistralai/Mistral-7B-Instruct-v0.2)
     - SEQ_LEN: Max sequence length (default: 2048)
     - BATCH_SIZE: Per-device batch size (default: 1)
     - GRAD_ACCUM: Gradient accumulation steps (default: 8)
@@ -117,7 +117,7 @@ Examples:
     parser.add_argument(
         "--base-model",
         type=str,
-        default=os.environ.get("BASE_MODEL", "microsoft/phi-2"),
+        default=os.environ.get("BASE_MODEL", "mistralai/Mistral-7B-Instruct-v0.2"),
         help="Base model to fine-tune",
     )
     parser.add_argument("--model-revision", type=str, default=None, help="Model revision to use")

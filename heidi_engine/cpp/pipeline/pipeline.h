@@ -24,7 +24,7 @@ struct EngineState;
 struct PipelineConfig {
     int rounds = 1;
     int samples_per_round = 50;
-    std::string base_model = "microsoft/phi-2";
+    std::string base_model = "mistralai/Mistral-7B-Instruct-v0.2";
     std::string teacher_model = "gpt-4o-mini";
     double val_ratio = 0.05;
     int seq_len = 2048;

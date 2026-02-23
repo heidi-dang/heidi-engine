@@ -25,7 +25,7 @@ set -o pipefail
 #     HEIDI_TELEMETRY    Set to 0 to disable telemetry (default: 1)
 #     ROUNDS              Number of training rounds (default: 3)
 #     SAMPLES_PER_ROUND   Samples to generate per round (default: 50)
-#     BASE_MODEL          Base model to fine-tune (default: microsoft/phi-2)
+#     BASE_MODEL          Base model to fine-tune (default: mistralai/Mistral-7B-Instruct-v0.2)
 #     TEACHER_MODEL       Teacher model for generation (default: gpt-4o-mini)
 #     VAL_RATIO           Validation split ratio (default: 0.1)
 #     OUT_DIR             Output directory (default: ~/.local/heidi_engine)

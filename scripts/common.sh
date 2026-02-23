@@ -45,7 +45,7 @@ export AUTOTRAIN_DIR="${AUTOTRAIN_DIR:-$HOME/.local/heidi_engine}"
 
 export ROUNDS="${ROUNDS:-3}"                          # Number of training rounds
 export SAMPLES_PER_ROUND="${SAMPLES_PER_ROUND:-200}"    # Samples to generate per round
-export BASE_MODEL="${BASE_MODEL:-microsoft/phi-2}"    # Base model to fine-tune
+export BASE_MODEL="${BASE_MODEL:-mistralai/Mistral-7B-Instruct-v0.2}"    # Base model to fine-tune
 export TEACHER_BACKEND="${TEACHER_BACKEND:-legacy}"    # legacy|openhei
 export TEACHER_MODEL="${TEACHER_MODEL:-gpt-4o-mini}"   # For openhei: provider/model
 export OPENHEI_ATTACH="${OPENHEI_ATTACH:-}"            # Optional: http://127.0.0.1:4096
