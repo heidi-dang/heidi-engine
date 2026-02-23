@@ -18,7 +18,7 @@ DEFAULT_PLACEHOLDERS = [
 def validate_semantic(record: dict, placeholders: List[str] = None) -> Tuple[tuple[bool, str], dict]:
     """
     Main entry point for semantic validation.
-    Routes to task-specific validators based on metadata.task_type.
+    Routes to task specific validators based on metadata.task_type.
     """
     metadata = record.get("metadata", {})
     task_type = metadata.get("task_type")

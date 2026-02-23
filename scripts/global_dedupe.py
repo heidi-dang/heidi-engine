@@ -51,11 +51,11 @@ def main():
                 with open(jsonl_file, 'r') as in_f:
                     for line in in_f:
                         line = line.strip()
-                        if not line: continue
+                        if not line:
+                            continue
 
                         try:
                             data = json.loads(line)
-                            start_count = total_samples
                             total_samples += 1
 
                             h = get_hash(data)

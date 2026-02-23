@@ -1,8 +1,10 @@
+import base64
 import os
 import sys
-import base64
+
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+
 
 class Keystore:
     """
@@ -22,7 +24,7 @@ class Keystore:
         key = self._derive_key(salt)
         aesgcm = AESGCM(key)
         ciphertext = aesgcm.encrypt(nonce, data.encode(), None)
-        
+
         # Format: salt(16) | nonce(12) | ciphertext
         combined = salt + nonce + ciphertext
         return base64.b64encode(combined).decode()
@@ -32,7 +34,7 @@ class Keystore:
         salt = combined[:16]
         nonce = combined[16:28]
         ciphertext = combined[28:]
-        
+
         try:
             key = self._derive_key(salt)
             aesgcm = AESGCM(key)
@@ -45,12 +47,12 @@ if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: keystore.py <encrypt|decrypt> <data|b64>")
         sys.exit(1)
-        
+
     pwd = os.getenv("HEIDI_KEYSTORE_PWD")
     if not pwd:
         print("[FATAL] HEIDI_KEYSTORE_PWD must be set.", file=sys.stderr)
         sys.exit(1)
-        
+
     ks = Keystore(pwd)
     if sys.argv[1] == "encrypt":
         print(ks.encrypt_gate(sys.argv[2]))

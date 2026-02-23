@@ -23,7 +23,7 @@ try:
 except ImportError:
     HAS_HEIDI_CPP = False
 
-import heidi_engine.telemetry as tel
+import heidi_engine.telemetry as tel  # noqa: E402
 
 # Defaults
 DEFAULT_BASE_MODEL = "microsoft/phi-2"
@@ -51,7 +51,8 @@ def run_trial(trial, args, script_dir, out_dir, train_file, val_file):
                     print(f"[HPO] Trial {trial_idx} skipped: Low VRAM ({free_mem_mb:.0f}MB < {DEFAULT_VRAM_THRESHOLD_MB}MB)")
                     raise optuna.TrialPruned()
         except Exception as e:
-            if isinstance(e, optuna.TrialPruned): raise
+            if isinstance(e, optuna.TrialPruned):
+                raise
             print(f"[HPO] GPU check failed: {e}")
 
     trial_out = out_dir / f"trial_{trial_idx}"

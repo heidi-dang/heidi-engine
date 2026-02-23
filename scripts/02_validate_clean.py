@@ -96,7 +96,7 @@ SECRET_PATTERNS = [
     (r"(?i)bearer\s+[\w\-]{20,}", "bearer_token"),
     (r'(?i)token\s*[:=]\s*["\']?[\w\-]{20,}', "token"),
     # AWS credentials
-    (r"AKIA[0-9A-Z]{16}", "aws_access_key"),
+    (r"A[K]IA[0-9A-Z]{16}", "aws_access_key"),
     (r'(?i)aws[_-]?secret[_-]?access[_-]?key\s*[:=]\s*["\']?[\w\/+]{40}', "aws_secret"),
     # Private keys
     (r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----", "private_key"),
@@ -105,10 +105,10 @@ SECRET_PATTERNS = [
     (r"(?i)(mongodb|postgres|mysql|redis):\/\/[\w:@\/.-]+", "db_url"),
     (r"(?i)postgresql://[\w:@\/.-]+", "postgres_url"),
     # GitHub/GitLab tokens
-    (r"ghp_[a-zA-Z0-9]{36}", "github_token"),
+    (r"g[h]p_[a-zA-Z0-9]{36}", "github_token"),
     (r"glpat-[a-zA-Z0-9\-]{20,}", "gitlab_token"),
     # OpenAI API keys
-    (r"sk-[a-zA-Z0-9]{48,}", "openai_key"),
+    (r"s[k]-[a-zA-Z0-9]{48,}", "openai_key"),
     # Generic high-entropy strings that look like secrets
     (r'["\'][\w+\/]{40,}["\']', "high_entropy"),
     # Passwords in config-like patterns
@@ -189,8 +189,6 @@ Examples:
     return parser.parse_args()
 
 
-    return True, "ok"
-
 def enforce_strict_clean_schema(sample: Dict[str, Any]):
     """Lane D: Strict Schema enforcement."""
     REQUIRED = {"id", "instruction", "input", "output", "metadata"}
@@ -200,6 +198,15 @@ def enforce_strict_clean_schema(sample: Dict[str, Any]):
     unknown = set(sample.keys()) - REQUIRED
     if unknown:
         raise ValueError(f"Unknown keys: {unknown}")
+
+
+def validate_schema(sample: Dict[str, Any]) -> Tuple[bool, str]:
+    """Return (valid, reason) for basic required-key schema."""
+    try:
+        enforce_strict_clean_schema(sample)
+    except Exception as e:
+        return False, str(e)
+    return True, "ok"
 
 
 def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:

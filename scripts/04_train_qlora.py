@@ -62,15 +62,6 @@ try:
 except ImportError:
     HAS_SECURITY_VALIDATOR = False
 
-def format_instruction(sample: Dict[str, Any]) -> str:
-    """
-    Format sample for instruction-following training.
-    """
-    # Lane F: Use direct indices to fail if schema violated
-    instruction = sample["instruction"]
-    input_text = sample["input"]
-    output = sample["output"]
-
 SKIP_PROVENANCE = os.environ.get("SKIP_PROVENANCE_CHECK", "").lower() in ("1", "true", "yes")
 
 # Configure logging
@@ -276,7 +267,7 @@ def load_training_data(data_path: str) -> List[Dict[str, Any]]:
 
             try:
                 sample = json.loads(line)
-                
+
                 # Zero-Trust Strict Schema Verification (Lane D/F)
                 REQUIRED_TRAIN_KEYS = {"instruction", "input", "output"}
                 # Note: provenance might be optional if HAS_SECURITY_VALIDATOR is relevant
@@ -284,7 +275,7 @@ def load_training_data(data_path: str) -> List[Dict[str, Any]]:
                 if missing:
                     logger.error(f"FATAL: Missing required training keys: {missing}")
                     sys.exit(1)
-                
+
                 # Reject unknown keys
                 # Allow 'id' and 'provenance' as well
                 ALLOWED_KEYS = REQUIRED_TRAIN_KEYS | {"id", "provenance"}
