@@ -278,7 +278,7 @@ def load_training_data(data_path: str) -> List[Dict[str, Any]]:
 
                 # Reject unknown keys
                 # Allow 'id' and 'provenance' as well
-                ALLOWED_KEYS = REQUIRED_TRAIN_KEYS | {"id", "provenance"}
+                ALLOWED_KEYS = REQUIRED_TRAIN_KEYS | {"id", "provenance", "metadata", "validation"}
                 unknown = set(sample.keys()) - ALLOWED_KEYS
                 if unknown:
                     logger.error(f"FATAL: Unknown keys in training record: {unknown}")
