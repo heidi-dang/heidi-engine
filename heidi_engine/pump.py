@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime as dt
-import fcntl
 import hashlib
 import json
 import os
@@ -14,6 +13,41 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional, Sequence, TextIO
+
+
+def _lock(f: TextIO, *, block: bool) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        # msvcrt.locking locks from current file position.
+        f.seek(0)
+        if f.tell() == 0:
+            f.write("0")
+            f.flush()
+        f.seek(0)
+        mode = msvcrt.LK_LOCK if block else msvcrt.LK_NBLCK
+        msvcrt.locking(f.fileno(), mode, 1)
+        return
+
+    import fcntl
+
+    flags = fcntl.LOCK_EX
+    if not block:
+        flags |= fcntl.LOCK_NB
+    fcntl.flock(f.fileno(), flags)
+
+
+def _unlock(f: TextIO) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
 @dataclass(frozen=True)
@@ -138,8 +172,8 @@ def _acquire_lock(paths: PumpPaths, *, force: bool) -> Iterator[TextIO]:
     f = paths.lock_file.open("a+", encoding="utf-8")
     try:
         try:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
+            _lock(f, block=False)
+        except (BlockingIOError, OSError):
             if not force:
                 raise SystemExit(
                     f"Run is already active (lock held): {paths.run_dir}. "
@@ -168,7 +202,7 @@ def _acquire_lock(paths: PumpPaths, *, force: bool) -> Iterator[TextIO]:
                 # Wait briefly; then try again.
                 time.sleep(1)
 
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            _lock(f, block=True)
 
         f.seek(0)
         f.truncate(0)
@@ -177,7 +211,7 @@ def _acquire_lock(paths: PumpPaths, *, force: bool) -> Iterator[TextIO]:
         yield f
     finally:
         try:
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            _unlock(f)
         except Exception:
             pass
         f.close()
