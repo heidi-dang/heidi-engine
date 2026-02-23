@@ -1,0 +1,4 @@
+## 2024-05-24 - Path Traversal in Telemetry Run Directory
+**Vulnerability:** The `get_run_dir` function in `heidi_engine/telemetry.py` used the `run_id` parameter directly to construct a file path without sanitization. This allowed an attacker to provide a malicious `run_id` (e.g., `../../../tmp/evil`) to write files outside of the intended directory structure.
+**Learning:** Even internal utility functions that handle identifiers can be vulnerable to path traversal if those identifiers are sourced from environment variables or CLI arguments that could be influenced by a malicious actor.
+**Prevention:** Always sanitize identifiers used in path construction. Using `Path(identifier).name` is an effective way to strip directory components and ensure the resulting path remains within the intended parent directory.
