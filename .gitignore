@@ -21,6 +21,7 @@ out_lora*/
 *.jsonl
 !data/.gitkeep
 !.local/ml/data/raw_sample.jsonl
+!tests/fixtures/openhei_run_stream.jsonl
 
 # autotrain/ package is TRACKED (source code)
 # Runtime artifacts inside autotrain/ are IGNORED
