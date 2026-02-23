@@ -423,8 +423,9 @@ def main():
     args = parse_args()
 
     print(f"[INFO] Loading samples from: {args.input}")
-    enforce_containment(args.input, os.getcwd())
-    enforce_containment(args.output, os.getcwd())
+    allowed_base = os.path.abspath(os.environ.get("OUT_DIR", os.getcwd()))
+    enforce_containment(args.input, allowed_base)
+    enforce_containment(args.output, allowed_base)
 
     # Load raw samples
     raw_samples = load_jsonl(args.input)
