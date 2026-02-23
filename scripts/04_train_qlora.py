@@ -591,8 +591,8 @@ def main():
 
     # Setup output directory
     os.makedirs(args.output, exist_ok=True)
-    enforce_containment(args.data, os.path.join(os.getcwd(), "verified"))
-    enforce_containment(args.output, os.path.join(os.getcwd(), "output"))
+    enforce_containment(args.data, os.getcwd())
+    enforce_containment(args.output, os.getcwd())
 
     # Log configuration
     logger.info("=" * 50)
