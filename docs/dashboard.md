@@ -256,7 +256,7 @@ Config must pass strict validation:
 
 | Field | Type | Default | Constraints |
 |-------|------|---------|-------------|
-| BASE_MODEL | string | microsoft/phi-2 | |
+| BASE_MODEL | string | mistralai/Mistral-7B-Instruct-v0.2 | |
 | TEACHER_MODEL | string | gpt-4o-mini | |
 | SAMPLES_PER_ROUND | int | 50 | 1-10000 |
 | ROUNDS | int | 3 | 1-100 |

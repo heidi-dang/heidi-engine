@@ -76,7 +76,7 @@ Examples:
     parser.add_argument(
         "--base-model",
         type=str,
-        default=os.environ.get("BASE_MODEL", "microsoft/phi-2"),
+        default=os.environ.get("BASE_MODEL", "mistralai/Mistral-7B-Instruct-v0.2"),
         help="Base model used for training",
     )
 
@@ -413,8 +413,10 @@ def main():
     Main entry point for evaluation.
     """
     args = parse_args()
-    enforce_containment(args.data, os.path.join(os.getcwd(), "verified"))
-    enforce_containment(args.output, os.path.join(os.getcwd(), "eval"))
+    # Allow evaluating datasets produced under the current workspace (e.g. runs/<run_id>/...).
+    # Still enforce containment to prevent path traversal.
+    enforce_containment(args.data, os.getcwd())
+    enforce_containment(args.output, os.getcwd())
     eval_data = load_eval_data(args.data, args.num_samples)
     print(f"[INFO] Loaded {len(eval_data)} samples")
 

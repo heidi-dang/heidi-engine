@@ -23,7 +23,7 @@ def test_doctor_pass_with_config():
     assert doctor_check(strict=True) == True
 
 def test_real_mode_blocked_in_core_integration():
-    import heidi_cpp
+    heidi_cpp = pytest.importorskip("heidi_cpp")
     core = heidi_cpp.Core()
     
     # Missing signing key/keystore should block REAL mode

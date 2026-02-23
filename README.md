@@ -87,7 +87,7 @@ Train models as part of the data loop (`--full`), or standalone for more control
 ```bash
 ./scripts/train_only.py \
   --data ./autotrain_repos/merged_dataset.jsonl \
-  --base-model microsoft/phi-2 \
+  --base-model mistralai/Mistral-7B-Instruct-v0.2 \
   --steps 1000 \
   --out-dir ./my_model_output
 ```

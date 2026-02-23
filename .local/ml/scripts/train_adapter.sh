@@ -13,7 +13,7 @@ EOF
 }
 
 OUT_DIR=".local/ml/runs/$(date +%Y%m%d-%H%M%S)"
-BASE_MODEL="microsoft/phi-2"
+BASE_MODEL="mistralai/Mistral-7B-Instruct-v0.2"
 DATA=".local/ml/data/train/train.jsonl"
 VAL_DATA=".local/ml/data/eval/val.jsonl"
 TRAIN_STEPS=500

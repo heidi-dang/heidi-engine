@@ -105,7 +105,7 @@ HTTP_STATUS_PORT = int(os.environ.get("HTTP_STATUS_PORT", "7779"))
 
 DEFAULT_CONFIG = {
     # Model configuration
-    "BASE_MODEL": "microsoft/phi-2",
+    "BASE_MODEL": "mistralai/Mistral-7B-Instruct-v0.2",
     "TEACHER_MODEL": "gpt-4o-mini",
     # Dataset configuration
     "SAMPLES_PER_ROUND": 50,
@@ -701,7 +701,7 @@ def configure_parameters(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Model configuration
     print("\n  --- Model Configuration ---")
-    config["BASE_MODEL"] = get_input("  Base model", config.get("BASE_MODEL", "microsoft/phi-2"))
+    config["BASE_MODEL"] = get_input("  Base model", config.get("BASE_MODEL", "mistralai/Mistral-7B-Instruct-v0.2"))
     config["TEACHER_MODEL"] = get_input(
         "  Teacher model", config.get("TEACHER_MODEL", "gpt-4o-mini")
     )

@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-import json
 import hashlib
-import sys
+import json
 import os
+import sys
+
 
 def verify_journal(filepath):
     """
     Offline deterministic replay verification.
     Parses events.jsonl, validates the SHA256 zero-trust chaining,
-    and reconstructs the State Machine progression to ensure 
+    and reconstructs the State Machine progression to ensure
     the recorded event sequence mathematically leads to the final state.
     """
     if not os.path.exists(filepath):
@@ -25,7 +26,6 @@ def verify_journal(filepath):
     expected_hash = None
     current_state = "IDLE"
     current_round = 0
-    mode = "unknown"
     run_id = None
 
     for i, line in enumerate(lines):
@@ -56,23 +56,28 @@ def verify_journal(filepath):
         if evt["event_type"] == "pipeline_start":
             current_state = "COLLECTING"
         elif evt["event_type"] == "stage_start":
-            if evt["stage"] == "generate": current_state = "COLLECTING"
-            elif evt["stage"] == "validate": current_state = "VALIDATING"
-            elif evt["stage"] == "test": current_state = "TESTING"
-            elif evt["stage"] == "train": current_state = "FINALIZING"
-            elif evt["stage"] == "eval": current_state = "EVALUATING"
+            if evt["stage"] == "generate":
+                current_state = "COLLECTING"
+            elif evt["stage"] == "validate":
+                current_state = "VALIDATING"
+            elif evt["stage"] == "test":
+                current_state = "TESTING"
+            elif evt["stage"] == "train":
+                current_state = "FINALIZING"
+            elif evt["stage"] == "eval":
+                current_state = "EVALUATING"
         elif evt["event_type"] == "pipeline_error":
             current_state = "ERROR"
         elif evt["event_type"] == "pipeline_stop":
             current_state = "IDLE"
         elif evt["event_type"] == "pipeline_complete":
             current_state = "IDLE"
-            
+
         current_round = max(current_round, evt.get("round", 0))
 
     print(f"Success: Validated {len(lines)} events in deterministic replay.")
     print(f"Final Reconstructed State: {current_state} (Round {current_round})")
-    
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: replay_journal.py <path_to_events.jsonl>")

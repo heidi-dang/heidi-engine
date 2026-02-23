@@ -44,6 +44,10 @@ N_TRIALS=10
 DO_DEDUPE=false
 PUSH_TO_HUB=""
 USE_GOLDEN=false
+TEACHER_BACKEND="${TEACHER_BACKEND:-}"
+TEACHER_MODEL_OVERRIDE="${TEACHER_MODEL:-}"
+OPENHEI_ATTACH_OVERRIDE="${OPENHEI_ATTACH:-}"
+OPENHEI_AGENT_OVERRIDE="${OPENHEI_AGENT:-}"
 
 print_usage() {
     cat <<EOF
@@ -72,6 +76,10 @@ Options:
   --sleep SECONDS      Sleep between API requests (default: $SLEEP_BETWEEN_REQUESTS)
   --monitor URL        Stream status to central dashboard (e.g. http://192.168.1.10:7779)
   --assistant          Run in assistant mode (uses code-assistant RUN_ID)
+  --teacher-backend B  Teacher backend (legacy|openhei)
+  --teacher-model M    Teacher model (for openhei: provider/model)
+  --openhei-attach U   Attach URL (e.g. http://127.0.0.1:4096)
+  --openhei-agent A    OpenHei agent name (default: general)
   --optuna             Enable Hyperparameter Optimization for training
   --n-trials N         Number of HPO trials (default: 10)
   --help               Show this help
@@ -140,6 +148,14 @@ while [[ $# -gt 0 ]]; do
             check_arg "$1" "$2"; export DASHBOARD_URL="$2"; shift 2;;
         --assistant)
             ASSISTANT_MODE=true; shift;;
+        --teacher-backend)
+            check_arg "$1" "$2"; TEACHER_BACKEND="$2"; shift 2;;
+        --teacher-model)
+            check_arg "$1" "$2"; TEACHER_MODEL_OVERRIDE="$2"; shift 2;;
+        --openhei-attach)
+            check_arg "$1" "$2"; OPENHEI_ATTACH_OVERRIDE="$2"; shift 2;;
+        --openhei-agent)
+            check_arg "$1" "$2"; OPENHEI_AGENT_OVERRIDE="$2"; shift 2;;
         --optuna)
             OPTUNA=true; shift;;
         --n-trials)
@@ -407,6 +423,7 @@ while true; do
     fi
 
     echo "\n--- ($idx) Processing: $repo -> $target_dir ---"
+    echo "[INFO] Repo $idx/$repos_count: $safe_name (rounds=$ROUNDS)"
 
     if [[ "$repo" =~ ^https?:// ]] || [[ "$repo" =~ \.git$ ]]; then
         # Resilient Cloning: partial + shallow + progress
@@ -514,11 +531,24 @@ while true; do
     export OUT_DIR="$OUT_BASE/$safe_name"
     export PIPELINE_MODE="$PIPELINE_MODE"
 
+    if [ -n "${TEACHER_BACKEND:-}" ]; then
+        export TEACHER_BACKEND
+    fi
+    if [ -n "${TEACHER_MODEL_OVERRIDE:-}" ]; then
+        export TEACHER_MODEL="$TEACHER_MODEL_OVERRIDE"
+    fi
+    if [ -n "${OPENHEI_ATTACH_OVERRIDE:-}" ]; then
+        export OPENHEI_ATTACH="$OPENHEI_ATTACH_OVERRIDE"
+    fi
+    if [ -n "${OPENHEI_AGENT_OVERRIDE:-}" ]; then
+        export OPENHEI_AGENT="$OPENHEI_AGENT_OVERRIDE"
+    fi
+
     mkdir -p "$OUT_DIR"
 
     echo "Running pipeline for $safe_name (RUN_ID=$RUN_ID, OUT_DIR=$OUT_DIR)"
 
-    if bash "$SCRIPT_DIR/loop.sh" --rounds "$ROUNDS" --samples "$SAMPLES" \
+    if with_heartbeat bash "$SCRIPT_DIR/loop.sh" --rounds "$ROUNDS" --samples "$SAMPLES" \
         $( [ "$PIPELINE_MODE" = "collect" ] && echo --collect ) \
         $( [ "$OPTUNA" = true ] && echo --optuna ) \
         --n-trials "$N_TRIALS"; then

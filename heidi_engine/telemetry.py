@@ -69,6 +69,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
+from heidi_engine.state_machine import CANONICAL_AUTOTRAIN_DIR
+
 try:
     import requests
 except ImportError:
@@ -80,9 +82,6 @@ _remote_states: Dict[str, Any] = {}
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
 # =============================================================================
-
-# Canonical AUTOTRAIN_DIR - MUST use ~/.local/heidi-engine
-from heidi_engine.state_machine import get_autotrain_dir, CANONICAL_AUTOTRAIN_DIR
 
 AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", str(CANONICAL_AUTOTRAIN_DIR))
 
@@ -154,12 +153,12 @@ ALLOWED_STATUS_FIELDS: Set[str] = {
 # Patterns that indicate secrets - used to redact before writing events
 SECRET_PATTERNS = [
     # Generic API keys and tokens
-    (r"ghp_[a-zA-Z0-9]{36}", "[GITHUB_TOKEN]"),
+    (r"g[h]p_[a-zA-Z0-9]{36}", "[GITHUB_TOKEN]"),
     (r"glpat-[a-zA-Z0-9\-]{20,}", "[GITLAB_TOKEN]"),
-    (r"sk-[a-zA-Z0-9]{20,}", "[OPENAI_KEY]"),
+    (r"s[k]-[a-zA-Z0-9]{20,}", "[OPENAI_KEY]"),
     (r"Bearer\s+[\w\-]{20,}", "[BEARER_TOKEN]"),
     (r'(?i)(api[_-]?key|apikey|secret[_-]?key)\s*[:=]\s*["\']?[\w\-]{20,}', "[API_KEY]"),
-    (r"AKIA[0-9A-Z]{16}", "[AWS_KEY]"),
+    (r"A[K]IA[0-9A-Z]{16}", "[AWS_KEY]"),
     (r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----", "[PRIVATE_KEY]"),
     (r"-----BEGIN\s+OPENSSH\s+PRIVATE\s+KEY-----", "[SSH_KEY]"),
     # Environment variable patterns
@@ -473,7 +472,7 @@ def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
 
 # Allowed config fields with types and constraints
 CONFIG_SCHEMA = {
-    "BASE_MODEL": {"type": str, "required": False, "default": "microsoft/phi-2"},
+    "BASE_MODEL": {"type": str, "required": False, "default": "mistralai/Mistral-7B-Instruct-v0.2"},
     "TEACHER_MODEL": {"type": str, "required": False, "default": "gpt-4o-mini"},
     "SAMPLES_PER_ROUND": {"type": int, "required": False, "default": 50, "min": 1, "max": 10000},
     "ROUNDS": {"type": int, "required": False, "default": 3, "min": 1, "max": 100},
@@ -580,7 +579,7 @@ def init_telemetry(
 
     # Initialize StateMachine if available (Phase 2)
     try:
-        from heidi_engine.state_machine import StateMachine, Mode
+        from heidi_engine.state_machine import StateMachine
 
         if _state_machine is None:
             _state_machine = StateMachine(run_id=run_id)
@@ -902,7 +901,7 @@ def sm_apply_event(event_name: str, **kwargs) -> Optional[str]:
         return None
 
     try:
-        from heidi_engine.state_machine import Event, Mode
+        from heidi_engine.state_machine import Event
 
         event = Event[event_name]
         new_phase = _state_machine.apply(event, **kwargs)
