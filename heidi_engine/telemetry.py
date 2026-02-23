@@ -56,12 +56,14 @@ CONFIG VALIDATION:
 """
 
 import atexit
+import copy
 import json
 import os
 import re
 import stat
 import sys
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
@@ -98,6 +100,9 @@ PRICING_CONFIG_PATH = os.environ.get("PRICING_CONFIG_PATH", "")
 EVENT_LOG_MAX_SIZE_MB = int(os.environ.get("EVENT_LOG_MAX_SIZE_MB", "100"))
 # Number of rotated log files to keep
 EVENT_LOG_RETENTION = int(os.environ.get("EVENT_LOG_RETENTION", "5"))
+
+# BOLT OPTIMIZATION: State cache TTL (seconds)
+HEIDI_STATUS_TTL_S = float(os.environ.get("HEIDI_STATUS_TTL_S", "0.5"))
 
 # =============================================================================
 # EVENT SCHEMA VERSION (FROZEN - DO NOT CHANGE)
@@ -649,6 +654,85 @@ def init_telemetry(
         return run_id
 
 
+class StateCache:
+    """
+    Thread-safe cache for state.json to reduce disk IO.
+
+    Validated by:
+        - TTL (default 0.5s)
+        - st_mtime_ns (file modification time)
+        - st_size (file size)
+        - run_id (cross-run isolation)
+    """
+
+    _instance = None
+    _lock = threading.RLock()
+
+    def __init__(self):
+        self.cache: Dict[str, Any] = {}
+        self.last_read: float = 0
+        self.mtime_ns: int = 0
+        self.size: int = 0
+        self.run_id: str = ""
+
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
+
+    def get_state(self, run_id: str, state_file: Path) -> Optional[Dict[str, Any]]:
+        now = time.time()
+
+        with self._lock:
+            # Cross-run isolation: invalidate if run_id changed
+            if self.run_id != run_id:
+                self.invalidate()
+                self.run_id = run_id
+
+            if not state_file.exists():
+                self.invalidate()
+                return None
+
+            try:
+                stat_info = state_file.stat()
+
+                # Check cache validity
+                if (
+                    self.cache
+                    and (now - self.last_read < HEIDI_STATUS_TTL_S)
+                    and (stat_info.st_mtime_ns == self.mtime_ns)
+                    and (stat_info.st_size == self.size)
+                ):
+                    return copy.deepcopy(self.cache)
+
+                # Cache miss or invalid - read from disk
+                with open(state_file) as f:
+                    state = json.load(f)
+                    # Resolve status from on-disk metadata
+                    state["status"] = resolve_status(state)
+
+                    self.cache = state
+                    self.mtime_ns = stat_info.st_mtime_ns
+                    self.size = stat_info.st_size
+                    self.last_read = now
+
+                    return copy.deepcopy(self.cache)
+            except Exception as e:
+                print(f"[WARN] Cache read failed: {e}", file=sys.stderr)
+                self.invalidate()
+                return None
+
+    def invalidate(self):
+        with self._lock:
+            self.cache = {}
+            self.last_read = 0
+            self.mtime_ns = 0
+            self.size = 0
+
+
 def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Load current state from state.json.
@@ -663,11 +747,17 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     RETURNS:
         State dictionary
     """
-    state_file = get_state_path(run_id)
+    resolved_run_id = run_id or get_run_id()
+    state_file = get_state_path(resolved_run_id)
+
+    # BOLT OPTIMIZATION: Use StateCache to avoid redundant disk reads
+    cached = StateCache.get_instance().get_state(resolved_run_id, state_file)
+    if cached is not None:
+        return cached
 
     if not state_file.exists():
         return {
-            "run_id": get_run_id(),
+            "run_id": resolved_run_id,
             "status": "idle",
             "counters": get_default_counters(),
             "usage": get_default_usage(),
@@ -769,6 +859,9 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
 
     # Atomic rename
     os.replace(temp_file, state_file)
+
+    # BOLT OPTIMIZATION: Invalidate cache after write
+    StateCache.get_instance().invalidate()
 
 
 def update_counters(delta: Dict[str, Any], run_id: Optional[str] = None) -> None:
@@ -1325,8 +1418,17 @@ def start_http_server(port: int = 7779) -> None:
         print("[WARN] HTTP server not available", file=sys.stderr)
         return
 
+    _gpu_cache = {"data": {"available": False}, "last_poll": 0.0}
+    _ts_cache = {"data": None, "last_read": 0.0}
+
     def get_gpu_summary() -> Dict[str, Any]:
-        """Get minimal GPU info without exposing sensitive data."""
+        """Get minimal GPU info with 2s caching."""
+        nonlocal _gpu_cache
+        now = time.time()
+        if now - _gpu_cache["last_poll"] < 2.0:
+            return _gpu_cache["data"]
+
+        res = {"available": False}
         try:
             import subprocess
 
@@ -1343,30 +1445,45 @@ def start_http_server(port: int = 7779) -> None:
             if result.returncode == 0:
                 parts = result.stdout.strip().split(",")
                 if len(parts) >= 2:
-                    return {
+                    res = {
                         "vram_used_mb": int(parts[0].strip()),
                         "vram_total_mb": int(parts[1].strip()),
                         "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
                     }
         except Exception:
             pass
-        return {"available": False}
+
+        _gpu_cache["data"] = res
+        _gpu_cache["last_poll"] = now
+        return res
 
     def get_last_event_ts() -> Optional[str]:
-        """Get timestamp of last event."""
+        """Get timestamp of last event with 1s caching."""
+        nonlocal _ts_cache
+        now = time.time()
+        if now - _ts_cache["last_read"] < 1.0:
+            return _ts_cache["data"]
+
+        ts = None
         try:
             events_file = get_events_path()
-            if events_file.exists() and events_file.stat().st_size > 0:
-                with open(events_file, "rb") as f:
-                    f.seek(-500, 2)  # Read last 500 bytes
-                    lines = f.read().decode().strip().split("\n")
-                    if lines:
-                        last_line = lines[-1]
-                        event = json.loads(last_line)
-                        return event.get("ts")
+            if events_file.exists():
+                size = events_file.stat().st_size
+                if size > 0:
+                    with open(events_file, "rb") as f:
+                        # BOLT OPTIMIZATION: Seek from end safely
+                        f.seek(max(0, size - 500), 0)
+                        lines = f.read().decode(errors="ignore").strip().split("\n")
+                        if lines:
+                            last_line = lines[-1]
+                            event = json.loads(last_line)
+                            ts = event.get("ts")
         except Exception:
             pass
-        return None
+
+        _ts_cache["data"] = ts
+        _ts_cache["last_read"] = now
+        return ts
 
     def redact_state(state: Dict[str, Any]) -> Dict[str, Any]:
         """Redact state to only allowed fields."""
