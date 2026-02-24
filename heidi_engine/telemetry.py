@@ -62,6 +62,7 @@ import re
 import stat
 import sys
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
@@ -263,6 +264,60 @@ _lock = threading.RLock()
 
 # Whether telemetry has been initialized
 _initialized = False
+
+# State cache TTL
+HEIDI_STATUS_TTL_S = float(os.environ.get("HEIDI_STATUS_TTL_S", "0.5"))
+
+
+class StateCache:
+    """Thread-safe cache for state.json to avoid repeated disk IO."""
+
+    def __init__(self):
+        self._cache = {}
+        self._lock = threading.RLock()
+
+    def get(self, filepath: Path) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            key = str(filepath)
+            if key not in self._cache:
+                return None
+
+            cached = self._cache[key]
+            now = time.time()
+
+            # BOLT OPTIMIZATION: Check TTL first
+            if now - cached["ts"] > HEIDI_STATUS_TTL_S:
+                return None
+
+            # BOLT OPTIMIZATION: Metadata validation is much faster than json.load
+            try:
+                stat = filepath.stat()
+                if stat.st_mtime_ns != cached["mtime"] or stat.st_size != cached["size"]:
+                    return None
+            except Exception:
+                return None
+
+            return cached["data"].copy()
+
+    def set(self, filepath: Path, data: Dict[str, Any]):
+        with self._lock:
+            try:
+                stat = filepath.stat()
+                self._cache[str(filepath)] = {
+                    "data": data.copy(),
+                    "ts": time.time(),
+                    "mtime": stat.st_mtime_ns,
+                    "size": stat.st_size,
+                }
+            except Exception:
+                pass
+
+    def invalidate(self, filepath: Path):
+        with self._lock:
+            self._cache.pop(str(filepath), None)
+
+
+_state_cache_singleton = StateCache()
 
 
 # =============================================================================
@@ -656,7 +711,7 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     HOW IT WORKS:
         - Reads state.json file
         - Returns empty state if file doesn't exist
-    
+
     ARGS:
         run_id: Run to read (defaults to current run)
 
@@ -664,6 +719,11 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
         State dictionary
     """
     state_file = get_state_path(run_id)
+
+    # BOLT OPTIMIZATION: Try cache first
+    cached = _state_cache_singleton.get(state_file)
+    if cached:
+        return cached
 
     if not state_file.exists():
         return {
@@ -678,6 +738,8 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             state = json.load(f)
             # Resolve status from on-disk metadata
             state["status"] = resolve_status(state)
+            # BOLT OPTIMIZATION: Update cache
+            _state_cache_singleton.set(state_file, state)
             return state
     except Exception as e:
         print(f"[WARN] Failed to load state: {e}", file=sys.stderr)
@@ -687,44 +749,44 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
 def resolve_status(state: Dict[str, Any]) -> str:
     """
     Resolve run status from on-disk metadata.
-    
+
     STATUS VALUES:
         - idle: No active run, or run_id present but no events
         - running: Worker active / stop not requested / still processing
         - stopped: stop_requested=true or pipeline complete
         - error: last_error present or health degraded
-    
+
     HOW IT WORKS:
         - Checks stop_requested flag
         - Checks status field
         - Checks for error indicators
-    
+
     ARGS:
         state: State dictionary from state.json
-    
+
     RETURNS:
         Status string: idle, running, stopped, error
     """
     # Explicit stop requested
     if state.get("stop_requested", False):
         return "stopped"
-    
+
     # Check explicit status first
     status = state.get("status", "")
     if status in ("running", "completed", "stopped", "error"):
         return status
-    
+
     # Check for errors
     if state.get("last_error") or state.get("health") == "degraded":
         return "error"
-    
+
     # Check if there's an active run_id but no recent activity
     run_id = state.get("run_id")
     if run_id:
         # Has run_id - check for activity
         counters = state.get("counters", {})
         usage = state.get("usage", {})
-        
+
         # If there's any activity, consider it running
         if counters.get("teacher_generated", 0) > 0:
             return "running"
@@ -732,10 +794,10 @@ def resolve_status(state: Dict[str, Any]) -> str:
             return "running"
         if counters.get("train_step", 0) > 0:
             return "running"
-        
+
         # No activity - idle
         return "idle"
-    
+
     # Default to idle if no run_id
     return "idle"
 
@@ -769,6 +831,9 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
 
     # Atomic rename
     os.replace(temp_file, state_file)
+
+    # BOLT OPTIMIZATION: Invalidate cache after write
+    _state_cache_singleton.invalidate(state_file)
 
 
 def update_counters(delta: Dict[str, Any], run_id: Optional[str] = None) -> None:
@@ -1295,6 +1360,79 @@ def stage_context(stage: str, round_num: int, message: str, **kwargs):
 # HTTP STATUS SERVER (OPTIONAL)
 # =============================================================================
 
+_gpu_cache = {"data": None, "ts": 0}
+_last_event_cache = {"data": None, "ts": 0}
+_status_lock = threading.Lock()
+
+
+def get_gpu_summary() -> Dict[str, Any]:
+    """Get minimal GPU info without exposing sensitive data."""
+    # BOLT OPTIMIZATION: Cache GPU info for 2.0s to reduce nvidia-smi overhead
+    with _status_lock:
+        now = time.time()
+        if _gpu_cache["data"] and now - _gpu_cache["ts"] < 2.0:
+            return _gpu_cache["data"].copy()
+
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.used,memory.total,utilization.gpu",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            parts = result.stdout.strip().split(",")
+            if len(parts) >= 2:
+                res = {
+                    "vram_used_mb": int(parts[0].strip()),
+                    "vram_total_mb": int(parts[1].strip()),
+                    "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
+                }
+                with _status_lock:
+                    _gpu_cache["data"] = res
+                    _gpu_cache["ts"] = time.time()
+                return res.copy()
+    except Exception:
+        pass
+
+    return {"available": False}
+
+
+def get_last_event_ts() -> Optional[str]:
+    """Get timestamp of last event."""
+    # BOLT OPTIMIZATION: Cache last event TS for 1.0s to reduce IO overhead
+    with _status_lock:
+        now = time.time()
+        if _last_event_cache["data"] and now - _last_event_cache["ts"] < 1.0:
+            return _last_event_cache["data"]
+
+    try:
+        events_file = get_events_path()
+        if events_file.exists():
+            size = events_file.stat().st_size
+            if size > 0:
+                with open(events_file, "rb") as f:
+                    # BOLT OPTIMIZATION: Use min(500, size) for safe backward seeking
+                    f.seek(-min(500, size), 2)
+                    lines = f.read().decode(errors="ignore").strip().split("\n")
+                    if lines:
+                        last_line = lines[-1]
+                        event = json.loads(last_line)
+                        res = event.get("ts")
+                        with _status_lock:
+                            _last_event_cache["data"] = res
+                            _last_event_cache["ts"] = time.time()
+                        return res
+    except Exception:
+        pass
+    return None
+
 
 def start_http_server(port: int = 7779) -> None:
     """
@@ -1324,49 +1462,6 @@ def start_http_server(port: int = 7779) -> None:
     except ImportError:
         print("[WARN] HTTP server not available", file=sys.stderr)
         return
-
-    def get_gpu_summary() -> Dict[str, Any]:
-        """Get minimal GPU info without exposing sensitive data."""
-        try:
-            import subprocess
-
-            result = subprocess.run(
-                [
-                    "nvidia-smi",
-                    "--query-gpu=memory.used,memory.total,utilization.gpu",
-                    "--format=csv,noheader,nounits",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                parts = result.stdout.strip().split(",")
-                if len(parts) >= 2:
-                    return {
-                        "vram_used_mb": int(parts[0].strip()),
-                        "vram_total_mb": int(parts[1].strip()),
-                        "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
-                    }
-        except Exception:
-            pass
-        return {"available": False}
-
-    def get_last_event_ts() -> Optional[str]:
-        """Get timestamp of last event."""
-        try:
-            events_file = get_events_path()
-            if events_file.exists() and events_file.stat().st_size > 0:
-                with open(events_file, "rb") as f:
-                    f.seek(-500, 2)  # Read last 500 bytes
-                    lines = f.read().decode().strip().split("\n")
-                    if lines:
-                        last_line = lines[-1]
-                        event = json.loads(last_line)
-                        return event.get("ts")
-        except Exception:
-            pass
-        return None
 
     def redact_state(state: Dict[str, Any]) -> Dict[str, Any]:
         """Redact state to only allowed fields."""
@@ -1517,7 +1612,7 @@ def main():
         python -m heidi_engine.telemetry emit <type> <message>
     """
     import argparse
-    
+
     parser = argparse.ArgumentParser(prog="heidi-engine telemetry")
     subparsers = parser.add_subparsers(dest="command")
 
