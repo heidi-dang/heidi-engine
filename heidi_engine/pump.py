@@ -7,12 +7,32 @@ import hashlib
 import json
 import os
 import signal
+import shutil
+import shlex
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional, Sequence, TextIO
+
+
+def _project_root() -> Optional[Path]:
+    env = (os.environ.get("HEIDI_ENGINE_PROJECT_ROOT") or "").strip()
+    if env:
+        p = Path(env).expanduser().resolve()
+        if (p / "scripts").is_dir():
+            return p
+
+    # In editable installs, pump.py lives under <repo>/heidi_engine/pump.py.
+    try:
+        repo = Path(__file__).resolve().parents[1]
+        if (repo / "scripts").is_dir():
+            return repo
+    except Exception:
+        pass
+
+    return None
 
 
 def _lock(f: TextIO, *, block: bool) -> None:
@@ -274,6 +294,37 @@ def _run_and_tee(
         raise SystemExit(f"Command failed ({code}): {' '.join(cmd)}")
 
 
+def _collect_without_git(*, root: Path, paths: PumpPaths, args: argparse.Namespace, env: Dict[str, str], log_fp: TextIO) -> None:
+    out_dir = paths.repos_dir / "local"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Use the existing teacher generator script, but write directly to clean_round_*.jsonl
+    # so downstream dedupe can merge as usual.
+    lang = args.stack
+    for r in range(1, int(args.rounds) + 1):
+        cmd = [
+            sys.executable,
+            str(root / "scripts" / "01_teacher_generate.py"),
+            "--samples",
+            str(args.samples_per_run),
+            "--output",
+            str(out_dir / f"clean_round_{r}.jsonl"),
+            "--backend",
+            args.teacher_backend,
+            "--teacher",
+            args.teacher_model,
+            "--round",
+            str(r),
+            "--language",
+            lang,
+            "--repo-dir",
+            str(paths.run_dir),
+            "--seed",
+            "42",
+        ]
+        _run_and_tee(cmd, env=env, log_fp=log_fp, cwd=root)
+
+
 def _maybe_start_openhei_serve(
     *,
     host: str,
@@ -293,8 +344,15 @@ def _maybe_start_openhei_serve(
 
     log_fp.write(f"\n[INFO] Starting openhei serve on {attach}\n")
     log_fp.flush()
+    cli_raw = (os.environ.get("OPENHEI_CLI") or "openhei").strip() or "openhei"
+    try:
+        cli_parts = shlex.split(cli_raw)
+    except ValueError:
+        cli_parts = ["openhei"]
+    if not cli_parts:
+        cli_parts = ["openhei"]
     proc = subprocess.Popen(
-        ["openhei", "serve", "--hostname", host, "--port", str(port)],
+        [*cli_parts, "serve", "--hostname", host, "--port", str(port)],
         stdout=log_fp,
         stderr=subprocess.STDOUT,
         text=True,
@@ -407,6 +465,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
     paths = PumpPaths(run_dir=Path(args.runs_dir) / args.run_id)
+    root = _project_root()
 
     if args.status:
         return _print_status(paths)
@@ -477,27 +536,38 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             _update_status(paths, stage="collect_skipped", merged_dataset=str(paths.merged_dataset))
         else:
             _update_status(paths, stage="collecting", repos_dir=str(paths.repos_dir))
-            cmd = [
-                "bash",
-                "scripts/loop_repos.sh",
-                "--stack",
-                args.stack,
-                "--max",
-                str(args.max_repos),
-                "--rounds",
-                str(args.rounds),
-                "--samples",
-                str(args.samples_per_run),
-                "--out-dir",
-                str(paths.repos_dir),
-                "--collect",
-                "--resume",
-                "--sort",
-                "stars",
-                "--order",
-                "desc",
-            ]
-            _run_and_tee(cmd, env=env, log_fp=log_fp)
+            if not root:
+                raise SystemExit(
+                    "Heidi Engine scripts directory not found. "
+                    "Install from a source checkout (editable) or set HEIDI_ENGINE_PROJECT_ROOT."
+                )
+
+            if not shutil.which("git"):
+                log_fp.write("[WARN] git not found in PATH; collecting without repo cloning.\n")
+                log_fp.flush()
+                _collect_without_git(root=root, paths=paths, args=args, env=env, log_fp=log_fp)
+            else:
+                cmd = [
+                    "bash",
+                    str(root / "scripts" / "loop_repos.sh"),
+                    "--stack",
+                    args.stack,
+                    "--max",
+                    str(args.max_repos),
+                    "--rounds",
+                    str(args.rounds),
+                    "--samples",
+                    str(args.samples_per_run),
+                    "--out-dir",
+                    str(paths.repos_dir),
+                    "--collect",
+                    "--resume",
+                    "--sort",
+                    "stars",
+                    "--order",
+                    "desc",
+                ]
+                _run_and_tee(cmd, env=env, log_fp=log_fp, cwd=root)
 
         # ------------------------------------------------------------------
         # DEDUPE
@@ -505,15 +575,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if not paths.merged_dataset.exists() or paths.merged_dataset.stat().st_size == 0:
             _update_status(paths, stage="deduping")
             total_before = _sum_clean_lines(paths.repos_dir)
+            if not root:
+                raise SystemExit(
+                    "Heidi Engine scripts directory not found. "
+                    "Install from a source checkout (editable) or set HEIDI_ENGINE_PROJECT_ROOT."
+                )
             cmd = [
-                "python3",
-                "scripts/global_dedupe.py",
+                sys.executable,
+                str(root / "scripts" / "global_dedupe.py"),
                 "--data-dir",
                 str(paths.repos_dir),
                 "--output",
                 str(paths.merged_dataset),
             ]
-            _run_and_tee(cmd, env=env, log_fp=log_fp)
+            _run_and_tee(cmd, env=env, log_fp=log_fp, cwd=root)
             unique_after = _count_lines(paths.merged_dataset)
             dedupe_ratio = (unique_after / total_before) if total_before else 1.0
             _update_status(
@@ -553,9 +628,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if ckpts:
                 resume_args = ["--resume-from-checkpoint", str(ckpts[-1])]
 
+            if not root:
+                raise SystemExit(
+                    "Heidi Engine scripts directory not found. "
+                    "Install from a source checkout (editable) or set HEIDI_ENGINE_PROJECT_ROOT."
+                )
+
             cmd = [
-                "python3",
-                "scripts/04_train_qlora.py",
+                sys.executable,
+                str(root / "scripts" / "04_train_qlora.py"),
                 "--data",
                 str(paths.train_dataset),
                 "--val-data",
@@ -571,7 +652,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "--eval-steps",
                 str(args.eval_steps),
             ] + resume_args
-            _run_and_tee(cmd, env=env, log_fp=log_fp)
+            _run_and_tee(cmd, env=env, log_fp=log_fp, cwd=root)
             _update_status(paths, stage="trained", adapter=str(final_adapter), train_steps=args.train_steps)
 
         # ------------------------------------------------------------------
@@ -583,9 +664,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else:
             _update_status(paths, stage="evaluating")
             paths.eval_dir.mkdir(parents=True, exist_ok=True)
+            if not root:
+                raise SystemExit(
+                    "Heidi Engine scripts directory not found. "
+                    "Install from a source checkout (editable) or set HEIDI_ENGINE_PROJECT_ROOT."
+                )
             cmd = [
-                "python3",
-                "scripts/05_eval.py",
+                sys.executable,
+                str(root / "scripts" / "05_eval.py"),
                 "--adapter",
                 str(final_adapter),
                 "--data",
@@ -600,7 +686,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 # (quick mode relies on 05_eval.py defaults, which already evaluate all lines
                 # unless --num-samples is passed).
                 pass
-            _run_and_tee(cmd, env=env, log_fp=log_fp)
+            _run_and_tee(cmd, env=env, log_fp=log_fp, cwd=root)
             eval_report_data = json.loads(_read_text(paths.eval_report))
 
         eval_summary = (eval_report_data.get("metrics") if isinstance(eval_report_data, dict) else None) or {}
