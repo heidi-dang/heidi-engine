@@ -66,18 +66,12 @@ CODE_BLOCK_PATTERNS = [
 # Patterns that indicate code should NOT be executed
 # TUNABLE: Add more dangerous patterns to block
 DANGEROUS_PATTERNS = [
-    r"import\s+os\s*;",  # os import with semicolon
-    r"import\s+subprocess",  # subprocess
-    r"import\s+sys\s*;",  # sys import with semicolon
-    r"eval\s*\(",  # eval()
-    r"exec\s*\(",  # exec()
-    r"__import__\s*\(",  # dynamic imports
-    r'open\s*\([^)]*,\s*[\'"]w',  # file write
-    r'open\s*\([^)]*,\s*[\'"]a',  # file append
-    r"requests\.",  # HTTP requests
-    r"urllib\.",  # URL handling
-    r"socket\.",  # network sockets
-    r"pickle\.load",  # pickle deserialization
+    # Block dangerous modules and their variants
+    r"\b(import|from)\s+(os|subprocess|sys|shutil|socket|requests|urllib|pickle|ctypes|pty|commands|platform|resource)\b",
+    # Block dynamic execution and dangerous builtins
+    r"\b(eval|exec|__import__|getattr|setattr|globals|locals|__builtins__)\b",
+    # Block non-read-only file operations
+    r'open\s*\([^)]*,\s*[\'"][^r]',
 ]
 
 
@@ -207,6 +201,9 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     # Write code to temp file
     test_file = os.path.join(temp_dir, "test_code.py")
 
+    # Indent code to fit inside the try block
+    indented_code = "\n".join("    " + line for line in code.splitlines())
+
     # Wrap code to capture output safely
     wrapped_code = f"""
 import sys
@@ -223,7 +220,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -251,13 +248,19 @@ except Exception as e:
 
     # Try to execute with timeout
     try:
+        # Clean environment to prevent secret leakage from host
+        clean_env = {
+            "PATH": os.environ.get("PATH", ""),
+            "PYTHONPATH": temp_dir,
+            "HOME": temp_dir,
+        }
         result = subprocess.run(
             [sys.executable, test_file],
             capture_output=True,
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=clean_env,
         )
 
         stdout = result.stdout
