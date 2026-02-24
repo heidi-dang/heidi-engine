@@ -63,6 +63,9 @@ def test_openhei_teacher_sends_prompt_via_stdin(monkeypatch, tmp_path):
 def test_openhei_teacher_falls_back_when_attach_session_not_found(monkeypatch, tmp_path, capsys):
     from heidi_engine.teacher import openhei_teacher as mod
 
+    # Force legacy CLI attach path for this unit test.
+    monkeypatch.setenv("OPENHEI_ATTACH_HTTP", "0")
+
     # Avoid real network validation in unit tests.
     monkeypatch.setattr(mod, "validate_openhei_attach_url", lambda *_a, **_k: None)
 
@@ -113,6 +116,7 @@ def test_openhei_teacher_strict_attach_fails_closed_on_session_not_found(monkeyp
     from heidi_engine.teacher import openhei_teacher as mod
 
     monkeypatch.setenv("OPENHEI_ATTACH_STRICT", "1")
+    monkeypatch.setenv("OPENHEI_ATTACH_HTTP", "0")
     monkeypatch.setattr(mod, "validate_openhei_attach_url", lambda *_a, **_k: None)
 
     class R:
