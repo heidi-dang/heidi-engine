@@ -56,15 +56,17 @@ CONFIG VALIDATION:
 """
 
 import atexit
+import copy
 import json
 import os
 import re
 import stat
 import sys
 import threading
+import time
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
@@ -255,6 +257,11 @@ def sanitize_artifact_paths(paths: List[str]) -> List[str]:
 # GLOBAL STATE
 # =============================================================================
 
+# TTL settings for status caching (seconds)
+HEIDI_STATUS_TTL_S = float(os.environ.get("HEIDI_STATUS_TTL_S", "0.5"))
+HEIDI_GPU_TTL_S = float(os.environ.get("HEIDI_GPU_TTL_S", "2.0"))
+HEIDI_EVENT_TS_TTL_S = float(os.environ.get("HEIDI_EVENT_TS_TTL_S", "1.0"))
+
 # Event batch buffer - flushed periodically or on exit
 _event_buffer: List[Dict[str, Any]] = []
 
@@ -263,6 +270,84 @@ _lock = threading.RLock()
 
 # Whether telemetry has been initialized
 _initialized = False
+
+# Global caches for GPU and Event TS
+_gpu_cache: Dict[str, Any] = {"data": None, "last_check": 0}
+_event_ts_cache: Dict[str, Dict[str, Any]] = {}
+
+
+class StateCache:
+    """
+    Thread-safe cache for state.json to avoid excessive disk IO.
+    Uses file metadata (mtime, size) and TTL for validation.
+    """
+
+    _instance = None
+    _lock = threading.RLock()
+
+    def __init__(self):
+        self.cache: Dict[str, Dict[str, Any]] = {}
+        self.metadata: Dict[str, Dict[str, Any]] = {}
+        self.last_check: Dict[str, float] = {}
+
+    @classmethod
+    def get_instance(cls):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = cls()
+            return cls._instance
+
+    def get(self, run_id: str, path: Path) -> Optional[Dict[str, Any]]:
+        """Get state from cache if valid."""
+        now = time.time()
+
+        with self._lock:
+            # Check TTL first
+            if run_id in self.last_check and (now - self.last_check[run_id]) < HEIDI_STATUS_TTL_S:
+                return copy.deepcopy(self.cache.get(run_id))
+
+            # Check file metadata
+            try:
+                if not path.exists():
+                    self.invalidate(run_id)
+                    return None
+
+                stat_info = path.stat()
+                mtime = stat_info.st_mtime_ns
+                size = stat_info.st_size
+
+                cached_meta = self.metadata.get(run_id)
+                if (
+                    cached_meta
+                    and cached_meta.get("mtime") == mtime
+                    and cached_meta.get("size") == size
+                ):
+                    self.last_check[run_id] = now
+                    return copy.deepcopy(self.cache.get(run_id))
+
+                # Cache invalid - need to reload
+                self.invalidate(run_id)
+                return None
+            except Exception:
+                return None
+
+    def set(self, run_id: str, path: Path, state: Dict[str, Any]):
+        """Update cache with new state."""
+        try:
+            stat_info = path.stat()
+            with self._lock:
+                self.cache[run_id] = copy.deepcopy(state)
+                self.metadata[run_id] = {"mtime": stat_info.st_mtime_ns, "size": stat_info.st_size}
+                self.last_check[run_id] = time.time()
+        except Exception:
+            pass
+
+    def invalidate(self, run_id: str):
+        """Invalidate cache for a specific run."""
+        with self._lock:
+            self.cache.pop(run_id, None)
+            self.metadata.pop(run_id, None)
+            self.last_check.pop(run_id, None)
 
 
 # =============================================================================
@@ -619,8 +704,8 @@ def init_telemetry(
             "counters": get_default_counters(),
             "usage": get_default_usage(),
             "config": {},  # Don't store config in state for security
-            "started_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
         # Save initial state atomically
@@ -654,20 +739,27 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     Load current state from state.json.
 
     HOW IT WORKS:
-        - Reads state.json file
+        - Reads state.json file (with caching)
         - Returns empty state if file doesn't exist
-    
+
     ARGS:
         run_id: Run to read (defaults to current run)
 
     RETURNS:
         State dictionary
     """
-    state_file = get_state_path(run_id)
+    run_id_resolved = run_id or get_run_id()
+    state_file = get_state_path(run_id_resolved)
+
+    # BOLT OPTIMIZATION: Check cache first
+    cache = StateCache.get_instance()
+    cached_state = cache.get(run_id_resolved, state_file)
+    if cached_state is not None:
+        return cached_state
 
     if not state_file.exists():
         return {
-            "run_id": get_run_id(),
+            "run_id": run_id_resolved,
             "status": "idle",
             "counters": get_default_counters(),
             "usage": get_default_usage(),
@@ -678,6 +770,8 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             state = json.load(f)
             # Resolve status from on-disk metadata
             state["status"] = resolve_status(state)
+            # Update cache
+            cache.set(run_id_resolved, state_file, state)
             return state
     except Exception as e:
         print(f"[WARN] Failed to load state: {e}", file=sys.stderr)
@@ -687,44 +781,44 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
 def resolve_status(state: Dict[str, Any]) -> str:
     """
     Resolve run status from on-disk metadata.
-    
+
     STATUS VALUES:
         - idle: No active run, or run_id present but no events
         - running: Worker active / stop not requested / still processing
         - stopped: stop_requested=true or pipeline complete
         - error: last_error present or health degraded
-    
+
     HOW IT WORKS:
         - Checks stop_requested flag
         - Checks status field
         - Checks for error indicators
-    
+
     ARGS:
         state: State dictionary from state.json
-    
+
     RETURNS:
         Status string: idle, running, stopped, error
     """
     # Explicit stop requested
     if state.get("stop_requested", False):
         return "stopped"
-    
+
     # Check explicit status first
     status = state.get("status", "")
     if status in ("running", "completed", "stopped", "error"):
         return status
-    
+
     # Check for errors
     if state.get("last_error") or state.get("health") == "degraded":
         return "error"
-    
+
     # Check if there's an active run_id but no recent activity
     run_id = state.get("run_id")
     if run_id:
         # Has run_id - check for activity
         counters = state.get("counters", {})
         usage = state.get("usage", {})
-        
+
         # If there's any activity, consider it running
         if counters.get("teacher_generated", 0) > 0:
             return "running"
@@ -732,10 +826,10 @@ def resolve_status(state: Dict[str, Any]) -> str:
             return "running"
         if counters.get("train_step", 0) > 0:
             return "running"
-        
+
         # No activity - idle
         return "idle"
-    
+
     # Default to idle if no run_id
     return "idle"
 
@@ -756,12 +850,15 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
         state: State dictionary to save
         run_id: Run ID (defaults to current)
     """
-    run_id = run_id or get_run_id()
-    state_file = get_state_path(run_id)
+    run_id_resolved = run_id or get_run_id()
+    state_file = get_state_path(run_id_resolved)
     temp_file = state_file.with_suffix(".tmp")
 
+    # BOLT OPTIMIZATION: Invalidate cache before write
+    StateCache.get_instance().invalidate(run_id_resolved)
+
     # Update timestamp
-    state["updated_at"] = datetime.utcnow().isoformat()
+    state["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     # Write to temp file
     with open(temp_file, "w") as f:
@@ -1038,7 +1135,7 @@ def emit_event(
     # Build event with schema version
     event = {
         "event_version": EVENT_VERSION,
-        "ts": datetime.utcnow().isoformat(),
+        "ts": datetime.now(timezone.utc).isoformat(),
         "run_id": run_id,
         "round": round_num if round_num is not None else state.get("current_round", 0),
         "stage": stage or state.get("current_stage", "unknown"),
@@ -1296,6 +1393,79 @@ def stage_context(stage: str, round_num: int, message: str, **kwargs):
 # =============================================================================
 
 
+def get_gpu_summary() -> Dict[str, Any]:
+    """Get minimal GPU info without exposing sensitive data."""
+    global _gpu_cache
+    now = time.time()
+
+    with _lock:
+        if _gpu_cache["data"] is not None and (now - _gpu_cache["last_check"]) < HEIDI_GPU_TTL_S:
+            return copy.deepcopy(_gpu_cache["data"])
+
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.used,memory.total,utilization.gpu",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            parts = result.stdout.strip().split(",")
+            if len(parts) >= 2:
+                data = {
+                    "vram_used_mb": int(parts[0].strip()),
+                    "vram_total_mb": int(parts[1].strip()),
+                    "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
+                }
+                with _lock:
+                    _gpu_cache = {"data": data, "last_check": now}
+                return copy.deepcopy(data)
+    except Exception:
+        pass
+
+    data = {"available": False}
+    with _lock:
+        _gpu_cache = {"data": data, "last_check": now}
+    return data
+
+
+def get_last_event_ts(run_id: Optional[str] = None) -> Optional[str]:
+    """Get timestamp of last event."""
+    global _event_ts_cache
+    now = time.time()
+    run_id_resolved = run_id or get_run_id()
+
+    with _lock:
+        cached = _event_ts_cache.get(run_id_resolved)
+        if cached and cached["data"] is not None and (now - cached["last_check"]) < HEIDI_EVENT_TS_TTL_S:
+            return cached["data"]
+
+    try:
+        events_file = get_events_path(run_id_resolved)
+        if events_file.exists():
+            size = events_file.stat().st_size
+            if size > 0:
+                with open(events_file, "rb") as f:
+                    f.seek(-min(500, size), 2)  # Read last 500 bytes (or all if < 500)
+                    lines = f.read().decode(errors="ignore").strip().split("\n")
+                    if lines:
+                        last_line = lines[-1]
+                        event = json.loads(last_line)
+                        ts = event.get("ts")
+                        with _lock:
+                            _event_ts_cache[run_id_resolved] = {"data": ts, "last_check": now}
+                        return ts
+    except Exception:
+        pass
+    return None
+
+
 def start_http_server(port: int = 7779) -> None:
     """
     Start lightweight HTTP server for status queries.
@@ -1324,49 +1494,6 @@ def start_http_server(port: int = 7779) -> None:
     except ImportError:
         print("[WARN] HTTP server not available", file=sys.stderr)
         return
-
-    def get_gpu_summary() -> Dict[str, Any]:
-        """Get minimal GPU info without exposing sensitive data."""
-        try:
-            import subprocess
-
-            result = subprocess.run(
-                [
-                    "nvidia-smi",
-                    "--query-gpu=memory.used,memory.total,utilization.gpu",
-                    "--format=csv,noheader,nounits",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                parts = result.stdout.strip().split(",")
-                if len(parts) >= 2:
-                    return {
-                        "vram_used_mb": int(parts[0].strip()),
-                        "vram_total_mb": int(parts[1].strip()),
-                        "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
-                    }
-        except Exception:
-            pass
-        return {"available": False}
-
-    def get_last_event_ts() -> Optional[str]:
-        """Get timestamp of last event."""
-        try:
-            events_file = get_events_path()
-            if events_file.exists() and events_file.stat().st_size > 0:
-                with open(events_file, "rb") as f:
-                    f.seek(-500, 2)  # Read last 500 bytes
-                    lines = f.read().decode().strip().split("\n")
-                    if lines:
-                        last_line = lines[-1]
-                        event = json.loads(last_line)
-                        return event.get("ts")
-        except Exception:
-            pass
-        return None
 
     def redact_state(state: Dict[str, Any]) -> Dict[str, Any]:
         """Redact state to only allowed fields."""
@@ -1517,7 +1644,7 @@ def main():
         python -m heidi_engine.telemetry emit <type> <message>
     """
     import argparse
-    
+
     parser = argparse.ArgumentParser(prog="heidi-engine telemetry")
     subparsers = parser.add_subparsers(dest="command")
 
