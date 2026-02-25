@@ -62,6 +62,7 @@ import re
 import stat
 import sys
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
@@ -98,6 +99,10 @@ PRICING_CONFIG_PATH = os.environ.get("PRICING_CONFIG_PATH", "")
 EVENT_LOG_MAX_SIZE_MB = int(os.environ.get("EVENT_LOG_MAX_SIZE_MB", "100"))
 # Number of rotated log files to keep
 EVENT_LOG_RETENTION = int(os.environ.get("EVENT_LOG_RETENTION", "5"))
+
+# Cache TTL for status API (seconds)
+# TUNABLE: Increase to reduce disk IO, decrease for more real-time status
+HEIDI_STATUS_TTL_S = float(os.environ.get("HEIDI_STATUS_TTL_S", "0.5"))
 
 # =============================================================================
 # EVENT SCHEMA VERSION (FROZEN - DO NOT CHANGE)
@@ -249,6 +254,78 @@ def sanitize_artifact_paths(paths: List[str]) -> List[str]:
     if not paths:
         return []
     return [truncate_string(p, MAX_PATH_LENGTH) for p in paths]
+
+
+class StateCache:
+    """
+    Thread-safe cache for state.json to avoid excessive disk IO.
+
+    Validated using:
+    - run_id (must match)
+    - File metadata (mtime_ns, size)
+    - TTL (HEIDI_STATUS_TTL_S)
+    """
+
+    def __init__(self):
+        self._cache = None
+        self._mtime_ns = 0
+        self._size = 0
+        self._last_check = 0
+        self._run_id = None
+        self._lock = threading.RLock()
+
+    def get(self, run_id: str, path: Path) -> Optional[Dict[str, Any]]:
+        now = time.time()
+        with self._lock:
+            if not self._cache:
+                return None
+
+            # Check TTL
+            if now - self._last_check < HEIDI_STATUS_TTL_S and self._run_id == run_id:
+                return self._cache
+
+            # Check file metadata
+            try:
+                if not path.exists():
+                    self.clear()
+                    return None
+
+                stat_val = path.stat()
+                if (
+                    stat_val.st_mtime_ns == self._mtime_ns
+                    and stat_val.st_size == self._size
+                    and self._run_id == run_id
+                ):
+                    self._last_check = now
+                    return self._cache
+            except Exception:
+                self.clear()
+                return None
+        return None
+
+    def set(self, run_id: str, path: Path, state: Dict[str, Any]):
+        try:
+            stat_val = path.stat()
+            with self._lock:
+                self._cache = state
+                self._mtime_ns = stat_val.st_mtime_ns
+                self._size = stat_val.st_size
+                self._run_id = run_id
+                self._last_check = time.time()
+        except Exception:
+            self.clear()
+
+    def clear(self):
+        with self._lock:
+            self._cache = None
+            self._mtime_ns = 0
+            self._size = 0
+            self._run_id = None
+            self._last_check = 0
+
+
+# Singleton instance
+_state_cache = StateCache()
 
 
 # =============================================================================
@@ -663,11 +740,17 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     RETURNS:
         State dictionary
     """
-    state_file = get_state_path(run_id)
+    resolved_run_id = run_id or get_run_id()
+    state_file = get_state_path(resolved_run_id)
+
+    # BOLT OPTIMIZATION: Use thread-safe cache to avoid excessive disk IO
+    cached = _state_cache.get(resolved_run_id, state_file)
+    if cached is not None:
+        return cached
 
     if not state_file.exists():
         return {
-            "run_id": get_run_id(),
+            "run_id": resolved_run_id,
             "status": "idle",
             "counters": get_default_counters(),
             "usage": get_default_usage(),
@@ -678,6 +761,10 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             state = json.load(f)
             # Resolve status from on-disk metadata
             state["status"] = resolve_status(state)
+
+            # Update cache
+            _state_cache.set(resolved_run_id, state_file, state)
+
             return state
     except Exception as e:
         print(f"[WARN] Failed to load state: {e}", file=sys.stderr)
@@ -769,6 +856,9 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
 
     # Atomic rename
     os.replace(temp_file, state_file)
+
+    # BOLT OPTIMIZATION: Invalidate cache after successful save
+    _state_cache.clear()
 
 
 def update_counters(delta: Dict[str, Any], run_id: Optional[str] = None) -> None:
@@ -1295,6 +1385,97 @@ def stage_context(stage: str, round_num: int, message: str, **kwargs):
 # HTTP STATUS SERVER (OPTIONAL)
 # =============================================================================
 
+# Caches for expensive status queries
+_gpu_summary_cache: Dict[str, Any] = {"available": False}
+_gpu_summary_ts = 0.0
+
+_event_ts_cache: Dict[str, str] = {}
+_event_ts_ts: Dict[str, float] = {}
+
+
+def get_last_event_ts(run_id: Optional[str] = None) -> Optional[str]:
+    """
+    Get timestamp of last event.
+
+    BOLT OPTIMIZATION: Thread-safe cache with 1.0s TTL.
+    """
+    resolved_run_id = run_id or get_run_id()
+
+    now = time.time()
+    with _lock:
+        if resolved_run_id in _event_ts_cache:
+            if now - _event_ts_ts.get(resolved_run_id, 0) < 1.0:
+                return _event_ts_cache[resolved_run_id]
+
+    try:
+        events_file = get_events_path(resolved_run_id)
+        if events_file.exists():
+            size = events_file.stat().st_size
+            if size > 0:
+                with open(events_file, "rb") as f:
+                    # BOLT OPTIMIZATION: Safe backward seek
+                    f.seek(-min(500, size), 2)
+                    lines = f.read().decode().strip().split("\n")
+                    if lines:
+                        last_line = lines[-1]
+                        event = json.loads(last_line)
+                        ts = event.get("ts")
+                        with _lock:
+                            _event_ts_cache[resolved_run_id] = ts
+                            _event_ts_ts[resolved_run_id] = now
+                        return ts
+    except Exception:
+        pass
+    return None
+
+
+def get_gpu_summary() -> Dict[str, Any]:
+    """
+    Get minimal GPU info without exposing sensitive data.
+
+    BOLT OPTIMIZATION: Thread-safe cache with 2.0s TTL to reduce nvidia-smi overhead.
+    """
+    global _gpu_summary_cache, _gpu_summary_ts
+
+    now = time.time()
+    with _lock:
+        if now - _gpu_summary_ts < 2.0:
+            return _gpu_summary_cache
+
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.used,memory.total,utilization.gpu",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            parts = result.stdout.strip().split(",")
+            if len(parts) >= 2:
+                summary = {
+                    "vram_used_mb": int(parts[0].strip()),
+                    "vram_total_mb": int(parts[1].strip()),
+                    "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
+                }
+                with _lock:
+                    _gpu_summary_cache = summary
+                    _gpu_summary_ts = now
+                return summary
+    except Exception:
+        pass
+
+    summary = {"available": False}
+    with _lock:
+        _gpu_summary_cache = summary
+        _gpu_summary_ts = now
+    return summary
+
 
 def start_http_server(port: int = 7779) -> None:
     """
@@ -1325,48 +1506,7 @@ def start_http_server(port: int = 7779) -> None:
         print("[WARN] HTTP server not available", file=sys.stderr)
         return
 
-    def get_gpu_summary() -> Dict[str, Any]:
-        """Get minimal GPU info without exposing sensitive data."""
-        try:
-            import subprocess
 
-            result = subprocess.run(
-                [
-                    "nvidia-smi",
-                    "--query-gpu=memory.used,memory.total,utilization.gpu",
-                    "--format=csv,noheader,nounits",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                parts = result.stdout.strip().split(",")
-                if len(parts) >= 2:
-                    return {
-                        "vram_used_mb": int(parts[0].strip()),
-                        "vram_total_mb": int(parts[1].strip()),
-                        "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
-                    }
-        except Exception:
-            pass
-        return {"available": False}
-
-    def get_last_event_ts() -> Optional[str]:
-        """Get timestamp of last event."""
-        try:
-            events_file = get_events_path()
-            if events_file.exists() and events_file.stat().st_size > 0:
-                with open(events_file, "rb") as f:
-                    f.seek(-500, 2)  # Read last 500 bytes
-                    lines = f.read().decode().strip().split("\n")
-                    if lines:
-                        last_line = lines[-1]
-                        event = json.loads(last_line)
-                        return event.get("ts")
-        except Exception:
-            pass
-        return None
 
     def redact_state(state: Dict[str, Any]) -> Dict[str, Any]:
         """Redact state to only allowed fields."""
