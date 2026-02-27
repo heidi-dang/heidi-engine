@@ -72,10 +72,15 @@ from typing import Any, Dict, List, Optional, Set
 # CONFIGURATION - Adjust these for your needs
 # =============================================================================
 
+def get_autotrain_dir() -> str:
+    """Get the base directory for all heidi_engine outputs."""
+    return os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi_engine"))
+
+
 # Base directory for all heidi_engine outputs
 # TUNABLE: Change to custom path if needed
 # NOTE: Default changed to .local/heidi_engine to avoid polluting repo root
-AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi_engine"))
+AUTOTRAIN_DIR = get_autotrain_dir()
 
 # Unique run identifier - set by loop.sh or menu.py
 # TUNABLE: Auto-generated if not provided
@@ -358,12 +363,25 @@ def get_run_dir(run_id: Optional[str] = None) -> Path:
         Creates runs/<run_id>/ directory structure.
         All run-specific files go here.
 
+    SECURITY:
+        - Sanitizes run_id to prevent path traversal
+        - Ensures run directory is within AUTOTRAIN_DIR/runs
+
     TUNABLE:
         - Modify directory structure by changing path construction
     """
     if run_id is None:
         run_id = get_run_id()
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+
+    # SECURITY: Sanitize run_id to prevent path traversal
+    # Path(run_id).name strips any directory components
+    safe_run_id = Path(run_id).name
+
+    # Handle edge cases like ".", "..", or empty string
+    if not safe_run_id or safe_run_id in (".", ".."):
+        safe_run_id = "default_run"
+
+    return Path(get_autotrain_dir()) / "runs" / safe_run_id
 
 
 def get_events_path(run_id: Optional[str] = None) -> Path:
@@ -1141,7 +1159,27 @@ def _rotate_events_log(events_file: Path) -> None:
     HOW IT WORKS:
         - Renames current log to .1, .2, etc.
         - Deletes oldest if over retention limit
+
+    SECURITY:
+        - Validates that rotation occurs only within the designated runs directory
     """
+    # SECURITY: Resolve paths to prevent traversal
+    try:
+        # Ensure base runs directory exists before resolving
+        runs_base = (Path(get_autotrain_dir()) / "runs").resolve()
+        abs_events_file = events_file.resolve()
+
+        # Check if the file is actually within the runs directory
+        if runs_base not in abs_events_file.parents:
+            print(
+                f"[ERROR] Security breach attempt: Rotation requested for file outside runs directory: {events_file}",
+                file=sys.stderr,
+            )
+            return
+    except Exception as e:
+        print(f"[ERROR] Failed to validate rotation path: {e}", file=sys.stderr)
+        return
+
     run_dir = events_file.parent
 
     # Remove oldest if at limit
