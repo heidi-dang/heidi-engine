@@ -62,6 +62,7 @@ import re
 import stat
 import sys
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
@@ -656,18 +657,25 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     HOW IT WORKS:
         - Reads state.json file
         - Returns empty state if file doesn't exist
-    
+        - Uses StateCache for performance
+
     ARGS:
         run_id: Run to read (defaults to current run)
 
     RETURNS:
         State dictionary
     """
-    state_file = get_state_path(run_id)
+    target_run_id = run_id or get_run_id()
+    state_file = get_state_path(target_run_id)
+
+    # Check cache first
+    cached_state = _state_cache.get(target_run_id, state_file)
+    if cached_state:
+        return cached_state
 
     if not state_file.exists():
         return {
-            "run_id": get_run_id(),
+            "run_id": target_run_id,
             "status": "idle",
             "counters": get_default_counters(),
             "usage": get_default_usage(),
@@ -678,6 +686,9 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             state = json.load(f)
             # Resolve status from on-disk metadata
             state["status"] = resolve_status(state)
+
+            # Update cache
+            _state_cache.set(target_run_id, state, state_file)
             return state
     except Exception as e:
         print(f"[WARN] Failed to load state: {e}", file=sys.stderr)
@@ -687,44 +698,44 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
 def resolve_status(state: Dict[str, Any]) -> str:
     """
     Resolve run status from on-disk metadata.
-    
+
     STATUS VALUES:
         - idle: No active run, or run_id present but no events
         - running: Worker active / stop not requested / still processing
         - stopped: stop_requested=true or pipeline complete
         - error: last_error present or health degraded
-    
+
     HOW IT WORKS:
         - Checks stop_requested flag
         - Checks status field
         - Checks for error indicators
-    
+
     ARGS:
         state: State dictionary from state.json
-    
+
     RETURNS:
         Status string: idle, running, stopped, error
     """
     # Explicit stop requested
     if state.get("stop_requested", False):
         return "stopped"
-    
+
     # Check explicit status first
     status = state.get("status", "")
     if status in ("running", "completed", "stopped", "error"):
         return status
-    
+
     # Check for errors
     if state.get("last_error") or state.get("health") == "degraded":
         return "error"
-    
+
     # Check if there's an active run_id but no recent activity
     run_id = state.get("run_id")
     if run_id:
         # Has run_id - check for activity
         counters = state.get("counters", {})
         usage = state.get("usage", {})
-        
+
         # If there's any activity, consider it running
         if counters.get("teacher_generated", 0) > 0:
             return "running"
@@ -732,10 +743,10 @@ def resolve_status(state: Dict[str, Any]) -> str:
             return "running"
         if counters.get("train_step", 0) > 0:
             return "running"
-        
+
         # No activity - idle
         return "idle"
-    
+
     # Default to idle if no run_id
     return "idle"
 
@@ -769,6 +780,9 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
 
     # Atomic rename
     os.replace(temp_file, state_file)
+
+    # Invalidate cache
+    _state_cache.invalidate(run_id)
 
 
 def update_counters(delta: Dict[str, Any], run_id: Optional[str] = None) -> None:
@@ -1292,6 +1306,154 @@ def stage_context(stage: str, round_num: int, message: str, **kwargs):
 
 
 # =============================================================================
+# TELEMETRY CACHING
+# =============================================================================
+
+# Global cache for GPU info and last event timestamp
+_gpu_cache: Dict[str, Any] = {"data": {"available": False}, "ts": 0.0}
+_event_ts_cache: Dict[str, Any] = {}  # run_id -> {"ts_str": str, "ts": float}
+
+# TTLs for caching
+HEIDI_GPU_TTL_S = float(os.environ.get("HEIDI_GPU_TTL_S", "2.0"))
+HEIDI_EVENT_TS_TTL_S = float(os.environ.get("HEIDI_EVENT_TS_TTL_S", "1.0"))
+HEIDI_STATUS_TTL_S = float(os.environ.get("HEIDI_STATUS_TTL_S", "0.5"))
+
+
+class StateCache:
+    """
+    Thread-safe cache for state.json to reduce disk IO.
+    Uses metadata (mtime, size) and TTL for validation.
+    """
+
+    def __init__(self):
+        self._cache: Dict[str, Any] = {}  # run_id -> {state, mtime_ns, size, ts}
+        self._lock = threading.RLock()
+
+    def get(self, run_id: str, state_file: Path) -> Optional[Dict[str, Any]]:
+        now = time.time()
+        with self._lock:
+            cached = self._cache.get(run_id)
+            if not cached:
+                return None
+
+            # TTL check
+            if now - cached["ts"] < HEIDI_STATUS_TTL_S:
+                return cached["state"]
+
+            # Metadata validation
+            try:
+                fstat = state_file.stat()
+                if fstat.st_mtime_ns == cached["mtime_ns"] and fstat.st_size == cached["size"]:
+                    # Metadata matches, update TTL and return
+                    cached["ts"] = now
+                    return cached["state"]
+            except Exception:
+                pass
+
+            return None
+
+    def set(self, run_id: str, state: Dict[str, Any], state_file: Path):
+        with self._lock:
+            try:
+                fstat = state_file.stat()
+                self._cache[run_id] = {
+                    "state": state,
+                    "mtime_ns": fstat.st_mtime_ns,
+                    "size": fstat.st_size,
+                    "ts": time.time(),
+                }
+            except Exception:
+                # If file doesn't exist yet, we don't cache
+                self.invalidate(run_id)
+
+    def invalidate(self, run_id: str):
+        with self._lock:
+            if run_id in self._cache:
+                del self._cache[run_id]
+
+
+_state_cache = StateCache()
+
+
+def get_gpu_summary() -> Dict[str, Any]:
+    """
+    Get minimal GPU info without exposing sensitive data.
+    Thread-safe and cached.
+    """
+    global _gpu_cache
+    now = time.time()
+
+    with _lock:
+        if now - _gpu_cache["ts"] < HEIDI_GPU_TTL_S:
+            return _gpu_cache["data"]
+
+        try:
+            import subprocess
+
+            result = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=memory.used,memory.total,utilization.gpu",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                parts = result.stdout.strip().split(",")
+                if len(parts) >= 2:
+                    data = {
+                        "vram_used_mb": int(parts[0].strip()),
+                        "vram_total_mb": int(parts[1].strip()),
+                        "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
+                    }
+                    _gpu_cache = {"data": data, "ts": now}
+                    return data
+        except Exception:
+            pass
+
+        _gpu_cache = {"data": {"available": False}, "ts": now}
+        return _gpu_cache["data"]
+
+
+def get_last_event_ts(run_id: Optional[str] = None) -> Optional[str]:
+    """
+    Get timestamp of last event.
+    Thread-safe and cached.
+    """
+    global _event_ts_cache
+    now = time.time()
+    run_id = run_id or get_run_id()
+
+    with _lock:
+        cached = _event_ts_cache.get(run_id)
+        if cached and now - cached["ts"] < HEIDI_EVENT_TS_TTL_S:
+            return cached["ts_str"]
+
+        try:
+            events_file = get_events_path(run_id)
+            if events_file.exists() and events_file.stat().st_size > 0:
+                with open(events_file, "rb") as f:
+                    size = events_file.stat().st_size
+                    f.seek(max(0, size - 500))  # Read last 500 bytes or whole file
+                    # BOLT PERFORMANCE NOTE: Using errors='ignore' for robust decoding
+                    # when seeking into middle of file
+                    lines = f.read().decode(errors="ignore").strip().split("\n")
+                    if lines:
+                        last_line = lines[-1]
+                        event = json.loads(last_line)
+                        ts_str = event.get("ts")
+                        _event_ts_cache[run_id] = {"ts_str": ts_str, "ts": now}
+                        return ts_str
+        except Exception:
+            pass
+
+        _event_ts_cache[run_id] = {"ts_str": None, "ts": now}
+        return None
+
+
+# =============================================================================
 # HTTP STATUS SERVER (OPTIONAL)
 # =============================================================================
 
@@ -1325,48 +1487,6 @@ def start_http_server(port: int = 7779) -> None:
         print("[WARN] HTTP server not available", file=sys.stderr)
         return
 
-    def get_gpu_summary() -> Dict[str, Any]:
-        """Get minimal GPU info without exposing sensitive data."""
-        try:
-            import subprocess
-
-            result = subprocess.run(
-                [
-                    "nvidia-smi",
-                    "--query-gpu=memory.used,memory.total,utilization.gpu",
-                    "--format=csv,noheader,nounits",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                parts = result.stdout.strip().split(",")
-                if len(parts) >= 2:
-                    return {
-                        "vram_used_mb": int(parts[0].strip()),
-                        "vram_total_mb": int(parts[1].strip()),
-                        "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
-                    }
-        except Exception:
-            pass
-        return {"available": False}
-
-    def get_last_event_ts() -> Optional[str]:
-        """Get timestamp of last event."""
-        try:
-            events_file = get_events_path()
-            if events_file.exists() and events_file.stat().st_size > 0:
-                with open(events_file, "rb") as f:
-                    f.seek(-500, 2)  # Read last 500 bytes
-                    lines = f.read().decode().strip().split("\n")
-                    if lines:
-                        last_line = lines[-1]
-                        event = json.loads(last_line)
-                        return event.get("ts")
-        except Exception:
-            pass
-        return None
 
     def redact_state(state: Dict[str, Any]) -> Dict[str, Any]:
         """Redact state to only allowed fields."""
@@ -1517,7 +1637,7 @@ def main():
         python -m heidi_engine.telemetry emit <type> <message>
     """
     import argparse
-    
+
     parser = argparse.ArgumentParser(prog="heidi-engine telemetry")
     subparsers = parser.add_subparsers(dest="command")
 
