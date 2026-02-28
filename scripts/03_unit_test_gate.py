@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -66,14 +67,14 @@ CODE_BLOCK_PATTERNS = [
 # Patterns that indicate code should NOT be executed
 # TUNABLE: Add more dangerous patterns to block
 DANGEROUS_PATTERNS = [
-    r"import\s+os\s*;",  # os import with semicolon
-    r"import\s+subprocess",  # subprocess
-    r"import\s+sys\s*;",  # sys import with semicolon
-    r"eval\s*\(",  # eval()
-    r"exec\s*\(",  # exec()
-    r"__import__\s*\(",  # dynamic imports
-    r'open\s*\([^)]*,\s*[\'"]w',  # file write
-    r'open\s*\([^)]*,\s*[\'"]a',  # file append
+    r"\b(import|from)\s+os\b",  # os import
+    r"\b(import|from)\s+subprocess\b",  # subprocess
+    r"\b(import|from)\s+sys\b",  # sys import
+    r"\b(import|from)\s+shutil\b",  # shutil
+    r"\beval\s*\(",  # eval()
+    r"\bexec\s*\(",  # exec()
+    r"\b__import__\s*\(",  # dynamic imports
+    r"\bopen\s*\(",  # file access
     r"requests\.",  # HTTP requests
     r"urllib\.",  # URL handling
     r"socket\.",  # network sockets
@@ -208,6 +209,8 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     test_file = os.path.join(temp_dir, "test_code.py")
 
     # Wrap code to capture output safely
+    # SECURITY: Indent the untrusted code block correctly within the try block
+    indented_code = textwrap.indent(code, "    ")
     wrapped_code = f"""
 import sys
 import io
@@ -223,7 +226,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -251,13 +254,22 @@ except Exception as e:
 
     # Try to execute with timeout
     try:
+        # SECURITY: Create a minimal environment to avoid leaking secrets (like API keys)
+        # to untrusted generated code.
+        test_env = {
+            "PATH": os.environ.get("PATH", ""),
+            "PYTHONPATH": temp_dir,
+            "HOME": temp_dir,
+            "TMPDIR": temp_dir,
+        }
+
         result = subprocess.run(
             [sys.executable, test_file],
             capture_output=True,
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=test_env,
         )
 
         stdout = result.stdout
