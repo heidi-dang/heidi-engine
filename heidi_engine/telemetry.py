@@ -56,12 +56,14 @@ CONFIG VALIDATION:
 """
 
 import atexit
+import copy
 import json
 import os
 import re
 import stat
 import sys
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
@@ -263,6 +265,76 @@ _lock = threading.RLock()
 
 # Whether telemetry has been initialized
 _initialized = False
+
+
+class StateCache:
+    """
+    Thread-safe cache for state.json data.
+
+    BOLT OPTIMIZATION:
+        Reduces disk I/O and JSON parsing overhead for /status and dashboard polls.
+        Uses TTL and file metadata validation to ensure data freshness.
+    """
+
+    def __init__(self, ttl: float = 0.5):
+        self._cache: Dict[str, Any] = {}
+        self._meta: Dict[str, Dict[str, Any]] = {}
+        self._lock = threading.Lock()
+        self._ttl = ttl
+
+    def get(self, run_id: str, path: Path) -> Optional[Dict[str, Any]]:
+        """Get state from cache if valid."""
+        with self._lock:
+            if run_id not in self._cache:
+                return None
+
+            # Check TTL
+            now = time.monotonic()
+            if now - self._meta[run_id]["last_check"] > self._ttl:
+                # Validate file metadata
+                try:
+                    st = path.stat()
+                    if (
+                        st.st_mtime_ns != self._meta[run_id]["mtime_ns"]
+                        or st.st_size != self._meta[run_id]["size"]
+                    ):
+                        # File changed, invalidate
+                        del self._cache[run_id]
+                        del self._meta[run_id]
+                        return None
+
+                    # Update check time
+                    self._meta[run_id]["last_check"] = now
+                except Exception:
+                    # File missing or error, invalidate
+                    del self._cache[run_id]
+                    del self._meta[run_id]
+                    return None
+
+            return copy.deepcopy(self._cache[run_id])
+
+    def set(self, run_id: str, path: Path, state: Dict[str, Any]):
+        """Store state in cache with metadata."""
+        try:
+            st = path.stat()
+            with self._lock:
+                self._cache[run_id] = copy.deepcopy(state)
+                self._meta[run_id] = {
+                    "mtime_ns": st.st_mtime_ns,
+                    "size": st.st_size,
+                    "last_check": time.monotonic(),
+                }
+        except Exception:
+            pass
+
+    def invalidate(self, run_id: str):
+        """Force invalidate cache for a run."""
+        with self._lock:
+            self._cache.pop(run_id, None)
+            self._meta.pop(run_id, None)
+
+
+_state_cache = StateCache()
 
 
 # =============================================================================
@@ -656,18 +728,25 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     HOW IT WORKS:
         - Reads state.json file
         - Returns empty state if file doesn't exist
-    
+
     ARGS:
         run_id: Run to read (defaults to current run)
 
     RETURNS:
         State dictionary
     """
-    state_file = get_state_path(run_id)
+    # BOLT OPTIMIZATION: Use thread-safe cache to avoid redundant disk I/O
+    run_id_val = run_id or get_run_id()
+    state_file = get_state_path(run_id_val)
+
+    # Fast path: check cache
+    cached = _state_cache.get(run_id_val, state_file)
+    if cached:
+        return cached
 
     if not state_file.exists():
         return {
-            "run_id": get_run_id(),
+            "run_id": run_id_val,
             "status": "idle",
             "counters": get_default_counters(),
             "usage": get_default_usage(),
@@ -678,6 +757,10 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             state = json.load(f)
             # Resolve status from on-disk metadata
             state["status"] = resolve_status(state)
+
+            # Update cache
+            _state_cache.set(run_id_val, state_file, state)
+
             return state
     except Exception as e:
         print(f"[WARN] Failed to load state: {e}", file=sys.stderr)
@@ -687,44 +770,44 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
 def resolve_status(state: Dict[str, Any]) -> str:
     """
     Resolve run status from on-disk metadata.
-    
+
     STATUS VALUES:
         - idle: No active run, or run_id present but no events
         - running: Worker active / stop not requested / still processing
         - stopped: stop_requested=true or pipeline complete
         - error: last_error present or health degraded
-    
+
     HOW IT WORKS:
         - Checks stop_requested flag
         - Checks status field
         - Checks for error indicators
-    
+
     ARGS:
         state: State dictionary from state.json
-    
+
     RETURNS:
         Status string: idle, running, stopped, error
     """
     # Explicit stop requested
     if state.get("stop_requested", False):
         return "stopped"
-    
+
     # Check explicit status first
     status = state.get("status", "")
     if status in ("running", "completed", "stopped", "error"):
         return status
-    
+
     # Check for errors
     if state.get("last_error") or state.get("health") == "degraded":
         return "error"
-    
+
     # Check if there's an active run_id but no recent activity
     run_id = state.get("run_id")
     if run_id:
         # Has run_id - check for activity
         counters = state.get("counters", {})
         usage = state.get("usage", {})
-        
+
         # If there's any activity, consider it running
         if counters.get("teacher_generated", 0) > 0:
             return "running"
@@ -732,10 +815,10 @@ def resolve_status(state: Dict[str, Any]) -> str:
             return "running"
         if counters.get("train_step", 0) > 0:
             return "running"
-        
+
         # No activity - idle
         return "idle"
-    
+
     # Default to idle if no run_id
     return "idle"
 
@@ -756,8 +839,9 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
         state: State dictionary to save
         run_id: Run ID (defaults to current)
     """
-    run_id = run_id or get_run_id()
-    state_file = get_state_path(run_id)
+    # BOLT OPTIMIZATION: Ensure run_id is resolved before invalidating cache
+    run_id_val = run_id or get_run_id()
+    state_file = get_state_path(run_id_val)
     temp_file = state_file.with_suffix(".tmp")
 
     # Update timestamp
@@ -769,6 +853,9 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
 
     # Atomic rename
     os.replace(temp_file, state_file)
+
+    # BOLT OPTIMIZATION: Invalidate cache after write to ensure consistency
+    _state_cache.invalidate(run_id_val)
 
 
 def update_counters(delta: Dict[str, Any], run_id: Optional[str] = None) -> None:
@@ -1517,7 +1604,7 @@ def main():
         python -m heidi_engine.telemetry emit <type> <message>
     """
     import argparse
-    
+
     parser = argparse.ArgumentParser(prog="heidi-engine telemetry")
     subparsers = parser.add_subparsers(dest="command")
 
