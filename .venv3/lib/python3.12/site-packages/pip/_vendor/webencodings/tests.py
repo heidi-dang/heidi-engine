@@ -14,15 +14,15 @@ A basic test suite for Encoding.
 from __future__ import unicode_literals
 
 from . import (
-    lookup,
     LABELS,
+    UTF8,
+    IncrementalDecoder,
+    IncrementalEncoder,
     decode,
     encode,
     iter_decode,
     iter_encode,
-    IncrementalDecoder,
-    IncrementalEncoder,
-    UTF8,
+    lookup,
 )
 
 
