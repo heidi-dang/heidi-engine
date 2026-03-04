@@ -66,18 +66,19 @@ CODE_BLOCK_PATTERNS = [
 # Patterns that indicate code should NOT be executed
 # TUNABLE: Add more dangerous patterns to block
 DANGEROUS_PATTERNS = [
-    r"import\s+os\s*;",  # os import with semicolon
-    r"import\s+subprocess",  # subprocess
-    r"import\s+sys\s*;",  # sys import with semicolon
-    r"eval\s*\(",  # eval()
-    r"exec\s*\(",  # exec()
-    r"__import__\s*\(",  # dynamic imports
-    r'open\s*\([^)]*,\s*[\'"]w',  # file write
-    r'open\s*\([^)]*,\s*[\'"]a',  # file append
-    r"requests\.",  # HTTP requests
-    r"urllib\.",  # URL handling
-    r"socket\.",  # network sockets
-    r"pickle\.load",  # pickle deserialization
+    # Any import of dangerous modules
+    r"\bimport\s+(os|subprocess|sys|shutil|socket|requests|urllib|pickle|builtins|pathlib|pty|ctypes)\b",
+    # Any from...import from dangerous modules
+    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pickle|builtins|pathlib|pty|ctypes)\b",
+    # Dangerous built-in functions
+    r"\beval\s*\(",
+    r"\bexec\s*\(",
+    r"\b__import__\s*\(",
+    r"\bgetattr\s*\(",
+    r"\bsetattr\s*\(",
+    r"\bbreakpoint\s*\(",
+    # File writing/appending (dangerous in unit test gate context)
+    r"open\s*\([^)]*,\s*['\"](w|a|x|r\+)['\"]",
 ]
 
 
