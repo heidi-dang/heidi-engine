@@ -70,6 +70,9 @@ from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
+from heidi_engine.telemetry import get_gpu_summary
+from heidi_engine.telemetry import get_state as get_telemetry_state
+
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
 # =============================================================================
@@ -89,7 +92,7 @@ MAX_EVENTS = int(os.environ.get("DASHBOARD_MAX_EVENTS", "20"))
 
 # Base directory for heidi_engine outputs
 # TUNABLE: Change if heidi_engine is in different location
-AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi-engine"))
+AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi_engine"))
 
 # Console width (auto-detected if not set)
 CONSOLE_WIDTH = int(os.environ.get("CONSOLE_WIDTH", "0"))
@@ -212,11 +215,11 @@ def get_config_path(run_id: str) -> Path:
 
 def load_state(run_id: str) -> Dict[str, Any]:
     """
-    Load current state from state.json.
+    Load current state from telemetry.
 
     HOW IT WORKS:
-        - Reads state.json file
-        - Returns empty state if file doesn't exist or is invalid
+        - Uses heidi_engine.telemetry.get_state (which has caching)
+        - Returns empty state if run doesn't exist
 
     TUNABLE:
         - N/A
@@ -227,16 +230,13 @@ def load_state(run_id: str) -> Dict[str, Any]:
     RETURNS:
         State dictionary
     """
-    state_file = get_state_path(run_id)
-
-    if not state_file.exists():
-        return get_default_state()
-
     try:
-        with open(state_file) as f:
-            return json.load(f)
+        state = get_telemetry_state(run_id)
+        if state.get("status") == "idle" and "counters" not in state:
+            return get_default_state()
+        return state
     except Exception as e:
-        console.print(f"[yellow]Warning: Failed to load state: {e}[/yellow]")
+        console.print(f"[yellow]Warning: Failed to load state from telemetry: {e}[/yellow]")
         return get_default_state()
 
 
@@ -354,50 +354,31 @@ def format_time(ts: str) -> str:
 
 def poll_gpu_info() -> Dict[str, Any]:
     """
-    Poll GPU information using nvidia-smi.
+    Poll GPU information using telemetry.
 
     HOW IT WORKS:
-        - Runs nvidia-smi command
-        - Parses output for VRAM usage
-        - Caches result for display
+        - Uses heidi_engine.telemetry.get_gpu_summary (which has caching)
 
     TUNABLE:
         - Adjust polling frequency via GPU_POLL_INTERVAL
-        - Add more metrics as needed
 
     RETURNS:
-        Dictionary with GPU info (empty if no GPU)
+        Dictionary with GPU info
     """
-    try:
-        import subprocess
+    summary = get_gpu_summary()
+    if summary.get("available") is not False:
+        # Map telemetry fields to dashboard fields
+        used = summary.get("vram_used_mb", 0)
+        total = summary.get("vram_total_mb", 0)
+        util = summary.get("util_pct", 0)
 
-        result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=memory.used,memory.total,utilization.gpu",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-
-        if result.returncode == 0:
-            parts = result.stdout.strip().split(",")
-            if len(parts) >= 2:
-                used = int(parts[0].strip())
-                total = int(parts[1].strip())
-                util = int(parts[2].strip()) if len(parts) > 2 else 0
-
-                return {
-                    "available": True,
-                    "memory_used_mb": used,
-                    "memory_total_mb": total,
-                    "memory_used_pct": (used / total * 100) if total > 0 else 0,
-                    "utilization_pct": util,
-                }
-    except Exception:
-        pass
+        return {
+            "available": True,
+            "memory_used_mb": used,
+            "memory_total_mb": total,
+            "memory_used_pct": (used / total * 100) if total > 0 else 0,
+            "utilization_pct": util,
+        }
 
     return {"available": False}
 
@@ -1227,10 +1208,9 @@ def main():
         If no run specified, shows interactive selection
     """
     global run_id, current_view
-    
+
     parser = argparse.ArgumentParser(
-        prog="heidi-engine dashboard",
-        description="Heidi Engine Real-Time Dashboard"
+        prog="heidi-engine dashboard", description="Heidi Engine Real-Time Dashboard"
     )
     parser.add_argument("--run", "-r", help="Run ID to monitor")
     parser.add_argument(
