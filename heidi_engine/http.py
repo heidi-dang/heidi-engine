@@ -23,8 +23,7 @@ import argparse
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="heidi-engine http",
-        description="Heidi Engine HTTP Status Server"
+        prog="heidi-engine http", description="Heidi Engine HTTP Status Server"
     )
     parser.add_argument(
         "--port", "-p", type=int, default=7779, help="Port to listen on (default: 7779)"
