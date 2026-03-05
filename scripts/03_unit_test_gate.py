@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -66,18 +67,14 @@ CODE_BLOCK_PATTERNS = [
 # Patterns that indicate code should NOT be executed
 # TUNABLE: Add more dangerous patterns to block
 DANGEROUS_PATTERNS = [
-    r"import\s+os\s*;",  # os import with semicolon
-    r"import\s+subprocess",  # subprocess
-    r"import\s+sys\s*;",  # sys import with semicolon
-    r"eval\s*\(",  # eval()
-    r"exec\s*\(",  # exec()
-    r"__import__\s*\(",  # dynamic imports
-    r'open\s*\([^)]*,\s*[\'"]w',  # file write
-    r'open\s*\([^)]*,\s*[\'"]a',  # file append
-    r"requests\.",  # HTTP requests
-    r"urllib\.",  # URL handling
-    r"socket\.",  # network sockets
-    r"pickle\.load",  # pickle deserialization
+    # Dangerous imports with word boundaries (handles comma-separated imports)
+    r"\bimport\s+[^;]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pickle|builtins|pathlib|pty|ctypes)\b",
+    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pickle|builtins|pathlib|pty|ctypes)\b",
+    # Dangerous built-ins and functions
+    r"\b(eval|exec|__import__|getattr|setattr|breakpoint)\s*\(",
+    # Unauthorized file write/append/exclusive-create operations (handles keyword arguments)
+    r"\bopen\s*\([^)]*mode\s*=\s*['\"][^'\"]*[wax\+]['\"]",
+    r"\bopen\s*\([^)]*,\s*['\"][^'\"]*[wax\+]['\"]",
 ]
 
 
@@ -208,6 +205,7 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     test_file = os.path.join(temp_dir, "test_code.py")
 
     # Wrap code to capture output safely
+    indented_code = textwrap.indent(code, "    ")
     wrapped_code = f"""
 import sys
 import io
@@ -223,7 +221,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
