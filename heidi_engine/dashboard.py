@@ -89,7 +89,7 @@ MAX_EVENTS = int(os.environ.get("DASHBOARD_MAX_EVENTS", "20"))
 
 # Base directory for heidi_engine outputs
 # TUNABLE: Change if heidi_engine is in different location
-AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi-engine"))
+AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi_engine"))
 
 # Console width (auto-detected if not set)
 CONSOLE_WIDTH = int(os.environ.get("CONSOLE_WIDTH", "0"))
@@ -212,29 +212,14 @@ def get_config_path(run_id: str) -> Path:
 
 def load_state(run_id: str) -> Dict[str, Any]:
     """
-    Load current state from state.json.
+    Load current state from state.json using optimized telemetry module.
 
-    HOW IT WORKS:
-        - Reads state.json file
-        - Returns empty state if file doesn't exist or is invalid
-
-    TUNABLE:
-        - N/A
-
-    ARGS:
-        run_id: Run to read
-
-    RETURNS:
-        State dictionary
+    BOLT OPTIMIZATION: Uses telemetry's thread-safe caching.
     """
-    state_file = get_state_path(run_id)
-
-    if not state_file.exists():
-        return get_default_state()
-
     try:
-        with open(state_file) as f:
-            return json.load(f)
+        from heidi_engine.telemetry import get_state
+
+        return get_state(run_id)
     except Exception as e:
         console.print(f"[yellow]Warning: Failed to load state: {e}[/yellow]")
         return get_default_state()
@@ -354,48 +339,27 @@ def format_time(ts: str) -> str:
 
 def poll_gpu_info() -> Dict[str, Any]:
     """
-    Poll GPU information using nvidia-smi.
+    Poll GPU information using optimized telemetry module.
 
-    HOW IT WORKS:
-        - Runs nvidia-smi command
-        - Parses output for VRAM usage
-        - Caches result for display
-
-    TUNABLE:
-        - Adjust polling frequency via GPU_POLL_INTERVAL
-        - Add more metrics as needed
-
-    RETURNS:
-        Dictionary with GPU info (empty if no GPU)
+    BOLT OPTIMIZATION: Uses telemetry's TTL caching to avoid slow nvidia-smi calls.
     """
     try:
-        import subprocess
+        from heidi_engine.telemetry import get_gpu_summary
 
-        result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=memory.used,memory.total,utilization.gpu",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
+        data = get_gpu_summary()
+        if not data.get("available", True):
+            return {"available": False}
 
-        if result.returncode == 0:
-            parts = result.stdout.strip().split(",")
-            if len(parts) >= 2:
-                used = int(parts[0].strip())
-                total = int(parts[1].strip())
-                util = int(parts[2].strip()) if len(parts) > 2 else 0
+        used = data.get("vram_used_mb", 0)
+        total = data.get("vram_total_mb", 0)
 
-                return {
-                    "available": True,
-                    "memory_used_mb": used,
-                    "memory_total_mb": total,
-                    "memory_used_pct": (used / total * 100) if total > 0 else 0,
-                    "utilization_pct": util,
-                }
+        return {
+            "available": True,
+            "memory_used_mb": used,
+            "memory_total_mb": total,
+            "memory_used_pct": (used / total * 100) if total > 0 else 0,
+            "utilization_pct": data.get("util_pct", 0),
+        }
     except Exception:
         pass
 
@@ -1227,10 +1191,9 @@ def main():
         If no run specified, shows interactive selection
     """
     global run_id, current_view
-    
+
     parser = argparse.ArgumentParser(
-        prog="heidi-engine dashboard",
-        description="Heidi Engine Real-Time Dashboard"
+        prog="heidi-engine dashboard", description="Heidi Engine Real-Time Dashboard"
     )
     parser.add_argument("--run", "-r", help="Run ID to monitor")
     parser.add_argument(

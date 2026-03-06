@@ -62,6 +62,7 @@ import re
 import stat
 import sys
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
@@ -265,6 +266,123 @@ _lock = threading.RLock()
 _initialized = False
 
 
+class StateCache:
+    """
+    Thread-safe cache for state.json data.
+    TTL of 0.5s prevents redundant disk I/O and JSON parsing.
+    """
+
+    def __init__(self, ttl: float = 0.5):
+        self.ttl = ttl
+        self.data: Optional[Dict[str, Any]] = None
+        self.last_update = 0.0
+        self.cached_run_id: Optional[str] = None
+        self.lock = threading.Lock()
+
+    def get(self, run_id: str) -> Optional[Dict[str, Any]]:
+        with self.lock:
+            if run_id != self.cached_run_id:
+                return None
+            if time.monotonic() - self.last_update > self.ttl:
+                return None
+            return json.loads(json.dumps(self.data)) if self.data else None
+
+    def set(self, run_id: str, data: Dict[str, Any]):
+        with self.lock:
+            self.cached_run_id = run_id
+            self.data = json.loads(json.dumps(data))
+            self.last_update = time.monotonic()
+
+    def invalidate(self):
+        with self.lock:
+            self.last_update = 0.0
+
+
+_state_cache = StateCache()
+
+
+# GPU and event timestamp caching
+_gpu_cache: Dict[str, Any] = {}
+_gpu_cache_ts = 0.0
+_gpu_cache_lock = threading.Lock()
+
+_event_ts_cache: Dict[str, str] = {}
+_event_ts_check_ts: Dict[str, float] = {}
+_event_ts_lock = threading.Lock()
+
+
+def get_gpu_summary() -> Dict[str, Any]:
+    """
+    Get minimal GPU info with 2s TTL caching.
+    BOLT OPTIMIZATION: Prevents slow nvidia-smi subprocess calls.
+    """
+    global _gpu_cache, _gpu_cache_ts
+    with _gpu_cache_lock:
+        if time.monotonic() - _gpu_cache_ts < 2.0:
+            return _gpu_cache
+
+        try:
+            import subprocess
+
+            result = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=memory.used,memory.total,utilization.gpu",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                parts = result.stdout.strip().split(",")
+                if len(parts) >= 2:
+                    _gpu_cache = {
+                        "vram_used_mb": int(parts[0].strip()),
+                        "vram_total_mb": int(parts[1].strip()),
+                        "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
+                    }
+                else:
+                    _gpu_cache = {"available": False}
+            else:
+                _gpu_cache = {"available": False}
+        except Exception:
+            _gpu_cache = {"available": False}
+
+        _gpu_cache_ts = time.monotonic()
+        return _gpu_cache
+
+
+def get_last_event_ts(run_id: Optional[str] = None) -> Optional[str]:
+    """
+    Get timestamp of last event with 1s TTL caching.
+    BOLT OPTIMIZATION: Prevents redundant disk I/O for last event check.
+    """
+    run_id = run_id or get_run_id()
+    with _event_ts_lock:
+        last_check = _event_ts_check_ts.get(run_id, 0.0)
+        if time.monotonic() - last_check < 1.0:
+            return _event_ts_cache.get(run_id)
+
+        try:
+            events_file = get_events_path(run_id)
+            ts = None
+            if events_file.exists() and events_file.stat().st_size > 0:
+                with open(events_file, "rb") as f:
+                    f.seek(-500, 2)  # Read last 500 bytes
+                    lines = f.read().decode().strip().split("\n")
+                    if lines:
+                        last_line = lines[-1]
+                        event = json.loads(last_line)
+                        ts = event.get("ts")
+
+            _event_ts_cache[run_id] = ts
+            _event_ts_check_ts[run_id] = time.monotonic()
+            return ts
+        except Exception:
+            return None
+
+
 # =============================================================================
 # DEFAULT COUNTERS AND USAGE TRACKING
 # =============================================================================
@@ -416,6 +534,10 @@ DEFAULT_PRICING = {
     "claude-3-haiku": {"input": 0.25, "output": 1.25},
 }
 
+_pricing_cache: Dict[str, Any] = {}
+_pricing_mtime = 0.0
+_pricing_lock = threading.Lock()
+
 
 def load_pricing_config() -> Dict[str, Dict[str, float]]:
     """
@@ -424,29 +546,33 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
     HOW IT WORKS:
         - First checks for pricing.json in run directory
         - Falls back to DEFAULT_PRICING
-        - Allows user to customize pricing per model
-
-    TUNABLE:
-        - Create pricing.json to override default prices
-        - Format: {"model_name": {"input": 0.5, "output": 1.5}}
-        - Prices are per 1M tokens
+        - BOLT OPTIMIZATION: Uses mtime caching to avoid redundant disk I/O.
     """
-    pricing = DEFAULT_PRICING.copy()
+    global _pricing_cache, _pricing_mtime
 
-    # Check for pricing config file
     pricing_file = (
         Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
     )
 
-    if pricing_file.exists():
+    if not pricing_file.exists():
+        return json.loads(json.dumps(DEFAULT_PRICING))
+
+    with _pricing_lock:
         try:
+            current_mtime = pricing_file.stat().st_mtime
+            if current_mtime <= _pricing_mtime and _pricing_cache:
+                return json.loads(json.dumps(_pricing_cache))
+
             with open(pricing_file) as f:
+                pricing = json.loads(json.dumps(DEFAULT_PRICING))
                 custom = json.load(f)
                 pricing.update(custom)
+                _pricing_cache = pricing
+                _pricing_mtime = current_mtime
+                return json.loads(json.dumps(pricing))
         except Exception as e:
             print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
-
-    return pricing
+            return json.loads(json.dumps(DEFAULT_PRICING))
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -651,23 +777,29 @@ def init_telemetry(
 
 def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     """
-    Load current state from state.json.
+    Load current state from state.json with caching.
 
-    HOW IT WORKS:
-        - Reads state.json file
-        - Returns empty state if file doesn't exist
-    
+    BOLT OPTIMIZATION: Uses StateCache to avoid redundant disk I/O and JSON parsing.
+
     ARGS:
         run_id: Run to read (defaults to current run)
 
     RETURNS:
         State dictionary
     """
-    state_file = get_state_path(run_id)
+    requested_run_id = run_id
+    run_id = run_id or get_run_id()
+
+    # Check cache first
+    cached = _state_cache.get(run_id)
+    if cached:
+        return cached
+
+    state_file = get_state_path(requested_run_id)
 
     if not state_file.exists():
         return {
-            "run_id": get_run_id(),
+            "run_id": run_id,
             "status": "idle",
             "counters": get_default_counters(),
             "usage": get_default_usage(),
@@ -678,6 +810,10 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             state = json.load(f)
             # Resolve status from on-disk metadata
             state["status"] = resolve_status(state)
+
+            # Update cache
+            _state_cache.set(run_id, state)
+
             return state
     except Exception as e:
         print(f"[WARN] Failed to load state: {e}", file=sys.stderr)
@@ -687,44 +823,44 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
 def resolve_status(state: Dict[str, Any]) -> str:
     """
     Resolve run status from on-disk metadata.
-    
+
     STATUS VALUES:
         - idle: No active run, or run_id present but no events
         - running: Worker active / stop not requested / still processing
         - stopped: stop_requested=true or pipeline complete
         - error: last_error present or health degraded
-    
+
     HOW IT WORKS:
         - Checks stop_requested flag
         - Checks status field
         - Checks for error indicators
-    
+
     ARGS:
         state: State dictionary from state.json
-    
+
     RETURNS:
         Status string: idle, running, stopped, error
     """
     # Explicit stop requested
     if state.get("stop_requested", False):
         return "stopped"
-    
+
     # Check explicit status first
     status = state.get("status", "")
-    if status in ("running", "completed", "stopped", "error"):
+    if status in ("running", "completed", "stopped", "error", "paused"):
         return status
-    
+
     # Check for errors
     if state.get("last_error") or state.get("health") == "degraded":
         return "error"
-    
+
     # Check if there's an active run_id but no recent activity
     run_id = state.get("run_id")
     if run_id:
         # Has run_id - check for activity
         counters = state.get("counters", {})
         usage = state.get("usage", {})
-        
+
         # If there's any activity, consider it running
         if counters.get("teacher_generated", 0) > 0:
             return "running"
@@ -732,10 +868,14 @@ def resolve_status(state: Dict[str, Any]) -> str:
             return "running"
         if counters.get("train_step", 0) > 0:
             return "running"
-        
+
+        # If status is explicitly set but not one of the "running" variants, trust it
+        if status:
+            return status
+
         # No activity - idle
         return "idle"
-    
+
     # Default to idle if no run_id
     return "idle"
 
@@ -769,6 +909,9 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
 
     # Atomic rename
     os.replace(temp_file, state_file)
+
+    # BOLT OPTIMIZATION: Invalidate cache after write
+    _state_cache.invalidate()
 
 
 def update_counters(delta: Dict[str, Any], run_id: Optional[str] = None) -> None:
@@ -1325,49 +1468,6 @@ def start_http_server(port: int = 7779) -> None:
         print("[WARN] HTTP server not available", file=sys.stderr)
         return
 
-    def get_gpu_summary() -> Dict[str, Any]:
-        """Get minimal GPU info without exposing sensitive data."""
-        try:
-            import subprocess
-
-            result = subprocess.run(
-                [
-                    "nvidia-smi",
-                    "--query-gpu=memory.used,memory.total,utilization.gpu",
-                    "--format=csv,noheader,nounits",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                parts = result.stdout.strip().split(",")
-                if len(parts) >= 2:
-                    return {
-                        "vram_used_mb": int(parts[0].strip()),
-                        "vram_total_mb": int(parts[1].strip()),
-                        "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
-                    }
-        except Exception:
-            pass
-        return {"available": False}
-
-    def get_last_event_ts() -> Optional[str]:
-        """Get timestamp of last event."""
-        try:
-            events_file = get_events_path()
-            if events_file.exists() and events_file.stat().st_size > 0:
-                with open(events_file, "rb") as f:
-                    f.seek(-500, 2)  # Read last 500 bytes
-                    lines = f.read().decode().strip().split("\n")
-                    if lines:
-                        last_line = lines[-1]
-                        event = json.loads(last_line)
-                        return event.get("ts")
-        except Exception:
-            pass
-        return None
-
     def redact_state(state: Dict[str, Any]) -> Dict[str, Any]:
         """Redact state to only allowed fields."""
         redacted = {}
@@ -1517,7 +1617,7 @@ def main():
         python -m heidi_engine.telemetry emit <type> <message>
     """
     import argparse
-    
+
     parser = argparse.ArgumentParser(prog="heidi-engine telemetry")
     subparsers = parser.add_subparsers(dest="command")
 
