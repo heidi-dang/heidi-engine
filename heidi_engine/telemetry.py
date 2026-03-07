@@ -62,6 +62,7 @@ import re
 import stat
 import sys
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
@@ -265,6 +266,56 @@ _lock = threading.RLock()
 _initialized = False
 
 
+class StateCache:
+    """
+    Thread-safe cache for state.json to avoid redundant disk I/O.
+
+    BOLT OPTIMIZATION:
+    - 0.5s TTL for rapid access without stale data risk.
+    - Updates on every save_state to ensure immediate consistency.
+    """
+    def __init__(self, ttl: float = 0.5):
+        self._cache: Dict[str, Any] = {}
+        self._cached_run_id: Optional[str] = None
+        self._last_read_ts: float = 0
+        self._ttl = ttl
+        self._lock = threading.Lock()
+
+    def get(self, run_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            now = time.monotonic()
+            if (self._cached_run_id == run_id and
+                (now - self._last_read_ts) < self._ttl):
+                return json.loads(json.dumps(self._cache)) # Deep copy
+            return None
+
+    def update(self, run_id: str, state: Dict[str, Any]):
+        with self._lock:
+            self._cache = json.loads(json.dumps(state)) # Deep copy
+            self._cached_run_id = run_id
+            self._last_read_ts = time.monotonic()
+
+    def invalidate(self):
+        with self._lock:
+            self._last_read_ts = 0
+
+
+_state_cache = StateCache()
+
+# Internal caches for status helpers
+_pricing_cache: Dict[str, Dict[str, float]] = {}
+_pricing_mtime: float = 0
+_pricing_path: Optional[Path] = None
+
+_gpu_cache: Dict[str, Any] = {}
+_gpu_cache_ts: float = 0
+_gpu_cache_ttl: float = 2.0
+
+_last_event_ts_cache: Dict[str, Optional[str]] = {}
+_last_event_ts_check_ts: Dict[str, float] = {}
+_last_event_ts_ttl: float = 1.0
+
+
 # =============================================================================
 # DEFAULT COUNTERS AND USAGE TRACKING
 # =============================================================================
@@ -426,27 +477,52 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Falls back to DEFAULT_PRICING
         - Allows user to customize pricing per model
 
+    BOLT OPTIMIZATION:
+        - Uses mtime-based caching to avoid redundant disk I/O.
+
     TUNABLE:
         - Create pricing.json to override default prices
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
-    pricing = DEFAULT_PRICING.copy()
+    global _pricing_cache, _pricing_mtime, _pricing_path
 
     # Check for pricing config file
     pricing_file = (
         Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
     )
 
-    if pricing_file.exists():
+    with _lock:
         try:
-            with open(pricing_file) as f:
-                custom = json.load(f)
-                pricing.update(custom)
+            if pricing_file.exists():
+                mtime = pricing_file.stat().st_mtime
+                if _pricing_path == pricing_file and _pricing_mtime == mtime:
+                    return json.loads(json.dumps(_pricing_cache))
+
+                with open(pricing_file) as f:
+                    custom = json.load(f)
+                    pricing = DEFAULT_PRICING.copy()
+                    pricing.update(custom)
+
+                    # Update cache
+                    _pricing_cache = pricing
+                    _pricing_mtime = mtime
+                    _pricing_path = pricing_file
+                    return json.loads(json.dumps(pricing))
+            else:
+                # No custom pricing file, use defaults
+                if _pricing_path is None and _pricing_cache:
+                    return json.loads(json.dumps(_pricing_cache))
+
+                pricing = DEFAULT_PRICING.copy()
+                _pricing_cache = pricing
+                _pricing_path = None
+                _pricing_mtime = 0
+                return json.loads(json.dumps(pricing))
+
         except Exception as e:
             print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
-
-    return pricing
+            return DEFAULT_PRICING.copy()
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -657,17 +733,27 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
         - Reads state.json file
         - Returns empty state if file doesn't exist
     
+    BOLT OPTIMIZATION:
+        - Uses _state_cache to avoid redundant disk I/O within TTL.
+
     ARGS:
         run_id: Run to read (defaults to current run)
 
     RETURNS:
         State dictionary
     """
+    run_id = run_id or get_run_id()
+
+    # Check cache first
+    cached = _state_cache.get(run_id)
+    if cached is not None:
+        return cached
+
     state_file = get_state_path(run_id)
 
     if not state_file.exists():
         return {
-            "run_id": get_run_id(),
+            "run_id": run_id,
             "status": "idle",
             "counters": get_default_counters(),
             "usage": get_default_usage(),
@@ -678,6 +764,10 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             state = json.load(f)
             # Resolve status from on-disk metadata
             state["status"] = resolve_status(state)
+
+            # Update cache
+            _state_cache.update(run_id, state)
+
             return state
     except Exception as e:
         print(f"[WARN] Failed to load state: {e}", file=sys.stderr)
@@ -749,8 +839,8 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
         - Uses os.rename for atomic update
         - Prevents corruption from partial writes
 
-    TUNABLE:
-        - N/A - just saves state
+    BOLT OPTIMIZATION:
+        - Updates _state_cache for immediate consistency.
 
     ARGS:
         state: State dictionary to save
@@ -769,6 +859,9 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
 
     # Atomic rename
     os.replace(temp_file, state_file)
+
+    # Update cache
+    _state_cache.update(run_id, state)
 
 
 def update_counters(delta: Dict[str, Any], run_id: Optional[str] = None) -> None:
@@ -1292,6 +1385,99 @@ def stage_context(stage: str, round_num: int, message: str, **kwargs):
 
 
 # =============================================================================
+# STATUS HELPERS (CACHED)
+# =============================================================================
+
+
+def get_gpu_summary() -> Dict[str, Any]:
+    """
+    Get minimal GPU info without exposing sensitive data.
+
+    BOLT OPTIMIZATION:
+        - TTL-based caching (2.0s) to avoid frequent nvidia-smi calls.
+    """
+    global _gpu_cache, _gpu_cache_ts
+
+    with _lock:
+        now = time.monotonic()
+        if (now - _gpu_cache_ts) < _gpu_cache_ttl:
+            return _gpu_cache.copy()
+
+        try:
+            import subprocess
+
+            result = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=memory.used,memory.total,utilization.gpu",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                parts = result.stdout.strip().split(",")
+                if len(parts) >= 2:
+                    info = {
+                        "available": True,
+                        "vram_used_mb": int(parts[0].strip()),
+                        "vram_total_mb": int(parts[1].strip()),
+                        "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
+                    }
+                    _gpu_cache = info
+                    _gpu_cache_ts = now
+                    return info.copy()
+        except Exception:
+            pass
+
+        info = {"available": False}
+        _gpu_cache = info
+        _gpu_cache_ts = now
+        return info.copy()
+
+
+def get_last_event_ts(run_id: Optional[str] = None) -> Optional[str]:
+    """
+    Get timestamp of last event.
+
+    BOLT OPTIMIZATION:
+        - TTL-based caching (1.0s) per run_id.
+    """
+    global _last_event_ts_cache, _last_event_ts_check_ts
+
+    run_id = run_id or get_run_id()
+
+    with _lock:
+        now = time.monotonic()
+        if run_id in _last_event_ts_check_ts:
+            if (now - _last_event_ts_check_ts[run_id]) < _last_event_ts_ttl:
+                return _last_event_ts_cache.get(run_id)
+
+        ts = None
+        try:
+            events_file = get_events_path(run_id)
+            if events_file.exists() and events_file.stat().st_size > 0:
+                with open(events_file, "rb") as f:
+                    # Read last 500 bytes to find the last line
+                    size = events_file.stat().st_size
+                    seek_pos = max(0, size - 500)
+                    f.seek(seek_pos)
+                    chunk = f.read().decode(errors="ignore")
+                    lines = chunk.strip().split("\n")
+                    if lines:
+                        last_line = lines[-1]
+                        event = json.loads(last_line)
+                        ts = event.get("ts")
+        except Exception:
+            pass
+
+        _last_event_ts_cache[run_id] = ts
+        _last_event_ts_check_ts[run_id] = now
+        return ts
+
+
+# =============================================================================
 # HTTP STATUS SERVER (OPTIONAL)
 # =============================================================================
 
@@ -1325,49 +1511,6 @@ def start_http_server(port: int = 7779) -> None:
         print("[WARN] HTTP server not available", file=sys.stderr)
         return
 
-    def get_gpu_summary() -> Dict[str, Any]:
-        """Get minimal GPU info without exposing sensitive data."""
-        try:
-            import subprocess
-
-            result = subprocess.run(
-                [
-                    "nvidia-smi",
-                    "--query-gpu=memory.used,memory.total,utilization.gpu",
-                    "--format=csv,noheader,nounits",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                parts = result.stdout.strip().split(",")
-                if len(parts) >= 2:
-                    return {
-                        "vram_used_mb": int(parts[0].strip()),
-                        "vram_total_mb": int(parts[1].strip()),
-                        "util_pct": int(parts[2].strip()) if len(parts) > 2 else 0,
-                    }
-        except Exception:
-            pass
-        return {"available": False}
-
-    def get_last_event_ts() -> Optional[str]:
-        """Get timestamp of last event."""
-        try:
-            events_file = get_events_path()
-            if events_file.exists() and events_file.stat().st_size > 0:
-                with open(events_file, "rb") as f:
-                    f.seek(-500, 2)  # Read last 500 bytes
-                    lines = f.read().decode().strip().split("\n")
-                    if lines:
-                        last_line = lines[-1]
-                        event = json.loads(last_line)
-                        return event.get("ts")
-        except Exception:
-            pass
-        return None
-
     def redact_state(state: Dict[str, Any]) -> Dict[str, Any]:
         """Redact state to only allowed fields."""
         redacted = {}
@@ -1394,11 +1537,11 @@ def start_http_server(port: int = 7779) -> None:
             if self.path == "/status" or self.path == "/":
                 state = get_state()
 
-                # Add GPU summary (no secrets)
+                # Add GPU summary (no secrets) - now uses cached module function
                 state["gpu_summary"] = get_gpu_summary()
 
-                # Add last event timestamp
-                state["last_event_ts"] = get_last_event_ts()
+                # Add last event timestamp - now uses cached module function
+                state["last_event_ts"] = get_last_event_ts(state.get("run_id"))
 
                 # Add health status
                 state["health"] = "ok" if state.get("status") != "error" else "degraded"

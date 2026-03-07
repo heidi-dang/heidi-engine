@@ -70,6 +70,8 @@ from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
+from heidi_engine import telemetry
+
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
 # =============================================================================
@@ -89,7 +91,8 @@ MAX_EVENTS = int(os.environ.get("DASHBOARD_MAX_EVENTS", "20"))
 
 # Base directory for heidi_engine outputs
 # TUNABLE: Change if heidi_engine is in different location
-AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi-engine"))
+# BOLT FIX: Corrected default to canonical heidi_engine (underscore)
+AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi_engine"))
 
 # Console width (auto-detected if not set)
 CONSOLE_WIDTH = int(os.environ.get("CONSOLE_WIDTH", "0"))
@@ -214,12 +217,8 @@ def load_state(run_id: str) -> Dict[str, Any]:
     """
     Load current state from state.json.
 
-    HOW IT WORKS:
-        - Reads state.json file
-        - Returns empty state if file doesn't exist or is invalid
-
-    TUNABLE:
-        - N/A
+    BOLT OPTIMIZATION:
+        - Uses telemetry.get_state for thread-safe TTL-based caching.
 
     ARGS:
         run_id: Run to read
@@ -227,14 +226,8 @@ def load_state(run_id: str) -> Dict[str, Any]:
     RETURNS:
         State dictionary
     """
-    state_file = get_state_path(run_id)
-
-    if not state_file.exists():
-        return get_default_state()
-
     try:
-        with open(state_file) as f:
-            return json.load(f)
+        return telemetry.get_state(run_id)
     except Exception as e:
         console.print(f"[yellow]Warning: Failed to load state: {e}[/yellow]")
         return get_default_state()
@@ -356,49 +349,23 @@ def poll_gpu_info() -> Dict[str, Any]:
     """
     Poll GPU information using nvidia-smi.
 
-    HOW IT WORKS:
-        - Runs nvidia-smi command
-        - Parses output for VRAM usage
-        - Caches result for display
-
-    TUNABLE:
-        - Adjust polling frequency via GPU_POLL_INTERVAL
-        - Add more metrics as needed
+    BOLT OPTIMIZATION:
+        - Uses telemetry.get_gpu_summary for TTL-based caching.
 
     RETURNS:
         Dictionary with GPU info (empty if no GPU)
     """
-    try:
-        import subprocess
-
-        result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=memory.used,memory.total,utilization.gpu",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-
-        if result.returncode == 0:
-            parts = result.stdout.strip().split(",")
-            if len(parts) >= 2:
-                used = int(parts[0].strip())
-                total = int(parts[1].strip())
-                util = int(parts[2].strip()) if len(parts) > 2 else 0
-
-                return {
-                    "available": True,
-                    "memory_used_mb": used,
-                    "memory_total_mb": total,
-                    "memory_used_pct": (used / total * 100) if total > 0 else 0,
-                    "utilization_pct": util,
-                }
-    except Exception:
-        pass
-
+    summary = telemetry.get_gpu_summary()
+    if summary.get("available"):
+        used = summary.get("vram_used_mb", 0)
+        total = summary.get("vram_total_mb", 0)
+        return {
+            "available": True,
+            "memory_used_mb": used,
+            "memory_total_mb": total,
+            "memory_used_pct": (used / total * 100) if total > 0 else 0,
+            "utilization_pct": summary.get("util_pct", 0),
+        }
     return {"available": False}
 
 
