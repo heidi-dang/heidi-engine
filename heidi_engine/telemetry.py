@@ -56,8 +56,8 @@ CONFIG VALIDATION:
 """
 
 import atexit
-import copy
 import base64
+import copy
 import json
 import os
 import re
@@ -68,9 +68,9 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
@@ -78,8 +78,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 # Base directory for all heidi_engine outputs
 # TUNABLE: Change to custom path if needed
-# NOTE: Default changed to .local/heidi_engine to avoid polluting repo root
-AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi_engine"))
+# NOTE: Default changed to .local/heidi-engine to avoid polluting repo root
+AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi-engine"))
 
 # Unique run identifier - set by loop.sh or menu.py
 # TUNABLE: Auto-generated if not provided
@@ -463,6 +463,12 @@ DEFAULT_PRICING = {
     "claude-3-haiku": {"input": 0.25, "output": 1.25},
 }
 
+# BOLT OPTIMIZATION: Module-level caching for pricing configuration
+_pricing_cache: Dict[str, Dict[str, float]] = {}
+_pricing_mtime = 0.0
+_pricing_path: Optional[Path] = None
+_pricing_lock = threading.Lock()
+
 
 def load_pricing_config() -> Dict[str, Dict[str, float]]:
     """
@@ -473,27 +479,53 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Falls back to DEFAULT_PRICING
         - Allows user to customize pricing per model
 
+    BOLT OPTIMIZATION:
+        Uses mtime-based caching to avoid redundant disk I/O and JSON parsing
+        on every event emission. Yields significant performance gain when
+        processing high-frequency usage updates.
+
     TUNABLE:
         - Create pricing.json to override default prices
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
-    pricing = DEFAULT_PRICING.copy()
+    global _pricing_cache, _pricing_mtime, _pricing_path
 
     # Check for pricing config file
     pricing_file = (
         Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
     )
 
-    if pricing_file.exists():
+    with _pricing_lock:
         try:
-            with open(pricing_file) as f:
-                custom = json.load(f)
-                pricing.update(custom)
+            if pricing_file.exists():
+                fstat = pricing_file.stat()
+                if (
+                    _pricing_cache
+                    and _pricing_path == pricing_file
+                    and fstat.st_mtime == _pricing_mtime
+                ):
+                    return copy.deepcopy(_pricing_cache)
+
+                # Cache miss or file changed
+                with open(pricing_file) as f:
+                    custom = json.load(f)
+                    pricing = DEFAULT_PRICING.copy()
+                    pricing.update(custom)
+                    _pricing_cache = pricing
+                    _pricing_mtime = fstat.st_mtime
+                    _pricing_path = pricing_file
+                    return copy.deepcopy(_pricing_cache)
         except Exception as e:
             print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
 
-    return pricing
+        # Fallback to defaults or return current cache if file disappeared
+        if not _pricing_cache:
+            _pricing_cache = DEFAULT_PRICING.copy()
+            _pricing_mtime = 0.0
+            _pricing_path = None
+
+        return copy.deepcopy(_pricing_cache)
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -666,8 +698,8 @@ def init_telemetry(
             "counters": get_default_counters(),
             "usage": get_default_usage(),
             "config": {},  # Don't store config in state for security
-            "started_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
         # Save initial state atomically
@@ -717,7 +749,7 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     """
     resolved_run_id = run_id or get_run_id()
 
-    # BOLT OPTIMIZATION: Check cache first
+    # BOLT OPTIMIZATION: Check cache first (0.5s TTL)
     cached = _state_cache.get(resolved_run_id)
     if cached is not None:
         return cached
@@ -731,11 +763,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
@@ -830,7 +857,7 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
     temp_file = state_file.with_suffix(".tmp")
 
     # Update timestamp
-    state["updated_at"] = datetime.utcnow().isoformat()
+    state["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     # Write to temp file
     with open(temp_file, "w") as f:
@@ -1009,6 +1036,19 @@ def clear_pause(run_id: Optional[str] = None) -> None:
     save_state(state, run_id)
 
 
+def request_train_now(run_id: Optional[str] = None) -> None:
+    """
+    Request immediate training start.
+    Sets train_requested flag in state.json.
+
+    ARGS:
+        run_id: Run ID (defaults to current)
+    """
+    state = get_state(run_id)
+    state["train_requested"] = True
+    save_state(state, run_id)
+
+
 def check_stop_requested(run_id: Optional[str] = None) -> bool:
     """
     Check if stop has been requested.
@@ -1110,7 +1150,7 @@ def emit_event(
     # Build event with schema version
     event = {
         "event_version": EVENT_VERSION,
-        "ts": datetime.utcnow().isoformat(),
+        "ts": datetime.now(timezone.utc).isoformat(),
         "run_id": run_id,
         "round": round_num if round_num is not None else state.get("current_round", 0),
         "stage": stage or state.get("current_stage", "unknown"),
@@ -1509,7 +1549,10 @@ def start_http_server(port: int = 7779) -> None:
     _session_pass = os.environ.get("TELEMETRY_PASS")
     if not _session_pass:
         _session_pass = secrets.token_urlsafe(16)
-        print(f"[SECURITY] TELEMETRY_PASS not set. Generated random password: {_session_pass}", file=sys.stderr)
+        print(
+            f"[SECURITY] TELEMETRY_PASS not set. Generated random password: {_session_pass}",
+            file=sys.stderr,
+        )
 
     class StateHandler(BaseHTTPRequestHandler):
         """HTTP handler with security restrictions."""
