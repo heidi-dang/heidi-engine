@@ -57,9 +57,11 @@ CONFIG VALIDATION:
 
 import atexit
 import copy
+import base64
 import json
 import os
 import re
+import secrets
 import stat
 import sys
 import threading
@@ -1497,10 +1499,56 @@ def start_http_server(port: int = 7779) -> None:
                 redacted[key] = value
         return redacted
 
+    # SECURITY: Session-specific random password if TELEMETRY_PASS is not set.
+    # Prevents hardcoded 'admin' default and ensures defense-in-depth.
+    _session_pass = os.environ.get("TELEMETRY_PASS")
+    if not _session_pass:
+        _session_pass = secrets.token_urlsafe(16)
+        print(f"[SECURITY] TELEMETRY_PASS not set. Generated random password: {_session_pass}", file=sys.stderr)
+
     class StateHandler(BaseHTTPRequestHandler):
         """HTTP handler with security restrictions."""
 
+        def check_auth(self) -> bool:
+            """Check Basic Authentication."""
+            # Exempt /health from authentication for infrastructure compatibility
+            if self.path == "/health":
+                return True
+
+            auth_header = self.headers.get("Authorization")
+            if not auth_header or not auth_header.startswith("Basic "):
+                self.send_auth_request()
+                return False
+
+            try:
+                auth_decoded = base64.b64decode(auth_header[6:]).decode()
+                if ":" not in auth_decoded:
+                    self.send_auth_request()
+                    return False
+                user, password = auth_decoded.split(":", 1)
+
+                if secrets.compare_digest(user, "admin") and secrets.compare_digest(
+                    password, _session_pass
+                ):
+                    return True
+            except Exception:
+                pass
+
+            self.send_auth_request()
+            return False
+
+        def send_auth_request(self):
+            """Send 401 Unauthorized response."""
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="Heidi Engine Telemetry"')
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"Authentication required")
+
         def do_GET(self):
+            if not self.check_auth():
+                return
+
             if self.path == "/health":
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
