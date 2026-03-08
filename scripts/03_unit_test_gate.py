@@ -66,18 +66,24 @@ CODE_BLOCK_PATTERNS = [
 # Patterns that indicate code should NOT be executed
 # TUNABLE: Add more dangerous patterns to block
 DANGEROUS_PATTERNS = [
-    r"import\s+os\s*;",  # os import with semicolon
-    r"import\s+subprocess",  # subprocess
-    r"import\s+sys\s*;",  # sys import with semicolon
-    r"eval\s*\(",  # eval()
-    r"exec\s*\(",  # exec()
-    r"__import__\s*\(",  # dynamic imports
-    r'open\s*\([^)]*,\s*[\'"]w',  # file write
-    r'open\s*\([^)]*,\s*[\'"]a',  # file append
-    r"requests\.",  # HTTP requests
-    r"urllib\.",  # URL handling
-    r"socket\.",  # network sockets
-    r"pickle\.load",  # pickle deserialization
+    # Dangerous imports (including comma-separated and aliased)
+    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
+    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
+    # Dangerous built-ins
+    r"\beval\s*\(",
+    r"\bexec\s*\(",
+    r"\b__import__\s*\(",
+    r"\bgetattr\s*\(",
+    r"\bsetattr\s*\(",
+    r"\bbreakpoint\s*\(",
+    # Dangerous module functions
+    r"\bos\.(system|popen|spawn|remove|unlink|rmdir|mkdir|chmod|chown|kill|exec|fork|pipe)\b",
+    r"\bsubprocess\.(run|call|check_call|check_output|Popen)\b",
+    r"\bshutil\.(rmtree|move|copy|copy2|copyfile|copymode|copystat|chown)\b",
+    r"\bpickle\.(load|loads)\b",
+    r"\bshelve\.open\b",
+    # File operations (specifically writing/appending)
+    r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
 ]
 
 

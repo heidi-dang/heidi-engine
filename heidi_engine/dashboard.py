@@ -1227,7 +1227,7 @@ def main():
         If no run specified, shows interactive selection
     """
     global run_id, current_view
-    
+
     parser = argparse.ArgumentParser(
         prog="heidi-engine dashboard",
         description="Heidi Engine Real-Time Dashboard"
