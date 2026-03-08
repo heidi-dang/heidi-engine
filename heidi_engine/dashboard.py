@@ -212,14 +212,12 @@ def get_config_path(run_id: str) -> Path:
 
 def load_state(run_id: str) -> Dict[str, Any]:
     """
-    Load current state from state.json.
+    Load current state using telemetry caching.
 
-    HOW IT WORKS:
-        - Reads state.json file
-        - Returns empty state if file doesn't exist or is invalid
-
-    TUNABLE:
-        - N/A
+    BOLT OPTIMIZATION:
+        Uses telemetry.get_state() which implements a 0.5s TTL cache.
+        This drastically reduces disk I/O and JSON parsing overhead
+        during high-frequency dashboard refreshes.
 
     ARGS:
         run_id: Run to read
@@ -227,16 +225,15 @@ def load_state(run_id: str) -> Dict[str, Any]:
     RETURNS:
         State dictionary
     """
-    state_file = get_state_path(run_id)
-
-    if not state_file.exists():
-        return get_default_state()
-
     try:
-        with open(state_file) as f:
-            return json.load(f)
-    except Exception as e:
-        console.print(f"[yellow]Warning: Failed to load state: {e}[/yellow]")
+        from heidi_engine import telemetry
+
+        state = telemetry.get_state(run_id)
+        # Ensure we don't return an error-state dictionary that would break dashboard UI
+        if not state or state.get("status") == "error":
+            return get_default_state()
+        return state
+    except Exception:
         return get_default_state()
 
 
