@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -214,33 +215,37 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     test_file = os.path.join(temp_dir, "test_code.py")
 
     # Wrap code to capture output safely
+    # SECURITY: Execute untrusted code with restricted globals to prevent access
+    # to the wrapper script's internal modules (like sys and io).
     wrapped_code = f"""
-import sys
-import io
+import sys as _sys
+import io as _io
 
 # Capture stdout and stderr
-stdout_capture = io.StringIO()
-stderr_capture = io.StringIO()
-original_stdout = sys.stdout
-original_stderr = sys.stderr
+_stdout_capture = _io.StringIO()
+_stderr_capture = _io.StringIO()
+_original_stdout = _sys.stdout
+_original_stderr = _sys.stderr
 
 try:
-    sys.stdout = stdout_capture
-    sys.stderr = stderr_capture
+    _sys.stdout = _stdout_capture
+    _sys.stderr = _stderr_capture
 
-    # Execute the user's code
-{code}
+    # Execute the user's code with restricted globals
+    # We provide a clean dictionary for globals and locals
+    _g = {{"__builtins__": __builtins__}}
+    exec({repr(code)}, _g, _g)
 
-    sys.stdout = original_stdout
-    sys.stderr = original_stderr
+    _sys.stdout = _original_stdout
+    _sys.stderr = _original_stderr
 
     print("__EXECUTION_SUCCESS__")
-    print(stdout_capture.getvalue())
+    print(_stdout_capture.getvalue())
 
 except Exception as e:
-    sys.stdout = original_stdout
-    sys.stderr = original_stderr
-    print(f"__EXECUTION_ERROR__: {{e}}", file=sys.stderr)
+    _sys.stdout = _original_stdout
+    _sys.stderr = _original_stderr
+    _sys.stderr.write(f"__EXECUTION_ERROR__: {{e}}\\n")
 """
 
     try:
@@ -257,13 +262,22 @@ except Exception as e:
 
     # Try to execute with timeout
     try:
+        # SECURITY: Use restricted environment to prevent leakage of sensitive
+        # environment variables (like API keys) to untrusted code.
+        safe_env = {
+            "PATH": os.environ.get("PATH", ""),
+            "PYTHONPATH": temp_dir,
+            "LANG": os.environ.get("LANG", "en_US.UTF-8"),
+            "PYTHONIOENCODING": "utf-8",
+        }
+
         result = subprocess.run(
             [sys.executable, test_file],
             capture_output=True,
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=safe_env,
         )
 
         stdout = result.stdout
