@@ -68,7 +68,7 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -311,6 +311,19 @@ class StateCache:
 
 _state_cache = StateCache()
 
+# BOLT OPTIMIZATION: Module-level caching for pricing and metadata
+_pricing_cache: Dict[str, Dict[str, float]] = {}
+_pricing_mtime: Dict[str, float] = {}  # Path -> mtime
+_pricing_lock = threading.Lock()
+
+_gpu_cache: Dict[str, Any] = {}
+_gpu_check_ts = 0.0
+_gpu_lock = threading.Lock()
+
+_event_ts_cache: Dict[str, str] = {}
+_event_ts_check_ts: Dict[str, float] = {}  # run_id -> ts
+_event_lock = threading.Lock()
+
 
 # =============================================================================
 # DEFAULT COUNTERS AND USAGE TRACKING
@@ -473,27 +486,47 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Falls back to DEFAULT_PRICING
         - Allows user to customize pricing per model
 
+    BOLT OPTIMIZATION:
+        Uses thread-safe caching based on mtime to avoid redundant disk IO
+        and JSON parsing when the config file hasn't changed.
+
     TUNABLE:
         - Create pricing.json to override default prices
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
-    pricing = DEFAULT_PRICING.copy()
+    global _pricing_cache, _pricing_mtime
 
     # Check for pricing config file
     pricing_file = (
         Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
     )
 
-    if pricing_file.exists():
+    if not pricing_file.exists():
+        return copy.deepcopy(DEFAULT_PRICING)
+
+    # Use absolute path for cache key to avoid collisions between different runs
+    file_key = str(pricing_file.absolute())
+
+    with _pricing_lock:
         try:
+            current_mtime = pricing_file.stat().st_mtime
+            if file_key in _pricing_cache and current_mtime == _pricing_mtime.get(file_key):
+                return copy.deepcopy(_pricing_cache[file_key])
+
+            # Cache miss or file changed
+            pricing = copy.deepcopy(DEFAULT_PRICING)
             with open(pricing_file) as f:
                 custom = json.load(f)
                 pricing.update(custom)
+
+            _pricing_cache[file_key] = pricing
+            _pricing_mtime[file_key] = current_mtime
+            return copy.deepcopy(pricing)
+
         except Exception as e:
             print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
-
-    return pricing
+            return copy.deepcopy(DEFAULT_PRICING)
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -666,8 +699,8 @@ def init_telemetry(
             "counters": get_default_counters(),
             "usage": get_default_usage(),
             "config": {},  # Don't store config in state for security
-            "started_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
         # Save initial state atomically
@@ -731,11 +764,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
@@ -830,7 +858,7 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
     temp_file = state_file.with_suffix(".tmp")
 
     # Update timestamp
-    state["updated_at"] = datetime.utcnow().isoformat()
+    state["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     # Write to temp file
     with open(temp_file, "w") as f:
@@ -1110,7 +1138,7 @@ def emit_event(
     # Build event with schema version
     event = {
         "event_version": EVENT_VERSION,
-        "ts": datetime.utcnow().isoformat(),
+        "ts": datetime.now(timezone.utc).isoformat(),
         "run_id": run_id,
         "round": round_num if round_num is not None else state.get("current_round", 0),
         "stage": stage or state.get("current_stage", "unknown"),
@@ -1366,16 +1394,6 @@ def stage_context(stage: str, round_num: int, message: str, **kwargs):
 # =============================================================================
 # HTTP STATUS SERVER (OPTIONAL)
 # =============================================================================
-
-# BOLT OPTIMIZATION: Module-level caching for expensive metadata
-_gpu_cache: Dict[str, Any] = {}
-_gpu_check_ts = 0.0
-_gpu_lock = threading.Lock()
-
-_event_ts_cache: Dict[str, str] = {}
-_event_ts_check_ts: Dict[str, float] = {}  # run_id -> ts
-_event_lock = threading.Lock()
-
 
 def get_gpu_summary() -> Dict[str, Any]:
     """
