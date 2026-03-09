@@ -147,20 +147,28 @@ ALLOWED_STATUS_FIELDS: Set[str] = {
 # =============================================================================
 
 # Patterns that indicate secrets - used to redact before writing events
+# Pre-compiled secret redaction patterns for performance.
+# BOLT OPTIMIZATION: Using pre-compiled regex with re.IGNORECASE for hot-path redaction.
 SECRET_PATTERNS = [
     # Generic API keys and tokens
-    (r"ghp_[a-zA-Z0-9]{36}", "[GITHUB_TOKEN]"),
-    (r"glpat-[a-zA-Z0-9\-]{20,}", "[GITLAB_TOKEN]"),
-    (r"sk-[a-zA-Z0-9]{20,}", "[OPENAI_KEY]"),
-    (r"Bearer\s+[\w\-]{20,}", "[BEARER_TOKEN]"),
-    (r'(?i)(api[_-]?key|apikey|secret[_-]?key)\s*[:=]\s*["\']?[\w\-]{20,}', "[API_KEY]"),
-    (r"AKIA[0-9A-Z]{16}", "[AWS_KEY]"),
-    (r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----", "[PRIVATE_KEY]"),
-    (r"-----BEGIN\s+OPENSSH\s+PRIVATE\s+KEY-----", "[SSH_KEY]"),
+    (re.compile(r"ghp_[a-zA-Z0-9]{36}", re.IGNORECASE), "[GITHUB_TOKEN]"),
+    (re.compile(r"glpat-[a-zA-Z0-9\-]{20,}", re.IGNORECASE), "[GITLAB_TOKEN]"),
+    (re.compile(r"sk-[a-zA-Z0-9]{20,}", re.IGNORECASE), "[OPENAI_KEY]"),
+    (re.compile(r"Bearer\s+[\w\-]{20,}", re.IGNORECASE), "[BEARER_TOKEN]"),
+    (
+        re.compile(r'(?i)(api[_-]?key|apikey|secret[_-]?key)\s*[:=]\s*["\']?[\w\-]{20,}', re.IGNORECASE),
+        "[API_KEY]",
+    ),
+    (re.compile(r"AKIA[0-9A-Z]{16}", re.IGNORECASE), "[AWS_KEY]"),
+    (re.compile(r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----", re.IGNORECASE), "[PRIVATE_KEY]"),
+    (re.compile(r"-----BEGIN\s+OPENSSH\s+PRIVATE\s+KEY-----", re.IGNORECASE), "[SSH_KEY]"),
     # Environment variable patterns
-    (r"\$?(OPENAI_API_KEY|GITHUB_TOKEN|GITLAB_TOKEN|AWS_SECRET)[=]\S+", "[ENV_SECRET]"),
+    (
+        re.compile(r"\$?(OPENAI_API_KEY|GITHUB_TOKEN|GITLAB_TOKEN|AWS_SECRET)[=]\S+", re.IGNORECASE),
+        "[ENV_SECRET]",
+    ),
     # Generic token patterns
-    (r'token[_-]?(id|key)?\s*[:=]\s*["\']?[\w\-]{20,}', "[TOKEN]"),
+    (re.compile(r'token[_-]?(id|key)?\s*[:=]\s*["\']?[\w\-]{20,}', re.IGNORECASE), "[TOKEN]"),
 ]
 
 # Keywords that indicate secrets - used for fast-path redaction check.
@@ -208,7 +216,7 @@ def redact_secrets(text: str) -> str:
 
     # Redact secrets
     for pattern, replacement in SECRET_PATTERNS:
-        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+        text = pattern.sub(replacement, text)
 
     return text
 
@@ -463,6 +471,11 @@ DEFAULT_PRICING = {
     "claude-3-haiku": {"input": 0.25, "output": 1.25},
 }
 
+# Pricing cache to avoid redundant disk I/O.
+_pricing_cache: Dict[str, Any] = {}
+_pricing_mtime = 0.0
+_pricing_lock = threading.Lock()
+
 
 def load_pricing_config() -> Dict[str, Dict[str, float]]:
     """
@@ -478,22 +491,34 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
-    pricing = DEFAULT_PRICING.copy()
-
     # Check for pricing config file
     pricing_file = (
         Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
     )
 
-    if pricing_file.exists():
-        try:
-            with open(pricing_file) as f:
-                custom = json.load(f)
-                pricing.update(custom)
-        except Exception as e:
-            print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+    # BOLT OPTIMIZATION: Thread-safe caching with mtime validation to avoid disk I/O.
+    # Yields significant speedup for high-frequency event emission.
+    global _pricing_cache, _pricing_mtime
+    with _pricing_lock:
+        if pricing_file.exists():
+            try:
+                mtime = pricing_file.stat().st_mtime
+                if _pricing_cache and mtime == _pricing_mtime:
+                    return copy.deepcopy(_pricing_cache)
 
-    return pricing
+                pricing = DEFAULT_PRICING.copy()
+                with open(pricing_file) as f:
+                    custom = json.load(f)
+                    pricing.update(custom)
+
+                _pricing_cache = pricing
+                _pricing_mtime = mtime
+                return copy.deepcopy(pricing)
+            except Exception as e:
+                print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+
+        # Fallback to defaults (no file or error)
+        return copy.deepcopy(DEFAULT_PRICING)
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -732,11 +757,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "usage": get_default_usage(),
         }
 
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
-
     try:
         with open(state_file) as f:
             state = json.load(f)
@@ -833,8 +853,9 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
     state["updated_at"] = datetime.utcnow().isoformat()
 
     # Write to temp file
+    # BOLT OPTIMIZATION: Remove indent to reduce file size and speed up serialization.
     with open(temp_file, "w") as f:
-        json.dump(state, f, indent=2)
+        json.dump(state, f)
 
     # Atomic rename
     os.replace(temp_file, state_file)
