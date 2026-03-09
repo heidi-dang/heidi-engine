@@ -70,6 +70,8 @@ from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
+from heidi_engine import telemetry
+
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
 # =============================================================================
@@ -134,12 +136,12 @@ data_cache: deque = deque(maxlen=data_tail_lines)
 
 def get_run_dir(run_id: str) -> Path:
     """Get the run directory path."""
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+    return telemetry.get_run_dir(run_id)
 
 
 def get_events_path(run_id: str) -> Path:
     """Get the event log file path."""
-    return get_run_dir(run_id) / "events.jsonl"
+    return telemetry.get_events_path(run_id)
 
 
 def get_latest_data_file(run_id: str, data_dir: Path, clean: bool = True) -> Optional[Path]:
@@ -197,12 +199,12 @@ def load_new_data_lines(run_id: str) -> List[str]:
 
 def get_state_path(run_id: str) -> Path:
     """Get the state file path."""
-    return get_run_dir(run_id) / "state.json"
+    return telemetry.get_state_path(run_id)
 
 
 def get_config_path(run_id: str) -> Path:
     """Get the config file path."""
-    return get_run_dir(run_id) / "config.json"
+    return telemetry.get_config_path(run_id)
 
 
 # =============================================================================
