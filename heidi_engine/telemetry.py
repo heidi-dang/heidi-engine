@@ -56,8 +56,8 @@ CONFIG VALIDATION:
 """
 
 import atexit
-import copy
 import base64
+import copy
 import json
 import os
 import re
@@ -70,7 +70,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
@@ -311,6 +311,11 @@ class StateCache:
 
 _state_cache = StateCache()
 
+# BOLT OPTIMIZATION: Thread-safe caching for pricing configuration
+_pricing_cache: Dict[str, Dict[str, Dict[str, float]]] = {}
+_pricing_mtimes: Dict[str, float] = {}
+_pricing_lock = threading.Lock()
+
 
 # =============================================================================
 # DEFAULT COUNTERS AND USAGE TRACKING
@@ -473,27 +478,52 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Falls back to DEFAULT_PRICING
         - Allows user to customize pricing per model
 
+    BOLT OPTIMIZATION:
+        Uses thread-safe caching with mtime validation to avoid redundant
+        disk I/O and JSON parsing on every usage update.
+
     TUNABLE:
         - Create pricing.json to override default prices
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
-    pricing = DEFAULT_PRICING.copy()
-
     # Check for pricing config file
     pricing_file = (
         Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
     )
+    file_path_str = str(pricing_file.absolute())
 
-    if pricing_file.exists():
+    with _pricing_lock:
         try:
-            with open(pricing_file) as f:
-                custom = json.load(f)
-                pricing.update(custom)
+            if pricing_file.exists():
+                mtime = pricing_file.stat().st_mtime
+                if (
+                    file_path_str in _pricing_cache
+                    and _pricing_mtimes.get(file_path_str) == mtime
+                ):
+                    return copy.deepcopy(_pricing_cache[file_path_str])
+
+                # Cache miss or file changed
+                pricing = DEFAULT_PRICING.copy()
+                with open(pricing_file) as f:
+                    custom = json.load(f)
+                    pricing.update(custom)
+
+                _pricing_cache[file_path_str] = pricing
+                _pricing_mtimes[file_path_str] = mtime
+                return copy.deepcopy(pricing)
         except Exception as e:
             print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
 
-    return pricing
+        # Fallback to defaults (cached if possible)
+        if "default" in _pricing_cache and not pricing_file.exists():
+            return copy.deepcopy(_pricing_cache["default"])
+
+        pricing = DEFAULT_PRICING.copy()
+        if not pricing_file.exists():
+            _pricing_cache["default"] = pricing
+
+        return copy.deepcopy(pricing)
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -732,11 +762,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "usage": get_default_usage(),
         }
 
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
-
     try:
         with open(state_file) as f:
             state = json.load(f)
@@ -833,8 +858,9 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
     state["updated_at"] = datetime.utcnow().isoformat()
 
     # Write to temp file
+    # BOLT OPTIMIZATION: Remove indent=2 to reduce file size and serialization overhead
     with open(temp_file, "w") as f:
-        json.dump(state, f, indent=2)
+        json.dump(state, f)
 
     # Atomic rename
     os.replace(temp_file, state_file)
