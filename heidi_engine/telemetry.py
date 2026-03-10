@@ -68,7 +68,7 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -147,20 +147,21 @@ ALLOWED_STATUS_FIELDS: Set[str] = {
 # =============================================================================
 
 # Patterns that indicate secrets - used to redact before writing events
+# BOLT OPTIMIZATION: Pre-compile regex patterns for faster redaction scanning.
 SECRET_PATTERNS = [
     # Generic API keys and tokens
-    (r"ghp_[a-zA-Z0-9]{36}", "[GITHUB_TOKEN]"),
-    (r"glpat-[a-zA-Z0-9\-]{20,}", "[GITLAB_TOKEN]"),
-    (r"sk-[a-zA-Z0-9]{20,}", "[OPENAI_KEY]"),
-    (r"Bearer\s+[\w\-]{20,}", "[BEARER_TOKEN]"),
-    (r'(?i)(api[_-]?key|apikey|secret[_-]?key)\s*[:=]\s*["\']?[\w\-]{20,}', "[API_KEY]"),
-    (r"AKIA[0-9A-Z]{16}", "[AWS_KEY]"),
-    (r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----", "[PRIVATE_KEY]"),
-    (r"-----BEGIN\s+OPENSSH\s+PRIVATE\s+KEY-----", "[SSH_KEY]"),
+    (re.compile(r"ghp_[a-zA-Z0-9]{36}", re.IGNORECASE), "[GITHUB_TOKEN]"),
+    (re.compile(r"glpat-[a-zA-Z0-9\-]{20,}", re.IGNORECASE), "[GITLAB_TOKEN]"),
+    (re.compile(r"sk-[a-zA-Z0-9]{20,}", re.IGNORECASE), "[OPENAI_KEY]"),
+    (re.compile(r"Bearer\s+[\w\-]{20,}", re.IGNORECASE), "[BEARER_TOKEN]"),
+    (re.compile(r"(api[_-]?key|apikey|secret[_-]?key)\s*[:=]\s*['\"]?[\w\-]{20,}", re.IGNORECASE), "[API_KEY]"),
+    (re.compile(r"AKIA[0-9A-Z]{16}", re.IGNORECASE), "[AWS_KEY]"),
+    (re.compile(r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----", re.IGNORECASE), "[PRIVATE_KEY]"),
+    (re.compile(r"-----BEGIN\s+OPENSSH\s+PRIVATE\s+KEY-----", re.IGNORECASE), "[SSH_KEY]"),
     # Environment variable patterns
-    (r"\$?(OPENAI_API_KEY|GITHUB_TOKEN|GITLAB_TOKEN|AWS_SECRET)[=]\S+", "[ENV_SECRET]"),
+    (re.compile(r"\$?(OPENAI_API_KEY|GITHUB_TOKEN|GITLAB_TOKEN|AWS_SECRET)[=]\S+", re.IGNORECASE), "[ENV_SECRET]"),
     # Generic token patterns
-    (r'token[_-]?(id|key)?\s*[:=]\s*["\']?[\w\-]{20,}', "[TOKEN]"),
+    (re.compile(r'token[_-]?(id|key)?\s*[:=]\s*["\']?[\w\-]{20,}', re.IGNORECASE), "[TOKEN]"),
 ]
 
 # Keywords that indicate secrets - used for fast-path redaction check.
@@ -207,8 +208,9 @@ def redact_secrets(text: str) -> str:
         return text
 
     # Redact secrets
+    # BOLT OPTIMIZATION: Use pre-compiled patterns.
     for pattern, replacement in SECRET_PATTERNS:
-        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+        text = pattern.sub(replacement, text)
 
     return text
 
@@ -666,8 +668,8 @@ def init_telemetry(
             "counters": get_default_counters(),
             "usage": get_default_usage(),
             "config": {},  # Don't store config in state for security
-            "started_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
         # Save initial state atomically
@@ -732,9 +734,9 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "usage": get_default_usage(),
         }
 
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
+    # BOLT OPTIMIZATION: Check thread-safe state cache (fallback read)
+    cached = _state_cache.get(resolved_run_id)
+    if cached is not None:
         return cached
 
     try:
@@ -830,17 +832,17 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
     temp_file = state_file.with_suffix(".tmp")
 
     # Update timestamp
-    state["updated_at"] = datetime.utcnow().isoformat()
+    state["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     # Write to temp file
     with open(temp_file, "w") as f:
-        json.dump(state, f, indent=2)
+        json.dump(state, f)
 
     # Atomic rename
     os.replace(temp_file, state_file)
 
-    # BOLT OPTIMIZATION: Invalidate cache after write
-    _state_cache.invalidate(resolved_run_id)
+    # BOLT OPTIMIZATION: Write-through update to cache after write
+    _state_cache.set(resolved_run_id, state)
 
 
 def update_counters(delta: Dict[str, Any], run_id: Optional[str] = None) -> None:
@@ -1110,7 +1112,7 @@ def emit_event(
     # Build event with schema version
     event = {
         "event_version": EVENT_VERSION,
-        "ts": datetime.utcnow().isoformat(),
+        "ts": datetime.now(timezone.utc).isoformat(),
         "run_id": run_id,
         "round": round_num if round_num is not None else state.get("current_round", 0),
         "stage": stage or state.get("current_stage", "unknown"),
