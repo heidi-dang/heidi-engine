@@ -311,6 +311,11 @@ class StateCache:
 
 _state_cache = StateCache()
 
+# BOLT OPTIMIZATION: Pricing config cache
+_pricing_cache: Dict[str, Any] = {}
+_pricing_mtime: Dict[str, float] = {}
+_pricing_lock = threading.Lock()
+
 
 # =============================================================================
 # DEFAULT COUNTERS AND USAGE TRACKING
@@ -468,32 +473,47 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
     """
     Load pricing configuration from file or use defaults.
 
-    HOW IT WORKS:
-        - First checks for pricing.json in run directory
-        - Falls back to DEFAULT_PRICING
-        - Allows user to customize pricing per model
-
-    TUNABLE:
-        - Create pricing.json to override default prices
-        - Format: {"model_name": {"input": 0.5, "output": 1.5}}
-        - Prices are per 1M tokens
+    BOLT OPTIMIZATION:
+        Thread-safe caching with mtime-based validation to avoid
+        redundant disk I/O and JSON parsing.
     """
-    pricing = DEFAULT_PRICING.copy()
+    global _pricing_cache, _pricing_mtime
 
     # Check for pricing config file
     pricing_file = (
         Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
     )
 
-    if pricing_file.exists():
-        try:
-            with open(pricing_file) as f:
-                custom = json.load(f)
-                pricing.update(custom)
-        except Exception as e:
-            print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+    # Use absolute path as cache key
+    try:
+        abs_path = str(pricing_file.absolute())
+    except Exception:
+        abs_path = str(pricing_file)
 
-    return pricing
+    with _pricing_lock:
+        if pricing_file.exists():
+            try:
+                mtime = pricing_file.stat().st_mtime
+                if abs_path in _pricing_cache and _pricing_mtime.get(abs_path) == mtime:
+                    return copy.deepcopy(_pricing_cache[abs_path])
+
+                # Cache miss or file updated
+                pricing = DEFAULT_PRICING.copy()
+                with open(pricing_file) as f:
+                    custom = json.load(f)
+                    pricing.update(custom)
+
+                _pricing_cache[abs_path] = pricing
+                _pricing_mtime[abs_path] = mtime
+                return copy.deepcopy(pricing)
+            except Exception as e:
+                print(
+                    f"[WARN] Failed to load pricing config from {pricing_file}: {e}", file=sys.stderr
+                )
+                return copy.deepcopy(DEFAULT_PRICING)
+        else:
+            # If no custom config, return defaults
+            return copy.deepcopy(DEFAULT_PRICING)
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -732,11 +752,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "usage": get_default_usage(),
         }
 
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
-
     try:
         with open(state_file) as f:
             state = json.load(f)
@@ -839,8 +854,8 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
     # Atomic rename
     os.replace(temp_file, state_file)
 
-    # BOLT OPTIMIZATION: Invalidate cache after write
-    _state_cache.invalidate(resolved_run_id)
+    # BOLT OPTIMIZATION: Write-through update to cache
+    _state_cache.set(resolved_run_id, state)
 
 
 def update_counters(delta: Dict[str, Any], run_id: Optional[str] = None) -> None:
