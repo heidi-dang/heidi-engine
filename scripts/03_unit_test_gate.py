@@ -86,6 +86,10 @@ DANGEROUS_PATTERNS = [
     r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
 ]
 
+# BOLT OPTIMIZATION: Pre-compile dangerous patterns for faster detection.
+# Reduces overhead during high-volume sample testing.
+_COMPILED_DANGEROUS_PATTERNS = [(re.compile(p, re.IGNORECASE), p) for p in DANGEROUS_PATTERNS]
+
 
 def parse_args() -> argparse.Namespace:
     """
@@ -185,9 +189,10 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     """
     found = []
 
-    for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, code, re.IGNORECASE):
-            found.append(pattern)
+    # BOLT OPTIMIZATION: Use pre-compiled patterns
+    for pattern, raw_pattern in _COMPILED_DANGEROUS_PATTERNS:
+        if pattern.search(code):
+            found.append(raw_pattern)
 
     return len(found) > 0, found
 
