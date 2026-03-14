@@ -732,11 +732,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "usage": get_default_usage(),
         }
 
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
-
     try:
         with open(state_file) as f:
             state = json.load(f)
@@ -834,13 +829,14 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
 
     # Write to temp file
     with open(temp_file, "w") as f:
-        json.dump(state, f, indent=2)
+        # BOLT OPTIMIZATION: Remove indent=2 for faster serialization
+        json.dump(state, f)
 
     # Atomic rename
     os.replace(temp_file, state_file)
 
-    # BOLT OPTIMIZATION: Invalidate cache after write
-    _state_cache.invalidate(resolved_run_id)
+    # BOLT OPTIMIZATION: Write-through cache update
+    _state_cache.set(resolved_run_id, state)
 
 
 def update_counters(delta: Dict[str, Any], run_id: Optional[str] = None) -> None:
