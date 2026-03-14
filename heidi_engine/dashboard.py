@@ -60,6 +60,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from rich import box
+from heidi_engine import telemetry
 
 # Rich imports for TUI
 from rich.console import Console
@@ -89,7 +90,7 @@ MAX_EVENTS = int(os.environ.get("DASHBOARD_MAX_EVENTS", "20"))
 
 # Base directory for heidi_engine outputs
 # TUNABLE: Change if heidi_engine is in different location
-AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi-engine"))
+AUTOTRAIN_DIR = telemetry.AUTOTRAIN_DIR
 
 # Console width (auto-detected if not set)
 CONSOLE_WIDTH = int(os.environ.get("CONSOLE_WIDTH", "0"))
@@ -134,12 +135,12 @@ data_cache: deque = deque(maxlen=data_tail_lines)
 
 def get_run_dir(run_id: str) -> Path:
     """Get the run directory path."""
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+    return telemetry.get_run_dir(run_id)
 
 
 def get_events_path(run_id: str) -> Path:
     """Get the event log file path."""
-    return get_run_dir(run_id) / "events.jsonl"
+    return telemetry.get_events_path(run_id)
 
 
 def get_latest_data_file(run_id: str, data_dir: Path, clean: bool = True) -> Optional[Path]:
@@ -197,12 +198,12 @@ def load_new_data_lines(run_id: str) -> List[str]:
 
 def get_state_path(run_id: str) -> Path:
     """Get the state file path."""
-    return get_run_dir(run_id) / "state.json"
+    return telemetry.get_state_path(run_id)
 
 
 def get_config_path(run_id: str) -> Path:
     """Get the config file path."""
-    return get_run_dir(run_id) / "config.json"
+    return telemetry.get_config_path(run_id)
 
 
 # =============================================================================
@@ -212,67 +213,10 @@ def get_config_path(run_id: str) -> Path:
 
 def load_state(run_id: str) -> Dict[str, Any]:
     """
-    Load current state from state.json.
-
-    HOW IT WORKS:
-        - Reads state.json file
-        - Returns empty state if file doesn't exist or is invalid
-
-    TUNABLE:
-        - N/A
-
-    ARGS:
-        run_id: Run to read
-
-    RETURNS:
-        State dictionary
+    Load current state from state.json using telemetry cache.
     """
-    state_file = get_state_path(run_id)
-
-    if not state_file.exists():
-        return get_default_state()
-
-    try:
-        with open(state_file) as f:
-            return json.load(f)
-    except Exception as e:
-        console.print(f"[yellow]Warning: Failed to load state: {e}[/yellow]")
-        return get_default_state()
-
-
-def get_default_state() -> Dict[str, Any]:
-    """Get default empty state."""
-    return {
-        "run_id": run_id or "unknown",
-        "status": "unknown",
-        "current_round": 0,
-        "current_stage": "initializing",
-        "stop_requested": False,
-        "pause_requested": False,
-        "counters": {
-            "teacher_generated": 0,
-            "teacher_failed": 0,
-            "raw_written": 0,
-            "validated_ok": 0,
-            "rejected_schema": 0,
-            "rejected_secret": 0,
-            "rejected_dedupe": 0,
-            "test_pass": 0,
-            "test_fail": 0,
-            "train_step": 0,
-            "train_loss": 0.0,
-            "eval_json_parse_rate": 0.0,
-            "eval_format_rate": 0.0,
-        },
-        "usage": {
-            "requests_sent": 0,
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "rate_limits_hit": 0,
-            "retries": 0,
-            "estimated_cost_usd": 0.0,
-        },
-    }
+    # BOLT OPTIMIZATION: Use telemetry.get_state() for cached access
+    return telemetry.get_state(run_id)
 
 
 def load_config(run_id: str) -> Dict[str, Any]:
@@ -354,52 +298,25 @@ def format_time(ts: str) -> str:
 
 def poll_gpu_info() -> Dict[str, Any]:
     """
-    Poll GPU information using nvidia-smi.
+    Poll GPU information using telemetry cache.
 
-    HOW IT WORKS:
-        - Runs nvidia-smi command
-        - Parses output for VRAM usage
-        - Caches result for display
-
-    TUNABLE:
-        - Adjust polling frequency via GPU_POLL_INTERVAL
-        - Add more metrics as needed
-
-    RETURNS:
-        Dictionary with GPU info (empty if no GPU)
+    BOLT OPTIMIZATION: Use telemetry.get_gpu_summary() for cached access
     """
-    try:
-        import subprocess
+    ginfo = telemetry.get_gpu_summary()
+    if not ginfo.get("available", True):
+        return {"available": False}
 
-        result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=memory.used,memory.total,utilization.gpu",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
+    used = ginfo.get("vram_used_mb", 0)
+    total = ginfo.get("vram_total_mb", 0)
+    util = ginfo.get("util_pct", 0)
 
-        if result.returncode == 0:
-            parts = result.stdout.strip().split(",")
-            if len(parts) >= 2:
-                used = int(parts[0].strip())
-                total = int(parts[1].strip())
-                util = int(parts[2].strip()) if len(parts) > 2 else 0
-
-                return {
-                    "available": True,
-                    "memory_used_mb": used,
-                    "memory_total_mb": total,
-                    "memory_used_pct": (used / total * 100) if total > 0 else 0,
-                    "utilization_pct": util,
-                }
-    except Exception:
-        pass
-
-    return {"available": False}
+    return {
+        "available": True,
+        "memory_used_mb": used,
+        "memory_total_mb": total,
+        "memory_used_pct": (used / total * 100) if total > 0 else 0,
+        "utilization_pct": util,
+    }
 
 
 def start_gpu_poller():
