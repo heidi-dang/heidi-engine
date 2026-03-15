@@ -199,13 +199,14 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     HOW IT WORKS:
         1. Write code to temporary file
         2. Try to compile (syntax check)
-        3. Try to execute with timeout
+        3. Try to execute with timeout in a subprocess
         4. Return (passed, stdout, stderr)
 
-    SAFETY:
-        - Runs in temp directory
-        - Has timeout protection
-        - Does NOT execute system commands
+    SECURITY:
+        - Environment variable whitelist (prevents API key leakage)
+        - Restricted globals in execution wrapper
+        - Subprocess isolation
+        - Timeout protection
 
     TUNABLE:
         - execution_timeout: Max time code can run
@@ -213,34 +214,35 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     # Write code to temp file
     test_file = os.path.join(temp_dir, "test_code.py")
 
-    # Wrap code to capture output safely
+    # Wrap code to capture output safely and restrict globals
     wrapped_code = f"""
-import sys
-import io
+import sys as _sys
+import io as _io
 
-# Capture stdout and stderr
-stdout_capture = io.StringIO()
-stderr_capture = io.StringIO()
-original_stdout = sys.stdout
-original_stderr = sys.stderr
+_stdout_capture = _io.StringIO()
+_stderr_capture = _io.StringIO()
+_original_stdout = _sys.stdout
+_original_stderr = _sys.stderr
+
+# SECURITY: Restricted globals for execution
+_g = {{"__builtins__": __builtins__}}
 
 try:
-    sys.stdout = stdout_capture
-    sys.stderr = stderr_capture
+    _sys.stdout = _stdout_capture
+    _sys.stderr = _stderr_capture
 
-    # Execute the user's code
-{code}
+    # Execute user code in restricted environment
+    exec({repr(code)}, _g)
 
-    sys.stdout = original_stdout
-    sys.stderr = original_stderr
-
-    print("__EXECUTION_SUCCESS__")
-    print(stdout_capture.getvalue())
+    _sys.stdout = _original_stdout
+    _sys.stderr = _original_stderr
+    _sys.stdout.write("__EXECUTION_SUCCESS__\\n")
+    _sys.stdout.write(_stdout_capture.getvalue())
 
 except Exception as e:
-    sys.stdout = original_stdout
-    sys.stderr = original_stderr
-    print(f"__EXECUTION_ERROR__: {{e}}", file=sys.stderr)
+    _sys.stdout = _original_stdout
+    _sys.stderr = _original_stderr
+    _sys.stderr.write(f"__EXECUTION_ERROR__: {{e}}\\n")
 """
 
     try:
@@ -255,6 +257,11 @@ except Exception as e:
     except SyntaxError as e:
         return False, "", f"Syntax error: {e}"
 
+    # SECURITY: Whitelist environment variables to prevent leakage of secrets like OPENAI_API_KEY
+    safe_env_keys = ["PATH", "PYTHONPATH", "LANG", "PYTHONIOENCODING"]
+    safe_env = {k: os.environ[k] for k in safe_env_keys if k in os.environ}
+    safe_env["PYTHONPATH"] = temp_dir
+
     # Try to execute with timeout
     try:
         result = subprocess.run(
@@ -263,7 +270,7 @@ except Exception as e:
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=safe_env,
         )
 
         stdout = result.stdout
@@ -367,7 +374,9 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    dir_name = os.path.dirname(path)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
