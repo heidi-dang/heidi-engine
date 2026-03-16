@@ -163,6 +163,11 @@ SECRET_PATTERNS = [
     (r'token[_-]?(id|key)?\s*[:=]\s*["\']?[\w\-]{20,}', "[TOKEN]"),
 ]
 
+# BOLT OPTIMIZATION: Pre-compile secret patterns to avoid repeated compilation.
+_COMPILED_SECRET_PATTERNS = [
+    (re.compile(p, re.IGNORECASE), r) for p, r in SECRET_PATTERNS
+]
+
 # Keywords that indicate secrets - used for fast-path redaction check.
 # NOTE: Must be kept in sync with SECRET_PATTERNS above.
 _SECRET_INDICATORS = re.compile(
@@ -207,8 +212,9 @@ def redact_secrets(text: str) -> str:
         return text
 
     # Redact secrets
-    for pattern, replacement in SECRET_PATTERNS:
-        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    # BOLT OPTIMIZATION: Use pre-compiled patterns for performance.
+    for pattern, replacement in _COMPILED_SECRET_PATTERNS:
+        text = pattern.sub(replacement, text)
 
     return text
 
@@ -731,11 +737,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
