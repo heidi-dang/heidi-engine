@@ -86,6 +86,10 @@ DANGEROUS_PATTERNS = [
     r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
 ]
 
+# BOLT OPTIMIZATION: Pre-compile patterns for faster extraction and check
+_COMPILED_CODE_BLOCK_PATTERNS = [re.compile(p, re.DOTALL) for p in CODE_BLOCK_PATTERNS]
+_COMPILED_DANGEROUS_PATTERNS = [(re.compile(p, re.IGNORECASE), p) for p in DANGEROUS_PATTERNS]
+
 
 def parse_args() -> argparse.Namespace:
     """
@@ -149,8 +153,8 @@ def extract_python_code(text: str) -> List[str]:
     """
     code_blocks = []
 
-    for pattern in CODE_BLOCK_PATTERNS:
-        matches = re.findall(pattern, text, re.DOTALL)
+    for pattern in _COMPILED_CODE_BLOCK_PATTERNS:
+        matches = pattern.findall(text)
         code_blocks.extend(matches)
 
     # Filter: keep only code that looks like Python
@@ -185,9 +189,9 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     """
     found = []
 
-    for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, code, re.IGNORECASE):
-            found.append(pattern)
+    for pattern, raw_pattern in _COMPILED_DANGEROUS_PATTERNS:
+        if pattern.search(code):
+            found.append(raw_pattern)
 
     return len(found) > 0, found
 
