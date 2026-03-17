@@ -63,6 +63,9 @@ CODE_BLOCK_PATTERNS = [
     r"`([^`\n]+)`",
 ]
 
+# BOLT OPTIMIZATION: Pre-compiled regex patterns for code extraction performance.
+_COMPILED_CODE_BLOCK_PATTERNS = [re.compile(p, re.DOTALL) for p in CODE_BLOCK_PATTERNS]
+
 # Patterns that indicate code should NOT be executed
 # TUNABLE: Add more dangerous patterns to block
 DANGEROUS_PATTERNS = [
@@ -85,6 +88,14 @@ DANGEROUS_PATTERNS = [
     # File operations (specifically writing/appending)
     r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
 ]
+
+# BOLT OPTIMIZATION: Pre-compiled regex patterns for dangerous code detection performance.
+_COMPILED_DANGEROUS_PATTERNS = [
+    (re.compile(p, re.IGNORECASE), p) for p in DANGEROUS_PATTERNS
+]
+
+# BOLT OPTIMIZATION: Combined pattern for fast-path skip.
+_COMBINED_DANGEROUS_PATTERN = re.compile("|".join(DANGEROUS_PATTERNS), re.IGNORECASE)
 
 
 def parse_args() -> argparse.Namespace:
@@ -143,14 +154,17 @@ def extract_python_code(text: str) -> List[str]:
         - Searches for markdown code blocks
         - Returns list of extracted code snippets
 
+    BOLT OPTIMIZATION:
+        Uses pre-compiled regex patterns for performance.
+
     TUNABLE:
         - Add more patterns for different code formats
         - Filter out non-Python code blocks
     """
     code_blocks = []
 
-    for pattern in CODE_BLOCK_PATTERNS:
-        matches = re.findall(pattern, text, re.DOTALL)
+    for compiled_pattern in _COMPILED_CODE_BLOCK_PATTERNS:
+        matches = compiled_pattern.findall(text)
         code_blocks.extend(matches)
 
     # Filter: keep only code that looks like Python
@@ -180,14 +194,21 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
         - Matches against list of dangerous patterns
         - Returns (is_dangerous, list_of_matches)
 
+    BOLT OPTIMIZATION:
+        Uses fast-path skip with combined regex and pre-compiled patterns.
+
     TUNABLE:
         - Adjust DANGEROUS_PATTERNS for your security needs
     """
+    # BOLT OPTIMIZATION: Fast-path skip.
+    if not _COMBINED_DANGEROUS_PATTERN.search(code):
+        return False, []
+
     found = []
 
-    for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, code, re.IGNORECASE):
-            found.append(pattern)
+    for compiled_pattern, raw_pattern in _COMPILED_DANGEROUS_PATTERNS:
+        if compiled_pattern.search(code):
+            found.append(raw_pattern)
 
     return len(found) > 0, found
 
