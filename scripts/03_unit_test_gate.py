@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -213,6 +214,9 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     # Write code to temp file
     test_file = os.path.join(temp_dir, "test_code.py")
 
+    # SECURITY/STABILITY: Indent the user code so it is properly nested in the try block
+    indented_code = textwrap.indent(code, "    ")
+
     # Wrap code to capture output safely
     wrapped_code = f"""
 import sys
@@ -229,7 +233,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
