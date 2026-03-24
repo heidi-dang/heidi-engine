@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -206,12 +207,16 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
         - Runs in temp directory
         - Has timeout protection
         - Does NOT execute system commands
+        - Uses isolated environment (env)
 
     TUNABLE:
         - execution_timeout: Max time code can run
     """
     # Write code to temp file
     test_file = os.path.join(temp_dir, "test_code.py")
+
+    # Indent code for try-except block
+    indented_code = textwrap.indent(code, "    ")
 
     # Wrap code to capture output safely
     wrapped_code = f"""
@@ -229,7 +234,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -257,13 +262,23 @@ except Exception as e:
 
     # Try to execute with timeout
     try:
+        # SECURITY: Create a minimal environment to avoid leaking secrets
+        # like OPENAI_API_KEY, TELEMETRY_PASS, etc.
+        safe_env = {
+            "PATH": os.environ.get("PATH", ""),
+            "PYTHONPATH": temp_dir,
+            "HOME": temp_dir,
+            "LANG": os.environ.get("LANG", "en_US.UTF-8"),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+
         result = subprocess.run(
             [sys.executable, test_file],
             capture_output=True,
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=safe_env,
         )
 
         stdout = result.stdout
