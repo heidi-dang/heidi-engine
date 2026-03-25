@@ -89,6 +89,13 @@ SECRET_PATTERNS = [
 # TUNABLE: Add/remove fields based on your data structure
 SECRET_CHECK_FIELDS = ["instruction", "input", "output", "response", "completion"]
 
+# BOLT OPTIMIZATION: Pre-compile regex patterns and indicators for fast-path checks.
+# _SECRET_INDICATORS provides a fast-path to skip clean samples using a combined regex.
+# We strip (?i) flags and compile with re.IGNORECASE to avoid "global flags" errors.
+_STRIPPED_PATTERNS = [p.replace("(?i)", "") for p, _ in SECRET_PATTERNS]
+_COMPILED_SECRET_PATTERNS = [re.compile(p, re.IGNORECASE) for p in _STRIPPED_PATTERNS]
+_SECRET_INDICATORS = re.compile("|".join(_STRIPPED_PATTERNS), re.IGNORECASE)
+
 
 def parse_args() -> argparse.Namespace:
     """
@@ -192,6 +199,11 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
         - Checks all specified fields against secret patterns
         - FAIL CLOSED: Returns True (has secrets) if ANY pattern matches
 
+    BOLT OPTIMIZATION:
+        - Uses _SECRET_INDICATORS fast-path to skip clean samples without
+          sacrificing coverage (automatically derived from SECRET_PATTERNS).
+        - Uses pre-compiled _COMPILED_SECRET_PATTERNS for faster scanning.
+
     TUNABLE:
         - Add more SECRET_PATTERNS for your use case
         - Adjust SECRET_CHECK_FIELDS to check more/less fields
@@ -200,16 +212,25 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
         - This is a heuristic - may have false positives/negatives
         - For production, consider using dedicated secret scanning tools
     """
+    # BOLT OPTIMIZATION: Check only fields that exist.
+    # Convert all relevant fields once to strings to avoid redundant str() calls.
+    fields_to_check = {f: str(sample[f]) for f in SECRET_CHECK_FIELDS if f in sample}
+
+    # BOLT OPTIMIZATION: Early exit if no indicators found in any relevant field.
+    # _SECRET_INDICATORS is a combined regex of all secret patterns.
+    if not any(_SECRET_INDICATORS.search(text) for text in fields_to_check.values()):
+        return False, []
+
     found_secrets = []
 
-    for field in SECRET_CHECK_FIELDS:
-        if field not in sample:
+    for field, text in fields_to_check.items():
+        # BOLT OPTIMIZATION: Skip field if it doesn't match the combined indicator
+        if not _SECRET_INDICATORS.search(text):
             continue
 
-        text = str(sample[field])
-
-        for pattern, secret_type in SECRET_PATTERNS:
-            if re.search(pattern, text):
+        for i, pattern in enumerate(_COMPILED_SECRET_PATTERNS):
+            if pattern.search(text):
+                secret_type = SECRET_PATTERNS[i][1]
                 found_secrets.append(f"{field}:{secret_type}")
 
     return len(found_secrets) > 0, found_secrets
@@ -273,10 +294,13 @@ def fuzzy_hash(sample: Dict[str, Any], n: int = 5) -> str:
     TUNABLE:
         - Adjust n for sensitivity (lower = more sensitive)
         - n=5 is a good balance for code data
+
+    BOLT OPTIMIZATION:
+        - Uses "".join(text.split()) for faster whitespace removal compared to regex.
     """
     text = (sample.get("instruction", "") + sample.get("output", "")).lower()
-    # Remove whitespace for more robust matching
-    text = re.sub(r"\s+", "", text)
+    # BOLT OPTIMIZATION: Faster whitespace removal
+    text = "".join(text.split())
 
     if len(text) < n:
         return text
