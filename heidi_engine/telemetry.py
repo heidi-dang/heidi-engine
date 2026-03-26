@@ -463,6 +463,11 @@ DEFAULT_PRICING = {
     "claude-3-haiku": {"input": 0.25, "output": 1.25},
 }
 
+# BOLT OPTIMIZATION: Thread-safe caching for pricing configuration
+_pricing_cache: Optional[Dict[str, Dict[str, float]]] = None
+_pricing_check_ts = 0.0
+_pricing_lock = threading.Lock()
+
 
 def load_pricing_config() -> Dict[str, Dict[str, float]]:
     """
@@ -473,27 +478,40 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Falls back to DEFAULT_PRICING
         - Allows user to customize pricing per model
 
+    BOLT OPTIMIZATION:
+        Uses thread-safe caching with a 5.0s TTL to avoid redundant
+        disk I/O and JSON parsing on every cost calculation.
+
     TUNABLE:
         - Create pricing.json to override default prices
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
-    pricing = DEFAULT_PRICING.copy()
+    global _pricing_cache, _pricing_check_ts
 
-    # Check for pricing config file
-    pricing_file = (
-        Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
-    )
+    with _pricing_lock:
+        now = time.monotonic()
+        if _pricing_cache is not None and (now - _pricing_check_ts) < 5.0:
+            return copy.deepcopy(_pricing_cache)
 
-    if pricing_file.exists():
-        try:
-            with open(pricing_file) as f:
-                custom = json.load(f)
-                pricing.update(custom)
-        except Exception as e:
-            print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+        pricing = DEFAULT_PRICING.copy()
 
-    return pricing
+        # Check for pricing config file
+        pricing_file = (
+            Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
+        )
+
+        if pricing_file.exists():
+            try:
+                with open(pricing_file) as f:
+                    custom = json.load(f)
+                    pricing.update(custom)
+            except Exception as e:
+                print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+
+        _pricing_cache = pricing
+        _pricing_check_ts = now
+        return copy.deepcopy(pricing)
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -733,7 +751,7 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
         }
 
     # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
+    cached = _state_cache.get(resolved_run_id)
     if cached:
         return cached
 
