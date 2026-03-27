@@ -405,12 +405,19 @@ def get_run_dir(run_id: Optional[str] = None) -> Path:
         Creates runs/<run_id>/ directory structure.
         All run-specific files go here.
 
-    TUNABLE:
-        - Modify directory structure by changing path construction
+    SECURITY:
+        - Sanitizes run_id to prevent path traversal
     """
     if run_id is None:
         run_id = get_run_id()
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+
+    # SECURITY: Sanitize run_id to prevent path traversal
+    clean_id = os.path.basename(run_id)
+    if clean_id in (".", "..", ""):
+        # Fallback if ID was malicious or empty
+        clean_id = f"invalid_run_{uuid.uuid4().hex[:8]}"
+
+    return Path(AUTOTRAIN_DIR) / "runs" / clean_id
 
 
 def get_events_path(run_id: Optional[str] = None) -> Path:
@@ -436,10 +443,22 @@ def get_run_id() -> str:
         - Uses RUN_ID env var if set
         - Otherwise generates a new UUID
         - Stores in global for subsequent calls
+
+    SECURITY:
+        - Sanitizes run_id from environment
     """
     global RUN_ID
     if not RUN_ID:
         RUN_ID = os.environ.get("RUN_ID", "")
+
+    if RUN_ID:
+        # SECURITY: Sanitize provided RUN_ID
+        clean_id = os.path.basename(RUN_ID)
+        if clean_id in (".", "..", ""):
+            RUN_ID = ""  # Force regeneration if invalid
+        else:
+            RUN_ID = clean_id
+
     if not RUN_ID:
         RUN_ID = str(uuid.uuid4())[:8]
         RUN_ID = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{RUN_ID}"
@@ -612,6 +631,7 @@ def init_telemetry(
         - Validates config against strict schema
         - Creates secure directory structure
         - Sets restrictive file permissions
+        - Sanitizes run_id to prevent path traversal
 
     HOW IT WORKS:
         1. Validates config if provided
@@ -639,7 +659,12 @@ def init_telemetry(
 
     with _lock:
         if run_id:
-            RUN_ID = run_id
+            # SECURITY: Sanitize provided run_id
+            clean_id = os.path.basename(run_id)
+            if clean_id in (".", "..", ""):
+                RUN_ID = f"safe_run_{uuid.uuid4().hex[:8]}"
+            else:
+                RUN_ID = clean_id
 
         run_id = get_run_id()
         run_dir = get_run_dir(run_id)
@@ -732,10 +757,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "usage": get_default_usage(),
         }
 
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
