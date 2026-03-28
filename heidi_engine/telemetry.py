@@ -405,12 +405,25 @@ def get_run_dir(run_id: Optional[str] = None) -> Path:
         Creates runs/<run_id>/ directory structure.
         All run-specific files go here.
 
+    SECURITY:
+        - Sanitizes run_id to prevent path traversal.
+        - Uses os.path.basename to ensure runs stay within runs/ directory.
+
     TUNABLE:
         - Modify directory structure by changing path construction
     """
     if run_id is None:
         run_id = get_run_id()
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+
+    # SECURITY: Sanitize run_id to prevent path traversal.
+    # Use basename to ensure the directory remains within the runs/ folder.
+    safe_run_id = os.path.basename(run_id)
+    if not safe_run_id or safe_run_id in (".", ".."):
+        # Fallback to a safe unique ID if the provided one is dangerous or empty
+        # We use uuid4 here to ensure uniqueness even if multiple invalid IDs are provided.
+        safe_run_id = f"safe_run_{uuid.uuid4().hex[:8]}"
+
+    return Path(AUTOTRAIN_DIR) / "runs" / safe_run_id
 
 
 def get_events_path(run_id: Optional[str] = None) -> Path:
@@ -436,13 +449,25 @@ def get_run_id() -> str:
         - Uses RUN_ID env var if set
         - Otherwise generates a new UUID
         - Stores in global for subsequent calls
+
+    SECURITY:
+        - Sanitizes RUN_ID from environment if present.
     """
     global RUN_ID
     if not RUN_ID:
-        RUN_ID = os.environ.get("RUN_ID", "")
+        # Get from environment if present
+        env_run_id = os.environ.get("RUN_ID", "")
+        if env_run_id:
+            # SECURITY: Sanitize environment-provided RUN_ID
+            RUN_ID = os.path.basename(env_run_id)
+            if not RUN_ID or RUN_ID in (".", ".."):
+                RUN_ID = ""  # Force generation below
+
     if not RUN_ID:
-        RUN_ID = str(uuid.uuid4())[:8]
-        RUN_ID = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{RUN_ID}"
+        # Generate new safe ID
+        suffix = str(uuid.uuid4())[:8]
+        RUN_ID = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{suffix}"
+
     return RUN_ID
 
 
@@ -610,6 +635,7 @@ def init_telemetry(
 
     SECURITY:
         - Validates config against strict schema
+        - Sanitizes run_id to prevent path traversal
         - Creates secure directory structure
         - Sets restrictive file permissions
 
@@ -639,7 +665,12 @@ def init_telemetry(
 
     with _lock:
         if run_id:
-            RUN_ID = run_id
+            # SECURITY: Sanitize provided run_id
+            safe_id = os.path.basename(run_id)
+            if not safe_id or safe_id in (".", ".."):
+                RUN_ID = f"safe_run_{uuid.uuid4().hex[:8]}"
+            else:
+                RUN_ID = safe_id
 
         run_id = get_run_id()
         run_dir = get_run_dir(run_id)
@@ -732,10 +763,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "usage": get_default_usage(),
         }
 
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
