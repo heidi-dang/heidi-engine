@@ -732,10 +732,8 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "usage": get_default_usage(),
         }
 
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
+    # NOTE: A previous redundant and broken cache check here was removed.
+    # The primary cache check at the beginning of this function is sufficient.
 
     try:
         with open(state_file) as f:
