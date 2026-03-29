@@ -187,3 +187,4 @@ Integrated Optuna-powered sweeps for optimal training parameters:
 - **Validation Failures:** Ensure compilers are installed; fallback logging is enabled
 
 For more, see [docs/walkthrough_v1.md](docs/walkthrough_v1.md).
+
