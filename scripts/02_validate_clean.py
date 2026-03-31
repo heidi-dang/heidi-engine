@@ -85,6 +85,10 @@ SECRET_PATTERNS = [
     (r'(?i)pwd\s*[:=]\s*["\'][^"\']{8,}["\']', "password"),
 ]
 
+# BOLT OPTIMIZATION: Pre-compiled secret patterns for faster matching.
+_COMPILED_SECRET_PATTERNS = [(re.compile(p), t) for p, t in SECRET_PATTERNS]
+
+
 # Fields to check for secrets
 # TUNABLE: Add/remove fields based on your data structure
 SECRET_CHECK_FIELDS = ["instruction", "input", "output", "response", "completion"]
@@ -192,6 +196,9 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
         - Checks all specified fields against secret patterns
         - FAIL CLOSED: Returns True (has secrets) if ANY pattern matches
 
+    BOLT OPTIMIZATION:
+        - Uses pre-compiled regex patterns to reduce overhead.
+
     TUNABLE:
         - Add more SECRET_PATTERNS for your use case
         - Adjust SECRET_CHECK_FIELDS to check more/less fields
@@ -208,8 +215,8 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
 
         text = str(sample[field])
 
-        for pattern, secret_type in SECRET_PATTERNS:
-            if re.search(pattern, text):
+        for pattern, secret_type in _COMPILED_SECRET_PATTERNS:
+            if pattern.search(text):
                 found_secrets.append(f"{field}:{secret_type}")
 
     return len(found_secrets) > 0, found_secrets
@@ -270,13 +277,18 @@ def fuzzy_hash(sample: Dict[str, Any], n: int = 5) -> str:
         - Uses character n-grams for fuzzy matching
         - Useful for catching samples that are nearly identical
 
+    BOLT OPTIMIZATION:
+        - Optimized whitespace removal using "".join(text.split()) which is
+          measurably faster than re.sub for large strings.
+
     TUNABLE:
         - Adjust n for sensitivity (lower = more sensitive)
         - n=5 is a good balance for code data
     """
     text = (sample.get("instruction", "") + sample.get("output", "")).lower()
-    # Remove whitespace for more robust matching
-    text = re.sub(r"\s+", "", text)
+
+    # BOLT OPTIMIZATION: Replace re.sub(r"\s+", "", text) with faster split/join.
+    text = "".join(text.split())
 
     if len(text) < n:
         return text
