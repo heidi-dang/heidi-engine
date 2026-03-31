@@ -717,7 +717,7 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     """
     resolved_run_id = run_id or get_run_id()
 
-    # BOLT OPTIMIZATION: Check cache first
+    # BOLT OPTIMIZATION: Check thread-safe StateCache first (0.5s TTL) to avoid redundant disk I/O.
     cached = _state_cache.get(resolved_run_id)
     if cached is not None:
         return cached
@@ -731,11 +731,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
