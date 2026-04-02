@@ -163,6 +163,11 @@ SECRET_PATTERNS = [
     (r'token[_-]?(id|key)?\s*[:=]\s*["\']?[\w\-]{20,}', "[TOKEN]"),
 ]
 
+# BOLT OPTIMIZATION: Pre-compile regex patterns for faster redaction.
+_COMPILED_SECRET_PATTERNS = [
+    (re.compile(pattern, re.IGNORECASE), replacement) for pattern, replacement in SECRET_PATTERNS
+]
+
 # Keywords that indicate secrets - used for fast-path redaction check.
 # NOTE: Must be kept in sync with SECRET_PATTERNS above.
 _SECRET_INDICATORS = re.compile(
@@ -206,9 +211,9 @@ def redact_secrets(text: str) -> str:
     if not _SECRET_INDICATORS.search(text):
         return text
 
-    # Redact secrets
-    for pattern, replacement in SECRET_PATTERNS:
-        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    # Redact secrets using pre-compiled patterns
+    for pattern, replacement in _COMPILED_SECRET_PATTERNS:
+        text = pattern.sub(replacement, text)
 
     return text
 
@@ -463,10 +468,19 @@ DEFAULT_PRICING = {
     "claude-3-haiku": {"input": 0.25, "output": 1.25},
 }
 
+# BOLT OPTIMIZATION: Thread-safe TTL cache for pricing config to avoid repeated disk reads.
+_pricing_cache: Optional[Dict[str, Dict[str, float]]] = None
+_pricing_check_ts = 0.0
+_pricing_lock = threading.Lock()
+
 
 def load_pricing_config() -> Dict[str, Dict[str, float]]:
     """
     Load pricing configuration from file or use defaults.
+
+    BOLT OPTIMIZATION:
+        Uses a thread-safe 5.0s TTL cache to minimize disk I/O and JSON parsing
+        during high-frequency event emission.
 
     HOW IT WORKS:
         - First checks for pricing.json in run directory
@@ -478,22 +492,30 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
-    pricing = DEFAULT_PRICING.copy()
+    global _pricing_cache, _pricing_check_ts
+    with _pricing_lock:
+        now = time.monotonic()
+        if _pricing_cache is not None and (now - _pricing_check_ts) < 5.0:
+            return copy.deepcopy(_pricing_cache)
 
-    # Check for pricing config file
-    pricing_file = (
-        Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
-    )
+        pricing = DEFAULT_PRICING.copy()
 
-    if pricing_file.exists():
-        try:
-            with open(pricing_file) as f:
-                custom = json.load(f)
-                pricing.update(custom)
-        except Exception as e:
-            print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+        # Check for pricing config file
+        pricing_file = (
+            Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
+        )
 
-    return pricing
+        if pricing_file.exists():
+            try:
+                with open(pricing_file) as f:
+                    custom = json.load(f)
+                    pricing.update(custom)
+            except Exception as e:
+                print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+
+        _pricing_cache = pricing
+        _pricing_check_ts = now
+        return copy.deepcopy(pricing)
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -732,11 +754,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "usage": get_default_usage(),
         }
 
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
-
     try:
         with open(state_file) as f:
             state = json.load(f)
@@ -839,8 +856,9 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
     # Atomic rename
     os.replace(temp_file, state_file)
 
-    # BOLT OPTIMIZATION: Invalidate cache after write
-    _state_cache.invalidate(resolved_run_id)
+    # BOLT OPTIMIZATION: Write-through cache update
+    # Updating the cache directly avoids a redundant disk read on the next get_state() call.
+    _state_cache.set(resolved_run_id, state)
 
 
 def update_counters(delta: Dict[str, Any], run_id: Optional[str] = None) -> None:
