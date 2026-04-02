@@ -268,6 +268,11 @@ _lock = threading.RLock()
 # Whether telemetry has been initialized
 _initialized = False
 
+# BOLT OPTIMIZATION: Module-level caching for expensive metadata
+_pricing_cache: Dict[str, Any] = {}
+_pricing_last_check = 0.0
+_pricing_lock = threading.Lock()
+
 
 class StateCache:
     """
@@ -473,27 +478,39 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Falls back to DEFAULT_PRICING
         - Allows user to customize pricing per model
 
+    BOLT OPTIMIZATION:
+        Thread-safe caching with 5s TTL to avoid redundant disk I/O and JSON parsing.
+
     TUNABLE:
         - Create pricing.json to override default prices
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
-    pricing = DEFAULT_PRICING.copy()
+    global _pricing_cache, _pricing_last_check
 
-    # Check for pricing config file
-    pricing_file = (
-        Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
-    )
+    with _pricing_lock:
+        now = time.monotonic()
+        if _pricing_cache and (now - _pricing_last_check) < 5.0:
+            return copy.deepcopy(_pricing_cache)
 
-    if pricing_file.exists():
-        try:
-            with open(pricing_file) as f:
-                custom = json.load(f)
-                pricing.update(custom)
-        except Exception as e:
-            print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+        pricing = DEFAULT_PRICING.copy()
 
-    return pricing
+        # Check for pricing config file
+        pricing_file = (
+            Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
+        )
+
+        if pricing_file.exists():
+            try:
+                with open(pricing_file) as f:
+                    custom = json.load(f)
+                    pricing.update(custom)
+            except Exception as e:
+                print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+
+        _pricing_cache = pricing
+        _pricing_last_check = now
+        return copy.deepcopy(pricing)
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -731,11 +748,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
@@ -1367,7 +1379,6 @@ def stage_context(stage: str, round_num: int, message: str, **kwargs):
 # HTTP STATUS SERVER (OPTIONAL)
 # =============================================================================
 
-# BOLT OPTIMIZATION: Module-level caching for expensive metadata
 _gpu_cache: Dict[str, Any] = {}
 _gpu_check_ts = 0.0
 _gpu_lock = threading.Lock()
