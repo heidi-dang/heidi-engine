@@ -56,8 +56,8 @@ CONFIG VALIDATION:
 """
 
 import atexit
-import copy
 import base64
+import copy
 import json
 import os
 import re
@@ -70,7 +70,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
@@ -311,6 +311,11 @@ class StateCache:
 
 _state_cache = StateCache()
 
+# BOLT OPTIMIZATION: Module-level caching for pricing config
+_pricing_cache: Dict[str, Dict[str, float]] = {}
+_pricing_last_check = 0.0
+_pricing_lock = threading.Lock()
+
 
 # =============================================================================
 # DEFAULT COUNTERS AND USAGE TRACKING
@@ -473,27 +478,40 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Falls back to DEFAULT_PRICING
         - Allows user to customize pricing per model
 
+    BOLT OPTIMIZATION:
+        Thread-safe caching with 5.0s TTL to avoid redundant disk I/O
+        during high-frequency event emission.
+
     TUNABLE:
         - Create pricing.json to override default prices
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
-    pricing = DEFAULT_PRICING.copy()
+    global _pricing_cache, _pricing_last_check
 
-    # Check for pricing config file
-    pricing_file = (
-        Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
-    )
+    with _pricing_lock:
+        now = time.monotonic()
+        if _pricing_cache and (now - _pricing_last_check) < 5.0:
+            return _pricing_cache.copy()
 
-    if pricing_file.exists():
-        try:
-            with open(pricing_file) as f:
-                custom = json.load(f)
-                pricing.update(custom)
-        except Exception as e:
-            print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+        pricing = DEFAULT_PRICING.copy()
 
-    return pricing
+        # Check for pricing config file
+        pricing_file = (
+            Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
+        )
+
+        if pricing_file.exists():
+            try:
+                with open(pricing_file) as f:
+                    custom = json.load(f)
+                    pricing.update(custom)
+            except Exception as e:
+                print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+
+        _pricing_cache = pricing.copy()
+        _pricing_last_check = now
+        return pricing
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -731,11 +749,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
@@ -1509,7 +1522,10 @@ def start_http_server(port: int = 7779) -> None:
     _session_pass = os.environ.get("TELEMETRY_PASS")
     if not _session_pass:
         _session_pass = secrets.token_urlsafe(16)
-        print(f"[SECURITY] TELEMETRY_PASS not set. Generated random password: {_session_pass}", file=sys.stderr)
+        print(
+            f"[SECURITY] TELEMETRY_PASS not set. Generated random password: {_session_pass}",
+            file=sys.stderr,
+        )
 
     class StateHandler(BaseHTTPRequestHandler):
         """HTTP handler with security restrictions."""
