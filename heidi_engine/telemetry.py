@@ -151,10 +151,10 @@ SECRET_PATTERNS = [
     # Generic API keys and tokens
     (r"ghp_[a-zA-Z0-9]{36}", "[GITHUB_TOKEN]"),
     (r"glpat-[a-zA-Z0-9\-]{20,}", "[GITLAB_TOKEN]"),
-    (r"sk-[a-zA-Z0-9]{20,}", "[OPENAI_KEY]"),
+    (r"sk-(proj-)?[a-zA-Z0-9]{40,}", "[OPENAI_KEY]"),
     (r"Bearer\s+[\w\-]{20,}", "[BEARER_TOKEN]"),
     (r'(?i)(api[_-]?key|apikey|secret[_-]?key)\s*[:=]\s*["\']?[\w\-]{20,}', "[API_KEY]"),
-    (r"AKIA[0-9A-Z]{16}", "[AWS_KEY]"),
+    (r"(AKIA|ASIA|AROA|AIDA)[0-9A-Z]{16}", "[AWS_KEY]"),
     (r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----", "[PRIVATE_KEY]"),
     (r"-----BEGIN\s+OPENSSH\s+PRIVATE\s+KEY-----", "[SSH_KEY]"),
     # Environment variable patterns
@@ -166,7 +166,7 @@ SECRET_PATTERNS = [
 # Keywords that indicate secrets - used for fast-path redaction check.
 # NOTE: Must be kept in sync with SECRET_PATTERNS above.
 _SECRET_INDICATORS = re.compile(
-    r"ghp_|glpat-|sk-|Bearer|api[_-]?key|apikey|secret[_-]?key|AKIA|PRIVATE\s+KEY|OPENSSH|TOKEN|AWS_SECRET",
+    r"ghp_|glpat-|sk-|Bearer|api[_-]?key|apikey|secret[_-]?key|AKIA|ASIA|AROA|AIDA|PRIVATE\s+KEY|OPENSSH|TOKEN|AWS_SECRET",
     re.IGNORECASE,
 )
 
@@ -401,6 +401,10 @@ def get_run_dir(run_id: Optional[str] = None) -> Path:
     """
     Get the run directory path.
 
+    SECURITY:
+        Sanitizes run_id to prevent path traversal.
+        Ensures run_dir is always within AUTOTRAIN_DIR/runs/.
+
     HOW IT WORKS:
         Creates runs/<run_id>/ directory structure.
         All run-specific files go here.
@@ -410,7 +414,16 @@ def get_run_dir(run_id: Optional[str] = None) -> Path:
     """
     if run_id is None:
         run_id = get_run_id()
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+
+    # SECURITY: Sanitize run_id to prevent path traversal
+    # We only take the filename part, effectively stripping any directory components.
+    # Fallback to a safe unique ID if run_id becomes empty or invalid (e.g. ".", "..").
+    safe_run_id = Path(run_id).name
+    if not safe_run_id or safe_run_id in (".", ".."):
+        # If the user provided a dangerous run_id, generate a safe fallback
+        safe_run_id = f"safe_run_{str(uuid.uuid4())[:8]}"
+
+    return Path(AUTOTRAIN_DIR) / "runs" / safe_run_id
 
 
 def get_events_path(run_id: Optional[str] = None) -> Path:
@@ -731,11 +744,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
