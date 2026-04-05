@@ -268,6 +268,11 @@ _lock = threading.RLock()
 # Whether telemetry has been initialized
 _initialized = False
 
+# BOLT OPTIMIZATION: Pricing cache to avoid redundant disk I/O
+_pricing_cache: Dict[str, Dict[str, float]] = {}
+_pricing_last_check = 0.0
+_pricing_lock = threading.Lock()
+
 
 class StateCache:
     """
@@ -468,30 +473,36 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
     """
     Load pricing configuration from file or use defaults.
 
-    HOW IT WORKS:
-        - First checks for pricing.json in run directory
-        - Falls back to DEFAULT_PRICING
-        - Allows user to customize pricing per model
-
-    TUNABLE:
-        - Create pricing.json to override default prices
-        - Format: {"model_name": {"input": 0.5, "output": 1.5}}
-        - Prices are per 1M tokens
+    BOLT OPTIMIZATION:
+        Thread-safe caching with 5.0s TTL to avoid redundant disk I/O
+        during high-frequency telemetry events.
     """
+    global _pricing_cache, _pricing_last_check
+
+    with _pricing_lock:
+        now = time.monotonic()
+        if _pricing_cache and (now - _pricing_last_check) < 5.0:
+            return _pricing_cache.copy()
+
     pricing = DEFAULT_PRICING.copy()
 
     # Check for pricing config file
-    pricing_file = (
-        Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
-    )
+    try:
+        pricing_file = (
+            Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
+        )
 
-    if pricing_file.exists():
-        try:
+        if pricing_file.exists():
             with open(pricing_file) as f:
                 custom = json.load(f)
                 pricing.update(custom)
-        except Exception as e:
-            print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+    except Exception as e:
+        # Don't let pricing load failures block telemetry
+        pass
+
+    with _pricing_lock:
+        _pricing_cache = pricing.copy()
+        _pricing_last_check = time.monotonic()
 
     return pricing
 
@@ -732,11 +743,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "usage": get_default_usage(),
         }
 
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
-
     try:
         with open(state_file) as f:
             state = json.load(f)
@@ -839,8 +845,8 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
     # Atomic rename
     os.replace(temp_file, state_file)
 
-    # BOLT OPTIMIZATION: Invalidate cache after write
-    _state_cache.invalidate(resolved_run_id)
+    # BOLT OPTIMIZATION: Write-through cache after write
+    _state_cache.set(resolved_run_id, state)
 
 
 def update_counters(delta: Dict[str, Any], run_id: Optional[str] = None) -> None:
