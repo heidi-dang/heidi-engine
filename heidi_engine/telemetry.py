@@ -450,6 +450,12 @@ def get_run_id() -> str:
 # PRICING CONFIGURATION
 # =============================================================================
 
+# BOLT OPTIMIZATION: Module-level caching for pricing config
+# Keyed by pricing_file absolute path for run isolation
+_pricing_cache: Dict[str, Dict[str, Any]] = {}
+_pricing_last_check: Dict[str, float] = {}
+_pricing_lock = threading.Lock()
+
 # Default pricing for common models (can be overridden by pricing.json)
 # TUNABLE: Add new models here or create pricing.json
 # prices are per 1M tokens
@@ -473,27 +479,44 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Falls back to DEFAULT_PRICING
         - Allows user to customize pricing per model
 
+    BOLT OPTIMIZATION:
+        Thread-safe caching with 5.0s TTL to avoid redundant disk I/O and JSON parsing
+        on every telemetry event emission. Keyed by absolute path for run isolation.
+
     TUNABLE:
         - Create pricing.json to override default prices
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
-    pricing = DEFAULT_PRICING.copy()
+    global _pricing_cache, _pricing_last_check
 
-    # Check for pricing config file
+    # Determine absolute path for caching key
     pricing_file = (
         Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
     )
+    cache_key = str(pricing_file.absolute())
 
-    if pricing_file.exists():
-        try:
-            with open(pricing_file) as f:
-                custom = json.load(f)
-                pricing.update(custom)
-        except Exception as e:
-            print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+    with _pricing_lock:
+        now = time.monotonic()
+        if cache_key in _pricing_cache and (now - _pricing_last_check.get(cache_key, 0)) < 5.0:
+            # Use deepcopy to ensure caller cannot mutate the global cache state
+            return copy.deepcopy(_pricing_cache[cache_key])
 
-    return pricing
+        # Start with defaults (deep copy to avoid mutating original constant)
+        pricing = copy.deepcopy(DEFAULT_PRICING)
+
+        if pricing_file.exists():
+            try:
+                with open(pricing_file) as f:
+                    custom = json.load(f)
+                    pricing.update(custom)
+            except Exception as e:
+                print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+
+        _pricing_cache[cache_key] = copy.deepcopy(pricing)
+        _pricing_last_check[cache_key] = now
+
+        return pricing
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -733,7 +756,7 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
         }
 
     # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
+    cached = _state_cache.get(resolved_run_id)
     if cached:
         return cached
 
