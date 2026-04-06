@@ -271,42 +271,56 @@ _initialized = False
 
 class StateCache:
     """
-    Thread-safe cache for run state to avoid redundant disk I/O.
+    Thread-safe multi-run cache for state data with mtime validation.
+    Reduces disk I/O during polling and dashboard refreshes.
     """
 
-    def __init__(self, ttl: float = 0.5):
+    def __init__(self, ttl: float = 1.0):
         self.ttl = ttl
-        self._cache: Dict[str, Any] = {}
-        self._cached_run_id: Optional[str] = None
-        self._last_check = 0.0
+        # {run_id: (state_dict, st_mtime, last_check_monotonic)}
+        self._cache: Dict[str, Tuple[Dict[str, Any], float, float]] = {}
         self._lock = threading.Lock()
 
-    def get(self, run_id: str) -> Optional[Dict[str, Any]]:
-        """Get cached state if valid and TTL hasn't expired."""
+    def get(self, run_id: str, state_file: Path) -> Optional[Dict[str, Any]]:
+        """Get cached state if mtime matches and TTL is valid."""
         with self._lock:
-            now = time.monotonic()
-            if (
-                self._cached_run_id == run_id
-                and (now - self._last_check) < self.ttl
-                and self._cache
-            ):
-                return copy.deepcopy(self._cache)
-        return None
+            cached_data = self._cache.get(run_id)
+            if not cached_data:
+                return None
 
-    def set(self, run_id: str, state: Dict[str, Any]):
-        """Update cache with new state."""
+            state, mtime, last_check = cached_data
+            now = time.monotonic()
+
+            # Fast-path: if TTL is valid, assume it hasn't changed on disk
+            if (now - last_check) < self.ttl:
+                return copy.deepcopy(state)
+
+            # TTL expired: validate with disk mtime (cheaper than full read/parse)
+            try:
+                current_mtime = state_file.stat().st_mtime
+                if current_mtime == mtime:
+                    # mtime unchanged, update check time and return cached
+                    self._cache[run_id] = (state, mtime, now)
+                    return copy.deepcopy(state)
+            except Exception:
+                pass
+
+            # mtime changed or stat failed: invalidate
+            del self._cache[run_id]
+            return None
+
+    def set(self, run_id: str, state: Dict[str, Any], mtime: float):
+        """Update cache with state and its current st_mtime."""
         with self._lock:
-            self._cache = copy.deepcopy(state)
-            self._cached_run_id = run_id
-            self._last_check = time.monotonic()
+            self._cache[run_id] = (copy.deepcopy(state), mtime, time.monotonic())
 
     def invalidate(self, run_id: Optional[str] = None):
-        """Invalidate cache for a specific run or all runs."""
+        """Invalidate specific run or clear entire cache."""
         with self._lock:
-            if run_id is None or self._cached_run_id == run_id:
-                self._cache = {}
-                self._cached_run_id = None
-                self._last_check = 0.0
+            if run_id:
+                self._cache.pop(run_id, None)
+            else:
+                self._cache.clear()
 
 
 _state_cache = StateCache()
@@ -701,13 +715,14 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     Load current state from state.json.
 
     HOW IT WORKS:
-        - Checks thread-safe StateCache first (0.5s TTL)
-        - Reads state.json file on cache miss
+        - Checks thread-safe StateCache first (1.0s TTL + mtime validation)
+        - Reads state.json file on cache miss or mtime mismatch
         - Returns empty state if file doesn't exist
 
     BOLT OPTIMIZATION:
         Uses StateCache to avoid redundant disk I/O and JSON parsing
         during high-frequency polling (e.g. dashboard refreshes).
+        Multi-run support enables caching for multiple runs simultaneously.
 
     ARGS:
         run_id: Run to read (defaults to current run)
@@ -716,13 +731,12 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
         State dictionary
     """
     resolved_run_id = run_id or get_run_id()
+    state_file = get_state_path(resolved_run_id)
 
-    # BOLT OPTIMIZATION: Check cache first
-    cached = _state_cache.get(resolved_run_id)
+    # BOLT OPTIMIZATION: Check multi-run cache with mtime validation
+    cached = _state_cache.get(resolved_run_id, state_file)
     if cached is not None:
         return cached
-
-    state_file = get_state_path(resolved_run_id)
 
     if not state_file.exists():
         return {
@@ -732,19 +746,16 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "usage": get_default_usage(),
         }
 
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
-
     try:
+        # Stat first for cache sync
+        mtime = state_file.stat().st_mtime
         with open(state_file) as f:
             state = json.load(f)
             # Resolve status from on-disk metadata
             state["status"] = resolve_status(state)
 
-            # BOLT OPTIMIZATION: Update cache
-            _state_cache.set(resolved_run_id, state)
+            # BOLT OPTIMIZATION: Update cache with mtime
+            _state_cache.set(resolved_run_id, state, mtime)
 
             return state
     except Exception as e:
@@ -816,10 +827,7 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
         - Writes to temp file first
         - Uses os.rename for atomic update
         - Prevents corruption from partial writes
-        - Invalidates StateCache to ensure fresh reads
-
-    TUNABLE:
-        - N/A - just saves state
+        - Performs write-through update to StateCache
 
     ARGS:
         state: State dictionary to save
@@ -839,8 +847,13 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
     # Atomic rename
     os.replace(temp_file, state_file)
 
-    # BOLT OPTIMIZATION: Invalidate cache after write
-    _state_cache.invalidate(resolved_run_id)
+    # BOLT OPTIMIZATION: Write-through cache update.
+    # We stat the file to get the exact mtime for the cache.
+    try:
+        mtime = state_file.stat().st_mtime
+        _state_cache.set(resolved_run_id, state, mtime)
+    except Exception:
+        _state_cache.invalidate(resolved_run_id)
 
 
 def update_counters(delta: Dict[str, Any], run_id: Optional[str] = None) -> None:
@@ -1614,10 +1627,11 @@ def list_runs() -> List[Dict[str, Any]]:
 
     HOW IT WORKS:
         - Scans runs/ subdirectories
-        - Returns basic info for each run
+        - Returns basic info for each run using cached get_state()
 
-    TUNABLE:
-        - N/A
+    BOLT OPTIMIZATION:
+        Uses cached get_state() to avoid redundant disk I/O when listing
+        runs. Multi-run cache ensures this is efficient for many runs.
 
     RETURNS:
         List of run info dictionaries
@@ -1629,19 +1643,14 @@ def list_runs() -> List[Dict[str, Any]]:
 
     runs = []
 
+    # Sort by mtime of the directory as a proxy for run activity
     for run_path in sorted(runs_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
         if not run_path.is_dir():
             continue
 
-        state_file = run_path / "state.json"
-
-        if state_file.exists():
-            try:
-                with open(state_file) as f:
-                    state = json.load(f)
-                    runs.append(state)
-            except Exception:
-                pass
+        state = get_state(run_path.name)
+        if state.get("status") != "idle" or (run_path / "state.json").exists():
+            runs.append(state)
 
     return runs
 
