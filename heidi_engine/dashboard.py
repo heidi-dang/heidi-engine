@@ -1229,8 +1229,7 @@ def main():
     global run_id, current_view
 
     parser = argparse.ArgumentParser(
-        prog="heidi-engine dashboard",
-        description="Heidi Engine Real-Time Dashboard"
+        prog="heidi-engine dashboard", description="Heidi Engine Real-Time Dashboard"
     )
     parser.add_argument("--run", "-r", help="Run ID to monitor")
     parser.add_argument(
