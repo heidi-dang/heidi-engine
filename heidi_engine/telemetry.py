@@ -284,29 +284,52 @@ class StateCache:
     def get(self, run_id: str) -> Optional[Dict[str, Any]]:
         """Get cached state if valid and TTL hasn't expired."""
         with self._lock:
+            if run_id not in self._cache:
+                return None
+
+            entry = self._cache[run_id]
             now = time.monotonic()
-            if (
-                self._cached_run_id == run_id
-                and (now - self._last_check) < self.ttl
-                and self._cache
-            ):
-                return copy.deepcopy(self._cache)
+
+            # Check TTL
+            if (now - entry["last_check"]) < self.ttl:
+                return copy.deepcopy(entry["data"])
+
+            # Check file mtime if TTL expired
+            try:
+                state_file = get_state_path(run_id)
+                if state_file.exists():
+                    mtime = state_file.stat().st_mtime
+                    if mtime == entry["mtime"]:
+                        # Update last_check and return
+                        entry["last_check"] = now
+                        return copy.deepcopy(entry["data"])
+            except Exception:
+                pass
+
         return None
 
     def set(self, run_id: str, state: Dict[str, Any]):
         """Update cache with new state."""
         with self._lock:
-            self._cache = copy.deepcopy(state)
-            self._cached_run_id = run_id
-            self._last_check = time.monotonic()
+            try:
+                state_file = get_state_path(run_id)
+                mtime = state_file.stat().st_mtime if state_file.exists() else 0.0
+            except Exception:
+                mtime = 0.0
+
+            self._cache[run_id] = {
+                "data": copy.deepcopy(state),
+                "mtime": mtime,
+                "last_check": time.monotonic(),
+            }
 
     def invalidate(self, run_id: Optional[str] = None):
         """Invalidate cache for a specific run or all runs."""
         with self._lock:
-            if run_id is None or self._cached_run_id == run_id:
+            if run_id is None:
                 self._cache = {}
-                self._cached_run_id = None
-                self._last_check = 0.0
+            elif run_id in self._cache:
+                del self._cache[run_id]
 
 
 _state_cache = StateCache()
@@ -450,6 +473,11 @@ def get_run_id() -> str:
 # PRICING CONFIGURATION
 # =============================================================================
 
+# BOLT OPTIMIZATION: Module-level caching for pricing config
+_pricing_cache: Dict[str, Any] = {}
+_pricing_last_check = 0.0
+_pricing_lock = threading.Lock()
+
 # Default pricing for common models (can be overridden by pricing.json)
 # TUNABLE: Add new models here or create pricing.json
 # prices are per 1M tokens
@@ -473,17 +501,27 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Falls back to DEFAULT_PRICING
         - Allows user to customize pricing per model
 
-    TUNABLE:
-        - Create pricing.json to override default prices
-        - Format: {"model_name": {"input": 0.5, "output": 1.5}}
-        - Prices are per 1M tokens
+    BOLT OPTIMIZATION:
+        Uses a thread-safe cache with a 5.0s TTL to avoid redundant disk I/O
+        during high-frequency event emissions.
     """
-    pricing = DEFAULT_PRICING.copy()
+    global _pricing_cache, _pricing_last_check
 
-    # Check for pricing config file
-    pricing_file = (
-        Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
-    )
+    # BOLT OPTIMIZATION: Use pre-resolved path string for cache key
+    # Construction of Path objects and .absolute() calls are relatively expensive in hot-paths.
+    pricing_file_str = PRICING_CONFIG_PATH or str((get_run_dir() / "pricing.json").absolute())
+
+    with _pricing_lock:
+        now = time.monotonic()
+        if pricing_file_str in _pricing_cache and (now - _pricing_last_check) < 5.0:
+            # BOLT OPTIMIZATION: Use deepcopy for safety.
+            # While shallow copy is faster, deepcopy ensures that any modification
+            # to the returned dictionary doesn't affect the cache.
+            return copy.deepcopy(_pricing_cache[pricing_file_str])
+
+    pricing_file = Path(pricing_file_str)
+
+    pricing = DEFAULT_PRICING.copy()
 
     if pricing_file.exists():
         try:
@@ -492,6 +530,10 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
                 pricing.update(custom)
         except Exception as e:
             print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+
+    with _pricing_lock:
+        _pricing_cache[pricing_file_str] = pricing
+        _pricing_last_check = time.monotonic()
 
     return pricing
 
@@ -732,11 +774,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "usage": get_default_usage(),
         }
 
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
-
     try:
         with open(state_file) as f:
             state = json.load(f)
@@ -839,8 +876,8 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
     # Atomic rename
     os.replace(temp_file, state_file)
 
-    # BOLT OPTIMIZATION: Invalidate cache after write
-    _state_cache.invalidate(resolved_run_id)
+    # BOLT OPTIMIZATION: Write-through cache update
+    _state_cache.set(resolved_run_id, state)
 
 
 def update_counters(delta: Dict[str, Any], run_id: Optional[str] = None) -> None:
@@ -1633,15 +1670,11 @@ def list_runs() -> List[Dict[str, Any]]:
         if not run_path.is_dir():
             continue
 
-        state_file = run_path / "state.json"
-
-        if state_file.exists():
-            try:
-                with open(state_file) as f:
-                    state = json.load(f)
-                    runs.append(state)
-            except Exception:
-                pass
+        # BOLT OPTIMIZATION: Use get_state which uses StateCache
+        run_id = run_path.name
+        state = get_state(run_id)
+        if state and state.get("run_id") == run_id:
+            runs.append(state)
 
     return runs
 
