@@ -213,7 +213,20 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     # Write code to temp file
     test_file = os.path.join(temp_dir, "test_code.py")
 
+    # SECURITY: Filter environment variables to prevent leaking secrets to generated code.
+    # Excludes keys containing sensitive words (case-insensitive).
+    safe_env = {
+        k: v
+        for k, v in os.environ.items()
+        if not any(
+            secret_word in k.upper() for secret_word in ["KEY", "TOKEN", "SECRET", "PASS"]
+        )
+    }
+    safe_env["PYTHONPATH"] = temp_dir
+
     # Wrap code to capture output safely
+    # Indent code correctly to be inside the try block
+    indented_code = "\n".join("    " + line for line in code.splitlines())
     wrapped_code = f"""
 import sys
 import io
@@ -229,7 +242,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -263,7 +276,7 @@ except Exception as e:
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=safe_env,
         )
 
         stdout = result.stdout
