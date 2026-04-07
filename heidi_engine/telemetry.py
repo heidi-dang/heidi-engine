@@ -473,17 +473,32 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Falls back to DEFAULT_PRICING
         - Allows user to customize pricing per model
 
+    BOLT OPTIMIZATION:
+        Thread-safe caching with 5.0s TTL per config file path.
+        Avoids redundant disk I/O on every event emission.
+
     TUNABLE:
         - Create pricing.json to override default prices
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
-    pricing = DEFAULT_PRICING.copy()
+    global _pricing_cache, _pricing_last_check
 
-    # Check for pricing config file
+    # Determine pricing file path
     pricing_file = (
         Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
     )
+    # Use absolute path as cache key to handle run isolation correctly
+    file_key = str(pricing_file.absolute())
+
+    # BOLT OPTIMIZATION: Check cache first
+    with _pricing_lock:
+        now = time.monotonic()
+        if file_key in _pricing_cache and (now - _pricing_last_check.get(file_key, 0)) < 5.0:
+            return _pricing_cache[file_key].copy()
+
+    # Cache miss or expired - Load from disk/defaults
+    pricing = DEFAULT_PRICING.copy()
 
     if pricing_file.exists():
         try:
@@ -493,7 +508,12 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         except Exception as e:
             print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
 
-    return pricing
+    # BOLT OPTIMIZATION: Update cache
+    with _pricing_lock:
+        _pricing_cache[file_key] = pricing
+        _pricing_last_check[file_key] = time.monotonic()
+
+    return pricing.copy()
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -732,10 +752,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "usage": get_default_usage(),
         }
 
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
@@ -1368,6 +1384,10 @@ def stage_context(stage: str, round_num: int, message: str, **kwargs):
 # =============================================================================
 
 # BOLT OPTIMIZATION: Module-level caching for expensive metadata
+_pricing_cache: Dict[str, Any] = {}
+_pricing_last_check: Dict[str, float] = {}  # pricing_file_path -> ts
+_pricing_lock = threading.Lock()
+
 _gpu_cache: Dict[str, Any] = {}
 _gpu_check_ts = 0.0
 _gpu_lock = threading.Lock()
