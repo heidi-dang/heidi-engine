@@ -65,7 +65,7 @@ SECRET_PATTERNS = [
     (r"(?i)bearer\s+[\w\-]{20,}", "bearer_token"),
     (r'(?i)token\s*[:=]\s*["\']?[\w\-]{20,}', "token"),
     # AWS credentials
-    (r"AKIA[0-9A-Z]{16}", "aws_access_key"),
+    (r"(AKIA|ASIA|AROA|AIDA)[0-9A-Z]{16}", "aws_access_key"),
     (r'(?i)aws[_-]?secret[_-]?access[_-]?key\s*[:=]\s*["\']?[\w\/+]{40}', "aws_secret"),
     # Private keys
     (r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----", "private_key"),
@@ -77,13 +77,16 @@ SECRET_PATTERNS = [
     (r"ghp_[a-zA-Z0-9]{36}", "github_token"),
     (r"glpat-[a-zA-Z0-9\-]{20,}", "gitlab_token"),
     # OpenAI API keys
-    (r"sk-[a-zA-Z0-9]{48,}", "openai_key"),
+    (r"sk-(proj-)?[a-zA-Z0-9]{40,}", "openai_key"),
     # Generic high-entropy strings that look like secrets
     (r'["\'][\w+\/]{40,}["\']', "high_entropy"),
     # Passwords in config-like patterns
     (r'(?i)password\s*[:=]\s*["\'][^"\']{8,}["\']', "password"),
     (r'(?i)pwd\s*[:=]\s*["\'][^"\']{8,}["\']', "password"),
 ]
+
+# Pre-compiled regex patterns for better performance during dataset cleaning.
+_COMPILED_SECRET_PATTERNS = [(re.compile(p), t) for p, t in SECRET_PATTERNS]
 
 # Fields to check for secrets
 # TUNABLE: Add/remove fields based on your data structure
@@ -208,8 +211,8 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
 
         text = str(sample[field])
 
-        for pattern, secret_type in SECRET_PATTERNS:
-            if re.search(pattern, text):
+        for pattern, secret_type in _COMPILED_SECRET_PATTERNS:
+            if pattern.search(text):
                 found_secrets.append(f"{field}:{secret_type}")
 
     return len(found_secrets) > 0, found_secrets
