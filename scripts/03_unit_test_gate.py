@@ -229,7 +229,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{"\n".join("    " + line for line in code.splitlines())}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -257,13 +257,23 @@ except Exception as e:
 
     # Try to execute with timeout
     try:
+        # SECURITY: Filter environment variables to prevent leaking secrets to untrusted code.
+        # We exclude any keys that likely contain tokens, keys, secrets or passwords.
+        filtered_env = {
+            k: v for k, v in os.environ.items()
+            if not any(
+                secret_word in k.upper() for secret_word in ["KEY", "TOKEN", "SECRET", "PASS"]
+            )
+        }
+        filtered_env["PYTHONPATH"] = temp_dir
+
         result = subprocess.run(
             [sys.executable, test_file],
             capture_output=True,
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=filtered_env,
         )
 
         stdout = result.stdout
