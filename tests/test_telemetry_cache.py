@@ -34,10 +34,14 @@ def test_state_cache():
         # 3. Test TTL Expiration
         # Force cache set with old timestamp
         telemetry._state_cache.set(run_id, {"run_id": run_id, "status": "cached"})
-        telemetry._state_cache._last_check = time.monotonic() - 1.0  # Expired
+
+        # Access internal cache to manipulate last_check
+        with telemetry._state_cache._lock:
+            state, mtime, last_check = telemetry._state_cache._cache[run_id]
+            telemetry._state_cache._cache[run_id] = (state, mtime, time.monotonic() - 1.0) # Expired
 
         s4 = telemetry.get_state(run_id)
-        assert s4["status"] != "cached"  # Should have reloaded from disk
+        assert s4["status"] != "cached"  # Should have reloaded from disk (mtime 0.0 vs real file mtime)
         print("TTL Expiration test passed")
 
 

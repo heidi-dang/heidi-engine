@@ -272,41 +272,65 @@ _initialized = False
 class StateCache:
     """
     Thread-safe cache for run state to avoid redundant disk I/O.
+    Supports multiple run IDs and validates hits using file modification time.
     """
 
     def __init__(self, ttl: float = 0.5):
         self.ttl = ttl
-        self._cache: Dict[str, Any] = {}
-        self._cached_run_id: Optional[str] = None
-        self._last_check = 0.0
+        # Map run_id -> (state, mtime, last_check)
+        self._cache: Dict[str, Tuple[Dict[str, Any], float, float]] = {}
         self._lock = threading.Lock()
 
-    def get(self, run_id: str) -> Optional[Dict[str, Any]]:
-        """Get cached state if valid and TTL hasn't expired."""
+    def get(self, run_id: str, state_file: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+        """
+        Get cached state if valid and TTL hasn't expired.
+        If state_file is provided, it validates the cache against the file's mtime.
+        """
         with self._lock:
-            now = time.monotonic()
-            if (
-                self._cached_run_id == run_id
-                and (now - self._last_check) < self.ttl
-                and self._cache
-            ):
-                return copy.deepcopy(self._cache)
-        return None
+            if run_id not in self._cache:
+                return None
 
-    def set(self, run_id: str, state: Dict[str, Any]):
-        """Update cache with new state."""
+            state, cached_mtime, last_check = self._cache[run_id]
+            now = time.monotonic()
+
+            # If within TTL, trust the cache
+            if (now - last_check) < self.ttl:
+                return copy.deepcopy(state)
+
+            # TTL expired, but we can still validate with mtime if state_file provided
+            if state_file and state_file.exists():
+                try:
+                    mtime = state_file.stat().st_mtime
+                    if mtime == cached_mtime:
+                        # File hasn't changed, update last_check and return
+                        self._cache[run_id] = (state, mtime, now)
+                        return copy.deepcopy(state)
+                except Exception:
+                    pass
+
+            # Cache is invalid or couldn't be validated
+            del self._cache[run_id]
+            return None
+
+    def set(self, run_id: str, state: Dict[str, Any], state_file: Optional[Path] = None):
+        """Update cache with new state and current mtime if available."""
+        mtime = 0.0
+        if state_file and state_file.exists():
+            try:
+                mtime = state_file.stat().st_mtime
+            except Exception:
+                pass
+
         with self._lock:
-            self._cache = copy.deepcopy(state)
-            self._cached_run_id = run_id
-            self._last_check = time.monotonic()
+            self._cache[run_id] = (copy.deepcopy(state), mtime, time.monotonic())
 
     def invalidate(self, run_id: Optional[str] = None):
         """Invalidate cache for a specific run or all runs."""
         with self._lock:
-            if run_id is None or self._cached_run_id == run_id:
+            if run_id is None:
                 self._cache = {}
-                self._cached_run_id = None
-                self._last_check = 0.0
+            elif run_id in self._cache:
+                del self._cache[run_id]
 
 
 _state_cache = StateCache()
@@ -450,6 +474,11 @@ def get_run_id() -> str:
 # PRICING CONFIGURATION
 # =============================================================================
 
+# BOLT OPTIMIZATION: Module-level caching for pricing to avoid redundant IO
+_pricing_cache: Dict[str, Dict[str, float]] = {}
+_pricing_last_check = 0.0
+_pricing_lock = threading.Lock()
+
 # Default pricing for common models (can be overridden by pricing.json)
 # TUNABLE: Add new models here or create pricing.json
 # prices are per 1M tokens
@@ -473,27 +502,39 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Falls back to DEFAULT_PRICING
         - Allows user to customize pricing per model
 
+    BOLT OPTIMIZATION:
+        Thread-safe caching with 5.0s TTL to avoid redundant disk I/O
+        in the telemetry hot-path (event emission).
+
     TUNABLE:
         - Create pricing.json to override default prices
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
-    pricing = DEFAULT_PRICING.copy()
+    global _pricing_cache, _pricing_last_check
+    with _pricing_lock:
+        now = time.monotonic()
+        if _pricing_cache and (now - _pricing_last_check) < 5.0:
+            return copy.deepcopy(_pricing_cache)
 
-    # Check for pricing config file
-    pricing_file = (
-        Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
-    )
+        pricing = DEFAULT_PRICING.copy()
 
-    if pricing_file.exists():
-        try:
-            with open(pricing_file) as f:
-                custom = json.load(f)
-                pricing.update(custom)
-        except Exception as e:
-            print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+        # Check for pricing config file
+        pricing_file = (
+            Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
+        )
 
-    return pricing
+        if pricing_file.exists():
+            try:
+                with open(pricing_file) as f:
+                    custom = json.load(f)
+                    pricing.update(custom)
+            except Exception as e:
+                print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+
+        _pricing_cache = pricing
+        _pricing_last_check = now
+        return copy.deepcopy(pricing)
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -717,12 +758,12 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     """
     resolved_run_id = run_id or get_run_id()
 
+    state_file = get_state_path(resolved_run_id)
+
     # BOLT OPTIMIZATION: Check cache first
-    cached = _state_cache.get(resolved_run_id)
+    cached = _state_cache.get(resolved_run_id, state_file)
     if cached is not None:
         return cached
-
-    state_file = get_state_path(resolved_run_id)
 
     if not state_file.exists():
         return {
@@ -732,11 +773,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "usage": get_default_usage(),
         }
 
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
-
     try:
         with open(state_file) as f:
             state = json.load(f)
@@ -744,7 +780,7 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             state["status"] = resolve_status(state)
 
             # BOLT OPTIMIZATION: Update cache
-            _state_cache.set(resolved_run_id, state)
+            _state_cache.set(resolved_run_id, state, state_file)
 
             return state
     except Exception as e:
@@ -839,8 +875,8 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
     # Atomic rename
     os.replace(temp_file, state_file)
 
-    # BOLT OPTIMIZATION: Invalidate cache after write
-    _state_cache.invalidate(resolved_run_id)
+    # BOLT OPTIMIZATION: Write-through cache update
+    _state_cache.set(resolved_run_id, state, state_file)
 
 
 def update_counters(delta: Dict[str, Any], run_id: Optional[str] = None) -> None:
@@ -1614,7 +1650,11 @@ def list_runs() -> List[Dict[str, Any]]:
 
     HOW IT WORKS:
         - Scans runs/ subdirectories
-        - Returns basic info for each run
+        - Returns basic info for each run using get_state()
+
+    BOLT OPTIMIZATION:
+        Uses get_state() which leverages StateCache to avoid redundant
+        JSON parsing for frequently accessed runs.
 
     TUNABLE:
         - N/A
@@ -1636,12 +1676,9 @@ def list_runs() -> List[Dict[str, Any]]:
         state_file = run_path / "state.json"
 
         if state_file.exists():
-            try:
-                with open(state_file) as f:
-                    state = json.load(f)
-                    runs.append(state)
-            except Exception:
-                pass
+            state = get_state(run_path.name)
+            if state:
+                runs.append(state)
 
     return runs
 
