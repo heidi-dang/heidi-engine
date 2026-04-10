@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -185,8 +186,11 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     """
     found = []
 
+    # Normalize code by removing backslash line continuations to prevent bypasses
+    normalized_code = code.replace("\\\n", "")
+
     for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, code, re.IGNORECASE):
+        if re.search(pattern, normalized_code, re.IGNORECASE):
             found.append(pattern)
 
     return len(found) > 0, found
@@ -229,7 +233,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{textwrap.indent(code, "    ")}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -257,13 +261,21 @@ except Exception as e:
 
     # Try to execute with timeout
     try:
+        # SECURITY: Filter environment variables to prevent leakage of secrets
+        # to untrusted generated code.
+        filtered_env = {
+            k: v for k, v in os.environ.items()
+            if not any(secret in k.upper() for secret in ["KEY", "TOKEN", "SECRET", "PASS"])
+        }
+        filtered_env["PYTHONPATH"] = temp_dir
+
         result = subprocess.run(
             [sys.executable, test_file],
             capture_output=True,
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=filtered_env,
         )
 
         stdout = result.stdout
