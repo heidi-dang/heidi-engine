@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -56,34 +57,34 @@ EXECUTION_TIMEOUT = 5
 # TUNABLE: Adjust regex for different code formats
 CODE_BLOCK_PATTERNS = [
     # Markdown code blocks: ```python ... ```
-    r"```python\n(.*?)```",
+    re.compile(r"```python\n(.*?)```", re.DOTALL),
     # Markdown code blocks without language: ``` ... ```
-    r"```\n(.*?)```",
+    re.compile(r"```\n(.*?)```", re.DOTALL),
     # Inline code markers
-    r"`([^`\n]+)`",
+    re.compile(r"`([^`\n]+)`"),
 ]
 
 # Patterns that indicate code should NOT be executed
 # TUNABLE: Add more dangerous patterns to block
 DANGEROUS_PATTERNS = [
     # Dangerous imports (including comma-separated and aliased)
-    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
-    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
+    re.compile(r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b", re.IGNORECASE),
+    re.compile(r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b", re.IGNORECASE),
     # Dangerous built-ins
-    r"\beval\s*\(",
-    r"\bexec\s*\(",
-    r"\b__import__\s*\(",
-    r"\bgetattr\s*\(",
-    r"\bsetattr\s*\(",
-    r"\bbreakpoint\s*\(",
+    re.compile(r"\beval\s*\(", re.IGNORECASE),
+    re.compile(r"\bexec\s*\(", re.IGNORECASE),
+    re.compile(r"\b__import__\s*\(", re.IGNORECASE),
+    re.compile(r"\bgetattr\s*\(", re.IGNORECASE),
+    re.compile(r"\bsetattr\s*\(", re.IGNORECASE),
+    re.compile(r"\bbreakpoint\s*\(", re.IGNORECASE),
     # Dangerous module functions
-    r"\bos\.(system|popen|spawn|remove|unlink|rmdir|mkdir|chmod|chown|kill|exec|fork|pipe)\b",
-    r"\bsubprocess\.(run|call|check_call|check_output|Popen)\b",
-    r"\bshutil\.(rmtree|move|copy|copy2|copyfile|copymode|copystat|chown)\b",
-    r"\bpickle\.(load|loads)\b",
-    r"\bshelve\.open\b",
+    re.compile(r"\bos\.(system|popen|spawn|remove|unlink|rmdir|mkdir|chmod|chown|kill|exec|fork|pipe)\b", re.IGNORECASE),
+    re.compile(r"\bsubprocess\.(run|call|check_call|check_output|Popen)\b", re.IGNORECASE),
+    re.compile(r"\bshutil\.(rmtree|move|copy|copy2|copyfile|copymode|copystat|chown)\b", re.IGNORECASE),
+    re.compile(r"\bpickle\.(load|loads)\b", re.IGNORECASE),
+    re.compile(r"\bshelve\.open\b", re.IGNORECASE),
     # File operations (specifically writing/appending)
-    r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
+    re.compile(r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]", re.IGNORECASE),
 ]
 
 
@@ -150,7 +151,7 @@ def extract_python_code(text: str) -> List[str]:
     code_blocks = []
 
     for pattern in CODE_BLOCK_PATTERNS:
-        matches = re.findall(pattern, text, re.DOTALL)
+        matches = pattern.findall(text)
         code_blocks.extend(matches)
 
     # Filter: keep only code that looks like Python
@@ -177,6 +178,7 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     Check if code contains dangerous patterns.
 
     HOW IT WORKS:
+        - Normalizes code (removes backslash-newline)
         - Matches against list of dangerous patterns
         - Returns (is_dangerous, list_of_matches)
 
@@ -185,9 +187,12 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     """
     found = []
 
+    # Normalize code to prevent regex bypass using backslash-newline
+    normalized_code = code.replace("\\\n", "")
+
     for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, code, re.IGNORECASE):
-            found.append(pattern)
+        if pattern.search(normalized_code):
+            found.append(pattern.pattern)
 
     return len(found) > 0, found
 
@@ -205,6 +210,7 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     SAFETY:
         - Runs in temp directory
         - Has timeout protection
+        - Filters environment for secrets
         - Does NOT execute system commands
 
     TUNABLE:
@@ -214,6 +220,8 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     test_file = os.path.join(temp_dir, "test_code.py")
 
     # Wrap code to capture output safely
+    # Use textwrap.indent to handle multi-line code properly
+    indented_code = textwrap.indent(code, "    ")
     wrapped_code = f"""
 import sys
 import io
@@ -229,7 +237,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -255,6 +263,13 @@ except Exception as e:
     except SyntaxError as e:
         return False, "", f"Syntax error: {e}"
 
+    # Filter environment to remove potential secrets
+    safe_env = {
+        k: v for k, v in os.environ.items()
+        if not any(secret_key in k.upper() for secret_key in ["KEY", "TOKEN", "SECRET", "PASS"])
+    }
+    safe_env["PYTHONPATH"] = temp_dir
+
     # Try to execute with timeout
     try:
         result = subprocess.run(
@@ -263,7 +278,7 @@ except Exception as e:
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=safe_env,
         )
 
         stdout = result.stdout
@@ -367,7 +382,9 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    dirname = os.path.dirname(path)
+    if dirname:
+        os.makedirs(dirname, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
