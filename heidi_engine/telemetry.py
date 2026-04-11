@@ -272,41 +272,57 @@ _initialized = False
 class StateCache:
     """
     Thread-safe cache for run state to avoid redundant disk I/O.
+    BOLT OPTIMIZATION: Supports multiple run IDs and file mtime validation.
     """
 
     def __init__(self, ttl: float = 0.5):
         self.ttl = ttl
-        self._cache: Dict[str, Any] = {}
-        self._cached_run_id: Optional[str] = None
-        self._last_check = 0.0
+        self._cache: Dict[str, Dict[str, Any]] = {}  # run_id -> {state, ts, mtime}
         self._lock = threading.Lock()
 
-    def get(self, run_id: str) -> Optional[Dict[str, Any]]:
+    def get(self, run_id: str, state_file: Optional[Path] = None) -> Optional[Dict[str, Any]]:
         """Get cached state if valid and TTL hasn't expired."""
         with self._lock:
+            entry = self._cache.get(run_id)
+            if not entry:
+                return None
+
             now = time.monotonic()
-            if (
-                self._cached_run_id == run_id
-                and (now - self._last_check) < self.ttl
-                and self._cache
-            ):
-                return copy.deepcopy(self._cache)
+            if (now - entry["ts"]) < self.ttl:
+                # If state_file provided, verify mtime to ensure cache is still fresh
+                if state_file:
+                    try:
+                        if state_file.stat().st_mtime != entry["mtime"]:
+                            return None
+                    except OSError:
+                        return None
+
+                return copy.deepcopy(entry["state"])
         return None
 
-    def set(self, run_id: str, state: Dict[str, Any]):
+    def set(self, run_id: str, state: Dict[str, Any], state_file: Optional[Path] = None):
         """Update cache with new state."""
+        mtime = 0.0
+        if state_file:
+            try:
+                mtime = state_file.stat().st_mtime
+            except OSError:
+                pass
+
         with self._lock:
-            self._cache = copy.deepcopy(state)
-            self._cached_run_id = run_id
-            self._last_check = time.monotonic()
+            self._cache[run_id] = {
+                "state": copy.deepcopy(state),
+                "ts": time.monotonic(),
+                "mtime": mtime,
+            }
 
     def invalidate(self, run_id: Optional[str] = None):
         """Invalidate cache for a specific run or all runs."""
         with self._lock:
-            if run_id is None or self._cached_run_id == run_id:
+            if run_id is None:
                 self._cache = {}
-                self._cached_run_id = None
-                self._last_check = 0.0
+            elif run_id in self._cache:
+                del self._cache[run_id]
 
 
 _state_cache = StateCache()
@@ -716,13 +732,12 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
         State dictionary
     """
     resolved_run_id = run_id or get_run_id()
+    state_file = get_state_path(resolved_run_id)
 
-    # BOLT OPTIMIZATION: Check cache first
-    cached = _state_cache.get(resolved_run_id)
+    # BOLT OPTIMIZATION: Check cache first with file mtime validation
+    cached = _state_cache.get(resolved_run_id, state_file)
     if cached is not None:
         return cached
-
-    state_file = get_state_path(resolved_run_id)
 
     if not state_file.exists():
         return {
@@ -732,19 +747,14 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "usage": get_default_usage(),
         }
 
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
-
     try:
         with open(state_file) as f:
             state = json.load(f)
             # Resolve status from on-disk metadata
             state["status"] = resolve_status(state)
 
-            # BOLT OPTIMIZATION: Update cache
-            _state_cache.set(resolved_run_id, state)
+            # BOLT OPTIMIZATION: Update cache with mtime for faster validation
+            _state_cache.set(resolved_run_id, state, state_file)
 
             return state
     except Exception as e:
