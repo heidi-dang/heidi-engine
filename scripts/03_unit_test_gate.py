@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -177,6 +178,7 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     Check if code contains dangerous patterns.
 
     HOW IT WORKS:
+        - Normalizes code (removes backslash-newline)
         - Matches against list of dangerous patterns
         - Returns (is_dangerous, list_of_matches)
 
@@ -185,8 +187,11 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     """
     found = []
 
+    # SECURITY: Normalize code to prevent bypasses using backslash-newline
+    normalized_code = code.replace("\\\n", "")
+
     for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, code, re.IGNORECASE):
+        if re.search(pattern, normalized_code, re.IGNORECASE):
             found.append(pattern)
 
     return len(found) > 0, found
@@ -213,6 +218,9 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     # Write code to temp file
     test_file = os.path.join(temp_dir, "test_code.py")
 
+    # SECURITY: Indent the user code correctly for the try block
+    indented_code = textwrap.indent(code, "    ")
+
     # Wrap code to capture output safely
     wrapped_code = f"""
 import sys
@@ -229,7 +237,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -257,13 +265,25 @@ except Exception as e:
 
     # Try to execute with timeout
     try:
+        # SECURITY: Filter environment variables to prevent secret leakage
+        # Only pass non-sensitive variables to the test subprocess
+        safe_env = {}
+        for k, v in os.environ.items():
+            # Exclude variables that likely contain secrets
+            if any(secret_kw in k.upper() for secret_kw in ["KEY", "TOKEN", "SECRET", "PASS"]):
+                continue
+            safe_env[k] = v
+
+        # Add PYTHONPATH
+        safe_env["PYTHONPATH"] = temp_dir
+
         result = subprocess.run(
             [sys.executable, test_file],
             capture_output=True,
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=safe_env,
         )
 
         stdout = result.stdout
@@ -367,7 +387,9 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    output_dir = os.path.dirname(path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
