@@ -473,27 +473,43 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Falls back to DEFAULT_PRICING
         - Allows user to customize pricing per model
 
+    BOLT OPTIMIZATION:
+        Thread-safe caching with 2.0s TTL per config file to eliminate redundant
+        disk I/O and JSON parsing during high-frequency telemetry events.
+
     TUNABLE:
         - Create pricing.json to override default prices
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
-    pricing = DEFAULT_PRICING.copy()
+    # BOLT OPTIMIZATION: Use environment variables for fast cache key
+    # avoids expensive Path construction and absolute() syscalls on hot-path.
+    cache_key = PRICING_CONFIG_PATH or get_run_id()
 
-    # Check for pricing config file
-    pricing_file = (
-        Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
-    )
+    global _pricing_cache, _pricing_check_ts
+    with _pricing_lock:
+        now = time.monotonic()
+        if cache_key in _pricing_cache and (now - _pricing_check_ts.get(cache_key, 0)) < 2.0:
+            return _pricing_cache[cache_key].copy()
 
-    if pricing_file.exists():
-        try:
-            with open(pricing_file) as f:
-                custom = json.load(f)
-                pricing.update(custom)
-        except Exception as e:
-            print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+        pricing = DEFAULT_PRICING.copy()
 
-    return pricing
+        # Check for pricing config file path
+        pricing_file = (
+            Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
+        )
+
+        if pricing_file.exists():
+            try:
+                with open(pricing_file) as f:
+                    custom = json.load(f)
+                    pricing.update(custom)
+            except Exception as e:
+                print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+
+        _pricing_cache[cache_key] = pricing.copy()
+        _pricing_check_ts[cache_key] = now
+        return pricing
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -1375,6 +1391,12 @@ _gpu_lock = threading.Lock()
 _event_ts_cache: Dict[str, str] = {}
 _event_ts_check_ts: Dict[str, float] = {}  # run_id -> ts
 _event_lock = threading.Lock()
+
+# BOLT OPTIMIZATION: Module-level caching for pricing config
+# Keyed by pricing file path to avoid cross-run pollution
+_pricing_cache: Dict[str, Dict[str, float]] = {}
+_pricing_check_ts: Dict[str, float] = {}  # path -> ts
+_pricing_lock = threading.Lock()
 
 
 def get_gpu_summary() -> Dict[str, Any]:
