@@ -177,6 +177,7 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     Check if code contains dangerous patterns.
 
     HOW IT WORKS:
+        - Normalizes code (removes backslash-newline) to prevent regex bypass
         - Matches against list of dangerous patterns
         - Returns (is_dangerous, list_of_matches)
 
@@ -185,8 +186,11 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     """
     found = []
 
+    # SECURITY: Normalize code to prevent bypasses like 'import\nos'
+    normalized_code = code.replace("\\\n", "").replace("\\\r\n", "")
+
     for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, code, re.IGNORECASE):
+        if re.search(pattern, normalized_code, re.IGNORECASE):
             found.append(pattern)
 
     return len(found) > 0, found
@@ -257,13 +261,26 @@ except Exception as e:
 
     # Try to execute with timeout
     try:
+        # SECURITY: Filter environment variables to prevent leaking sensitive info
+        # to generated code (e.g., API keys, tokens, etc.)
+        safe_env = {
+            k: v
+            for k, v in os.environ.items()
+            if not any(
+                secret_word in k.upper()
+                for secret_word in ["KEY", "TOKEN", "SECRET", "PASS"]
+            )
+        }
+        # Add PYTHONPATH to safe_env
+        safe_env["PYTHONPATH"] = temp_dir
+
         result = subprocess.run(
             [sys.executable, test_file],
             capture_output=True,
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=safe_env,
         )
 
         stdout = result.stdout
@@ -367,7 +384,9 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    dirname = os.path.dirname(path)
+    if dirname:
+        os.makedirs(dirname, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
