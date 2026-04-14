@@ -67,8 +67,8 @@ CODE_BLOCK_PATTERNS = [
 # TUNABLE: Add more dangerous patterns to block
 DANGEROUS_PATTERNS = [
     # Dangerous imports (including comma-separated and aliased)
-    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
-    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
+    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc|importlib|builtins|inspect)\b",
+    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc|importlib|builtins|inspect)\b",
     # Dangerous built-ins
     r"\beval\s*\(",
     r"\bexec\s*\(",
@@ -205,7 +205,7 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     SAFETY:
         - Runs in temp directory
         - Has timeout protection
-        - Does NOT execute system commands
+        - Filters environment variables to prevent secret leakage
 
     TUNABLE:
         - execution_timeout: Max time code can run
@@ -213,39 +213,12 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     # Write code to temp file
     test_file = os.path.join(temp_dir, "test_code.py")
 
-    # Wrap code to capture output safely
-    wrapped_code = f"""
-import sys
-import io
-
-# Capture stdout and stderr
-stdout_capture = io.StringIO()
-stderr_capture = io.StringIO()
-original_stdout = sys.stdout
-original_stderr = sys.stderr
-
-try:
-    sys.stdout = stdout_capture
-    sys.stderr = stderr_capture
-
-    # Execute the user's code
-{code}
-
-    sys.stdout = original_stdout
-    sys.stderr = original_stderr
-
-    print("__EXECUTION_SUCCESS__")
-    print(stdout_capture.getvalue())
-
-except Exception as e:
-    sys.stdout = original_stdout
-    sys.stderr = original_stderr
-    print(f"__EXECUTION_ERROR__: {{e}}", file=sys.stderr)
-"""
+    # Clean up code and ensure it's valid
+    code = code.strip()
 
     try:
         with open(test_file, "w") as f:
-            f.write(wrapped_code)
+            f.write(code)
     except Exception as e:
         return False, "", f"Failed to write temp file: {e}"
 
@@ -255,6 +228,14 @@ except Exception as e:
     except SyntaxError as e:
         return False, "", f"Syntax error: {e}"
 
+    # SECURITY: Filter environment variables to prevent leakage of secrets
+    # to the code being tested. This is a crucial defense-in-depth measure.
+    safe_env = {
+        k: v for k, v in os.environ.items()
+        if not any(secret_key in k.upper() for secret_key in ["KEY", "TOKEN", "SECRET", "PASS"])
+    }
+    safe_env["PYTHONPATH"] = temp_dir
+
     # Try to execute with timeout
     try:
         result = subprocess.run(
@@ -263,23 +244,11 @@ except Exception as e:
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=safe_env,
         )
 
-        stdout = result.stdout
-        stderr = result.stderr
-
-        # Check for execution success marker
-        if "__EXECUTION_SUCCESS__" in stdout:
-            return True, stdout.replace("__EXECUTION_SUCCESS__\n", ""), stderr
-        elif "__EXECUTION_ERROR__" in stderr:
-            return False, stdout, stderr
-        else:
-            # Exit code check
-            if result.returncode != 0:
-                return False, stdout, stderr
-
-            return True, stdout, stderr
+        passed = result.returncode == 0
+        return passed, result.stdout, result.stderr
 
     except subprocess.TimeoutExpired:
         return False, "", f"Execution timeout ({execution_timeout}s)"
@@ -330,7 +299,12 @@ def test_sample(
     for i, code in enumerate(code_blocks):
         passed, stdout, stderr = test_python_code(code, temp_dir, execution_timeout)
         results.append(
-            {"block_index": i, "passed": passed, "error": stderr if not passed else None}
+            {
+                "block_index": i,
+                "passed": passed,
+                "stdout": stdout if passed else None,
+                "error": stderr if not passed else None,
+            }
         )
 
     # Sample passes if at least one code block passes
@@ -367,7 +341,8 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.dirname(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
