@@ -733,8 +733,8 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
         }
 
     # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
+    cached = _state_cache.get(resolved_run_id)
+    if cached is not None:
         return cached
 
     try:
