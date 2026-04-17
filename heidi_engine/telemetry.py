@@ -463,6 +463,12 @@ DEFAULT_PRICING = {
     "claude-3-haiku": {"input": 0.25, "output": 1.25},
 }
 
+# BOLT OPTIMIZATION: Module-level caching for pricing config
+_pricing_cache: Optional[Dict[str, Dict[str, float]]] = None
+_pricing_cache_ts = 0.0
+_pricing_cache_key = ""
+_pricing_lock = threading.Lock()
+
 
 def load_pricing_config() -> Dict[str, Dict[str, float]]:
     """
@@ -473,17 +479,36 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Falls back to DEFAULT_PRICING
         - Allows user to customize pricing per model
 
+    BOLT OPTIMIZATION:
+        Uses thread-safe caching with 2.0s TTL to avoid redundant disk I/O
+        and JSON parsing on performance-critical paths (e.g. event emission).
+
     TUNABLE:
         - Create pricing.json to override default prices
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
-    pricing = DEFAULT_PRICING.copy()
+    global _pricing_cache, _pricing_cache_ts, _pricing_cache_key
 
     # Check for pricing config file
     pricing_file = (
         Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
     )
+
+    # BOLT OPTIMIZATION: Check thread-safe cache
+    # Performance Note: Using str(pricing_file.absolute()) triggers syscalls.
+    # Using environment variables/pre-computed strings for keys is faster.
+    file_key = f"{PRICING_CONFIG_PATH}:{get_run_id()}"
+    with _pricing_lock:
+        now = time.monotonic()
+        if (
+            _pricing_cache is not None
+            and _pricing_cache_key == file_key
+            and (now - _pricing_cache_ts) < 2.0
+        ):
+            return copy.deepcopy(_pricing_cache)
+
+    pricing = DEFAULT_PRICING.copy()
 
     if pricing_file.exists():
         try:
@@ -493,7 +518,13 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         except Exception as e:
             print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
 
-    return pricing
+    # BOLT OPTIMIZATION: Update cache
+    with _pricing_lock:
+        _pricing_cache = pricing
+        _pricing_cache_ts = time.monotonic()
+        _pricing_cache_key = file_key
+
+    return copy.deepcopy(pricing)
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -731,11 +762,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
