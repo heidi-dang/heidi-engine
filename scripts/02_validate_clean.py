@@ -89,6 +89,18 @@ SECRET_PATTERNS = [
 # TUNABLE: Add/remove fields based on your data structure
 SECRET_CHECK_FIELDS = ["instruction", "input", "output", "response", "completion"]
 
+# BOLT OPTIMIZATION: Pre-compiled secret patterns to avoid redundant compilation
+# on every sample. Yields significant performance gain for large datasets.
+_SECRET_COMPILED = [(re.compile(p), t) for p, t in SECRET_PATTERNS]
+
+# BOLT OPTIMIZATION: Keywords for fast-path early exit.
+# Python "in" operator is significantly faster than regex for simple matches.
+_SECRET_KEYWORDS = [
+    "api", "secret", "bearer", "token", "akia", "aws", "private", "openssh",
+    "mongodb", "postgres", "mysql", "redis", "://", "ghp_", "glpat-", "sk-",
+    "password", "pwd"
+]
+
 
 def parse_args() -> argparse.Namespace:
     """
@@ -192,6 +204,11 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
         - Checks all specified fields against secret patterns
         - FAIL CLOSED: Returns True (has secrets) if ANY pattern matches
 
+    BOLT OPTIMIZATION:
+        1. Joins all fields into one string to minimize regex calls.
+        2. Uses fast-path indicator check to skip safe strings.
+        3. Uses pre-compiled regex patterns.
+
     TUNABLE:
         - Add more SECRET_PATTERNS for your use case
         - Adjust SECRET_CHECK_FIELDS to check more/less fields
@@ -202,14 +219,34 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
     """
     found_secrets = []
 
+    # BOLT OPTIMIZATION: Collect all text to check once
+    check_texts = []
+    for field in SECRET_CHECK_FIELDS:
+        if field in sample:
+            check_texts.append(str(sample[field]))
+
+    if not check_texts:
+        return False, []
+
+    combined_text = "\n".join(check_texts)
+    combined_lower = combined_text.lower()
+
+    # BOLT OPTIMIZATION: Fast-path early exit using simple keyword check
+    # Python "in" is optimized for substring searching.
+    if not any(kw in combined_lower for kw in _SECRET_KEYWORDS):
+        return False, []
+
+    # If indicators found, do deep check
     for field in SECRET_CHECK_FIELDS:
         if field not in sample:
             continue
 
         text = str(sample[field])
+        if not any(kw in text.lower() for kw in _SECRET_KEYWORDS):
+            continue
 
-        for pattern, secret_type in SECRET_PATTERNS:
-            if re.search(pattern, text):
+        for pattern_re, secret_type in _SECRET_COMPILED:
+            if pattern_re.search(text):
                 found_secrets.append(f"{field}:{secret_type}")
 
     return len(found_secrets) > 0, found_secrets
