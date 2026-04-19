@@ -89,6 +89,16 @@ SECRET_PATTERNS = [
 # TUNABLE: Add/remove fields based on your data structure
 SECRET_CHECK_FIELDS = ["instruction", "input", "output", "response", "completion"]
 
+# BOLT OPTIMIZATION: Pre-compiled regex patterns for secret detection
+_COMPILED_SECRETS = [(re.compile(p), t) for p, t in SECRET_PATTERNS]
+
+# BOLT OPTIMIZATION: Fast-path indicators to skip clean strings quickly.
+# Must be kept in sync with SECRET_PATTERNS.
+_SECRET_INDICATORS = re.compile(
+    r"api[_-]?key|apikey|secret[_-]?key|bearer|token|AKIA|aws[_-]?secret|BEGIN\s+(RSA\s+)?PRIVATE|BEGIN\s+OPENSSH|mongodb|postgres|mysql|redis|ghp_|glpat-|sk-|password|pwd|['\"]",
+    re.IGNORECASE,
+)
+
 
 def parse_args() -> argparse.Namespace:
     """
@@ -192,6 +202,10 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
         - Checks all specified fields against secret patterns
         - FAIL CLOSED: Returns True (has secrets) if ANY pattern matches
 
+    BOLT OPTIMIZATION:
+        Uses pre-compiled regex and a fast-path keyword check to minimize
+        overhead on clean data.
+
     TUNABLE:
         - Add more SECRET_PATTERNS for your use case
         - Adjust SECRET_CHECK_FIELDS to check more/less fields
@@ -208,8 +222,12 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
 
         text = str(sample[field])
 
-        for pattern, secret_type in SECRET_PATTERNS:
-            if re.search(pattern, text):
+        # BOLT OPTIMIZATION: Skip expensive regex loop if no indicators are found
+        if not _SECRET_INDICATORS.search(text):
+            continue
+
+        for pattern, secret_type in _COMPILED_SECRETS:
+            if pattern.search(text):
                 found_secrets.append(f"{field}:{secret_type}")
 
     return len(found_secrets) > 0, found_secrets
