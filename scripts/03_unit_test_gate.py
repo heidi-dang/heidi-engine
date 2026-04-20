@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -67,8 +68,8 @@ CODE_BLOCK_PATTERNS = [
 # TUNABLE: Add more dangerous patterns to block
 DANGEROUS_PATTERNS = [
     # Dangerous imports (including comma-separated and aliased)
-    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
-    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
+    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc|importlib|builtins|gc|inspect|types)\b",
+    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc|importlib|builtins|gc|inspect|types)\b",
     # Dangerous built-ins
     r"\beval\s*\(",
     r"\bexec\s*\(",
@@ -84,6 +85,12 @@ DANGEROUS_PATTERNS = [
     r"\bshelve\.open\b",
     # File operations (specifically writing/appending)
     r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
+    # Sandbox escape patterns
+    r"__builtins__",
+    r"__subclasses__",
+    r"__globals__",
+    r"__base__",
+    r"__mro__",
 ]
 
 
@@ -213,6 +220,9 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     # Write code to temp file
     test_file = os.path.join(temp_dir, "test_code.py")
 
+    # Indent code for wrapping
+    indented_code = textwrap.indent(code, "    ")
+
     # Wrap code to capture output safely
     wrapped_code = f"""
 import sys
@@ -229,7 +239,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -255,6 +265,14 @@ except Exception as e:
     except SyntaxError as e:
         return False, "", f"Syntax error: {e}"
 
+    # Create sanitized environment - use allowlist for security
+    # Only allow safe, standard environment variables
+    safe_vars = ["PATH", "LANG", "PYTHONIOENCODING", "USER", "HOME", "PWD", "SHELL"]
+    sanitized_env = {k: os.environ[k] for k in safe_vars if k in os.environ}
+
+    # Ensure PYTHONPATH includes temp_dir
+    sanitized_env["PYTHONPATH"] = temp_dir
+
     # Try to execute with timeout
     try:
         result = subprocess.run(
@@ -263,7 +281,7 @@ except Exception as e:
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=sanitized_env,
         )
 
         stdout = result.stdout
@@ -367,7 +385,9 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    dirname = os.path.dirname(path)
+    if dirname:
+        os.makedirs(dirname, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
