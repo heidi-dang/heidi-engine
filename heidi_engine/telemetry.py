@@ -463,6 +463,10 @@ DEFAULT_PRICING = {
     "claude-3-haiku": {"input": 0.25, "output": 1.25},
 }
 
+# BOLT OPTIMIZATION: Thread-safe cache for pricing configuration to avoid redundant I/O.
+_pricing_cache: Dict[str, Dict[str, Dict[str, float]]] = {}
+_pricing_lock = threading.Lock()
+
 
 def load_pricing_config() -> Dict[str, Dict[str, float]]:
     """
@@ -473,17 +477,24 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Falls back to DEFAULT_PRICING
         - Allows user to customize pricing per model
 
+    BOLT OPTIMIZATION:
+        Uses a thread-safe cache keyed by pricing file path to avoid redundant
+        disk I/O and JSON parsing on every call.
+
     TUNABLE:
         - Create pricing.json to override default prices
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
-    pricing = DEFAULT_PRICING.copy()
+    # Check for pricing config file path first to use as cache key
+    pricing_file_path = PRICING_CONFIG_PATH or str(get_run_dir() / "pricing.json")
 
-    # Check for pricing config file
-    pricing_file = (
-        Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
-    )
+    with _pricing_lock:
+        if pricing_file_path in _pricing_cache:
+            return copy.deepcopy(_pricing_cache[pricing_file_path])
+
+    pricing = DEFAULT_PRICING.copy()
+    pricing_file = Path(pricing_file_path)
 
     if pricing_file.exists():
         try:
@@ -493,7 +504,11 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         except Exception as e:
             print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
 
-    return pricing
+    # Update cache
+    with _pricing_lock:
+        _pricing_cache[pricing_file_path] = pricing
+
+    return copy.deepcopy(pricing)
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -731,11 +746,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
