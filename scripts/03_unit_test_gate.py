@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -67,8 +68,8 @@ CODE_BLOCK_PATTERNS = [
 # TUNABLE: Add more dangerous patterns to block
 DANGEROUS_PATTERNS = [
     # Dangerous imports (including comma-separated and aliased)
-    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
-    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
+    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc|importlib|gc|inspect|builtins|ctypes)\b",
+    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc|importlib|gc|inspect|builtins|ctypes)\b",
     # Dangerous built-ins
     r"\beval\s*\(",
     r"\bexec\s*\(",
@@ -76,12 +77,15 @@ DANGEROUS_PATTERNS = [
     r"\bgetattr\s*\(",
     r"\bsetattr\s*\(",
     r"\bbreakpoint\s*\(",
+    r"\bdelattr\s*\(",
+    r"\bhelp\s*\(",
     # Dangerous module functions
     r"\bos\.(system|popen|spawn|remove|unlink|rmdir|mkdir|chmod|chown|kill|exec|fork|pipe)\b",
     r"\bsubprocess\.(run|call|check_call|check_output|Popen)\b",
     r"\bshutil\.(rmtree|move|copy|copy2|copyfile|copymode|copystat|chown)\b",
     r"\bpickle\.(load|loads)\b",
     r"\bshelve\.open\b",
+    r"\bimportlib\.import_module\b",
     # File operations (specifically writing/appending)
     r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
 ]
@@ -214,6 +218,9 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     test_file = os.path.join(temp_dir, "test_code.py")
 
     # Wrap code to capture output safely
+    # We use textwrap.indent to ensure the code block is correctly indented
+    # inside the try block.
+    indented_code = textwrap.indent(code, "    ")
     wrapped_code = f"""
 import sys
 import io
@@ -229,7 +236,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -255,6 +262,12 @@ except Exception as e:
     except SyntaxError as e:
         return False, "", f"Syntax error: {e}"
 
+    # SECURITY: Filter environment variables to prevent leaking sensitive keys (e.g. OPENAI_API_KEY)
+    # We only allow a small allowlist of safe environment variables.
+    safe_env_keys = {"PATH", "LANG", "PYTHONIOENCODING", "USER", "HOME", "PWD"}
+    safe_env = {k: v for k, v in os.environ.items() if k in safe_env_keys}
+    safe_env["PYTHONPATH"] = temp_dir
+
     # Try to execute with timeout
     try:
         result = subprocess.run(
@@ -263,7 +276,7 @@ except Exception as e:
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=safe_env,
         )
 
         stdout = result.stdout
