@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -67,17 +68,21 @@ CODE_BLOCK_PATTERNS = [
 # TUNABLE: Add more dangerous patterns to block
 DANGEROUS_PATTERNS = [
     # Dangerous imports (including comma-separated and aliased)
-    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
-    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
-    # Dangerous built-ins
+    # Includes indirect paths to os/subprocess like posixpath, ntpath, etc.
+    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc|posixpath|ntpath|macpath|genericpath|builtins|inspect|importlib|gc|ctypes)\b",
+    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc|posixpath|ntpath|macpath|genericpath|builtins|inspect|importlib|gc|ctypes)\b",
+    # Dangerous built-ins and internal attributes
     r"\beval\s*\(",
     r"\bexec\s*\(",
     r"\b__import__\s*\(",
     r"\bgetattr\s*\(",
     r"\bsetattr\s*\(",
     r"\bbreakpoint\s*\(",
+    r"__builtins__",
+    r"__subclasses__",
+    r"__globals__",
     # Dangerous module functions
-    r"\bos\.(system|popen|spawn|remove|unlink|rmdir|mkdir|chmod|chown|kill|exec|fork|pipe)\b",
+    r"\bos\.(system|popen|spawn|remove|unlink|rmdir|mkdir|chmod|chown|kill|exec|fork|pipe|walk|listdir)\b",
     r"\bsubprocess\.(run|call|check_call|check_output|Popen)\b",
     r"\bshutil\.(rmtree|move|copy|copy2|copyfile|copymode|copystat|chown)\b",
     r"\bpickle\.(load|loads)\b",
@@ -229,7 +234,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{textwrap.indent(code, '    ')}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -257,13 +262,21 @@ except Exception as e:
 
     # Try to execute with timeout
     try:
+        # SECURITY: Restrict environment to prevent secret leakage (e.g. OPENAI_API_KEY)
+        safe_env = {
+            "PATH": os.environ.get("PATH", ""),
+            "PYTHONPATH": temp_dir,
+            "LANG": os.environ.get("LANG", "en_US.UTF-8"),
+            "PYTHONIOENCODING": "utf-8",
+        }
+
         result = subprocess.run(
             [sys.executable, test_file],
             capture_output=True,
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=safe_env,
         )
 
         stdout = result.stdout
@@ -367,7 +380,8 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.dirname(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
