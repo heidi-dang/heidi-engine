@@ -67,8 +67,8 @@ CODE_BLOCK_PATTERNS = [
 # TUNABLE: Add more dangerous patterns to block
 DANGEROUS_PATTERNS = [
     # Dangerous imports (including comma-separated and aliased)
-    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
-    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
+    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc|posixpath|ntpath|macpath|genericpath|builtins|inspect|importlib|gc|ctypes)\b",
+    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc|posixpath|ntpath|macpath|genericpath|builtins|inspect|importlib|gc|ctypes)\b",
     # Dangerous built-ins
     r"\beval\s*\(",
     r"\bexec\s*\(",
@@ -84,7 +84,15 @@ DANGEROUS_PATTERNS = [
     r"\bshelve\.open\b",
     # File operations (specifically writing/appending)
     r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
+    # Dangerous attributes and internal bypasses
+    r"__subclasses__",
+    r"__globals__",
+    r"__builtins__",
 ]
+
+# Safe environment variables for code execution
+# TUNABLE: Add more safe variables as needed
+SAFE_ENV_VARS = ["PATH", "PYTHONPATH", "LANG", "PYTHONIOENCODING"]
 
 
 def parse_args() -> argparse.Namespace:
@@ -213,6 +221,9 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     # Write code to temp file
     test_file = os.path.join(temp_dir, "test_code.py")
 
+    # Indent user code for the try-except block
+    indented_code = "\n".join("    " + line for line in code.splitlines())
+
     # Wrap code to capture output safely
     wrapped_code = f"""
 import sys
@@ -229,7 +240,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -255,6 +266,10 @@ except Exception as e:
     except SyntaxError as e:
         return False, "", f"Syntax error: {e}"
 
+    # Filter environment for safety
+    safe_env = {k: v for k, v in os.environ.items() if k in SAFE_ENV_VARS}
+    safe_env["PYTHONPATH"] = temp_dir
+
     # Try to execute with timeout
     try:
         result = subprocess.run(
@@ -263,7 +278,7 @@ except Exception as e:
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=safe_env,
         )
 
         stdout = result.stdout
