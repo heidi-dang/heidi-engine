@@ -82,6 +82,12 @@ class TestSecretRedaction:
         assert "[GITHUB_TOKEN]" in redacted
         assert "[OPENAI_KEY]" in redacted
 
+    def test_redact_openai_proj(self):
+        text = "API key: sk-proj-1234567890abcdefghijklmnopqrstuvwxyz1234567890"
+        redacted = redact_secrets(text)
+        assert "[OPENAI_KEY]" in redacted
+        assert "sk-proj-" not in redacted
+
     def test_no_secrets(self):
         """Test that normal text is not modified."""
         text = "This is a normal string with no secrets"

@@ -67,15 +67,19 @@ CODE_BLOCK_PATTERNS = [
 # TUNABLE: Add more dangerous patterns to block
 DANGEROUS_PATTERNS = [
     # Dangerous imports (including comma-separated and aliased)
-    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
-    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
-    # Dangerous built-ins
+    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|shutil|socket|requests|urllib|pathlib|posixpath|ntpath|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc|gc|ctypes|inspect|importlib)\b",
+    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|posixpath|ntpath|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc|gc|ctypes|inspect|importlib)\b",
+    # Dangerous built-ins and internal attributes
     r"\beval\s*\(",
     r"\bexec\s*\(",
     r"\b__import__\s*\(",
     r"\bgetattr\s*\(",
     r"\bsetattr\s*\(",
     r"\bbreakpoint\s*\(",
+    r"\b__getattribute__\b",
+    r"\b__subclasses__\b",
+    r"\b__builtins__\b",
+    r"\b__globals__\b",
     # Dangerous module functions
     r"\bos\.(system|popen|spawn|remove|unlink|rmdir|mkdir|chmod|chown|kill|exec|fork|pipe)\b",
     r"\bsubprocess\.(run|call|check_call|check_output|Popen)\b",
@@ -163,7 +167,19 @@ def extract_python_code(text: str) -> List[str]:
 
         # Skip if it's clearly not Python (no indentation, keywords, etc.)
         if not any(
-            kw in code for kw in ["def ", "class ", "import ", "return ", "if ", "for ", "while "]
+            kw in code
+            for kw in [
+                "def ",
+                "class ",
+                "import ",
+                "return ",
+                "if ",
+                "for ",
+                "while ",
+                "with ",
+                "print(",
+                " = ",
+            ]
         ):
             continue
 
@@ -213,6 +229,9 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     # Write code to temp file
     test_file = os.path.join(temp_dir, "test_code.py")
 
+    # Indent code for wrapping
+    indented_code = "\n".join("    " + line for line in code.splitlines())
+
     # Wrap code to capture output safely
     wrapped_code = f"""
 import sys
@@ -229,7 +248,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -367,7 +386,9 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
