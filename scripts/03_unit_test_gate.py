@@ -214,6 +214,8 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     test_file = os.path.join(temp_dir, "test_code.py")
 
     # Wrap code to capture output safely
+    # We indent the user code to be within the try block
+    indented_code = "\n".join("    " + line for line in code.splitlines())
     wrapped_code = f"""
 import sys
 import io
@@ -229,7 +231,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -257,13 +259,19 @@ except Exception as e:
 
     # Try to execute with timeout
     try:
+        # SECURITY: Filter environment variables to prevent leakage of sensitive data
+        # like API keys (e.g. OPENAI_API_KEY) to the generated code being tested.
+        safe_env_keys = ["PATH", "PYTHONPATH", "LANG", "PYTHONIOENCODING"]
+        safe_env = {k: os.environ[k] for k in safe_env_keys if k in os.environ}
+        safe_env["PYTHONPATH"] = temp_dir  # Override with local temp dir
+
         result = subprocess.run(
             [sys.executable, test_file],
             capture_output=True,
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=safe_env,
         )
 
         stdout = result.stdout
