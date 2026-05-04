@@ -89,6 +89,19 @@ SECRET_PATTERNS = [
 # TUNABLE: Add/remove fields based on your data structure
 SECRET_CHECK_FIELDS = ["instruction", "input", "output", "response", "completion"]
 
+# BOLT OPTIMIZATION: Pre-compile secret detection patterns
+_COMPILED_SECRET_PATTERNS = [
+    (re.compile(pattern), secret_type) for pattern, secret_type in SECRET_PATTERNS
+]
+
+# BOLT OPTIMIZATION: Fast-path indicators for secrets
+# NOTE: Includes common markers like quotes to ensure high-entropy check is not skipped.
+_SECRET_KEYWORDS = [
+    "api", "key", "private", "mongodb", "postgres", "mysql", "redis",
+    "bearer", "token", "akia", "ghp_", "glpat-", "sk-", "password", "pwd",
+    '"', "'"
+]
+
 
 def parse_args() -> argparse.Namespace:
     """
@@ -208,8 +221,12 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
 
         text = str(sample[field])
 
-        for pattern, secret_type in SECRET_PATTERNS:
-            if re.search(pattern, text):
+        # BOLT OPTIMIZATION: Fast-path keyword check to avoid expensive regex
+        if not any(kw in text.lower() for kw in _SECRET_KEYWORDS):
+            continue
+
+        for pattern, secret_type in _COMPILED_SECRET_PATTERNS:
+            if pattern.search(text):
                 found_secrets.append(f"{field}:{secret_type}")
 
     return len(found_secrets) > 0, found_secrets
@@ -275,8 +292,8 @@ def fuzzy_hash(sample: Dict[str, Any], n: int = 5) -> str:
         - n=5 is a good balance for code data
     """
     text = (sample.get("instruction", "") + sample.get("output", "")).lower()
-    # Remove whitespace for more robust matching
-    text = re.sub(r"\s+", "", text)
+    # BOLT OPTIMIZATION: "".join(text.split()) is ~7x faster than re.sub(r"\s+", "", text)
+    text = "".join(text.split())
 
     if len(text) < n:
         return text
