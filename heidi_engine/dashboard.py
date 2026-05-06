@@ -70,6 +70,8 @@ from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
+from heidi_engine.telemetry import get_state as load_state_from_telemetry
+
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
 # =============================================================================
@@ -214,12 +216,10 @@ def load_state(run_id: str) -> Dict[str, Any]:
     """
     Load current state from state.json.
 
-    HOW IT WORKS:
-        - Reads state.json file
-        - Returns empty state if file doesn't exist or is invalid
-
-    TUNABLE:
-        - N/A
+    BOLT OPTIMIZATION:
+        Uses heidi_engine.telemetry.get_state() which implements a thread-safe
+        StateCache with 0.5s TTL. This significantly reduces disk I/O and
+        JSON parsing overhead during frequent dashboard refreshes (2Hz).
 
     ARGS:
         run_id: Run to read
@@ -227,14 +227,11 @@ def load_state(run_id: str) -> Dict[str, Any]:
     RETURNS:
         State dictionary
     """
-    state_file = get_state_path(run_id)
-
-    if not state_file.exists():
-        return get_default_state()
-
     try:
-        with open(state_file) as f:
-            return json.load(f)
+        state = load_state_from_telemetry(run_id)
+        if state.get("status") == "error" and "error" in state:
+            return get_default_state()
+        return state
     except Exception as e:
         console.print(f"[yellow]Warning: Failed to load state: {e}[/yellow]")
         return get_default_state()

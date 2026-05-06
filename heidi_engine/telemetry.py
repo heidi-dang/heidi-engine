@@ -732,11 +732,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "usage": get_default_usage(),
         }
 
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
-
     try:
         with open(state_file) as f:
             state = json.load(f)
@@ -988,6 +983,25 @@ def request_pause(run_id: Optional[str] = None) -> None:
     state = get_state(run_id)
     state["pause_requested"] = True
     save_state(state, run_id)
+
+
+def request_train_now(run_id: Optional[str] = None) -> None:
+    """
+    Request training to start now.
+
+    HOW IT WORKS:
+        - Emits a train_requested event
+        - This can be picked up by the pipeline to trigger early training
+
+    ARGS:
+        run_id: Run ID (defaults to current)
+    """
+    emit_event(
+        event_type="train_requested",
+        message="User requested training to start now",
+        level="info",
+        run_id=run_id,
+    )
 
 
 def clear_pause(run_id: Optional[str] = None) -> None:
@@ -1544,7 +1558,6 @@ def start_http_server(port: int = 7779) -> None:
 
         def send_auth_request(self):
             """Send 401 Unauthorized response."""
-            self.send_response(401)
             self.send_header("WWW-Authenticate", 'Basic realm="Heidi Engine Telemetry"')
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
