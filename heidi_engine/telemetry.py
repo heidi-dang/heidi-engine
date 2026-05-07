@@ -151,7 +151,9 @@ SECRET_PATTERNS = [
     # Generic API keys and tokens
     (r"ghp_[a-zA-Z0-9]{36}", "[GITHUB_TOKEN]"),
     (r"glpat-[a-zA-Z0-9\-]{20,}", "[GITLAB_TOKEN]"),
-    (r"sk-[a-zA-Z0-9]{20,}", "[OPENAI_KEY]"),
+    (r"sk-[a-zA-Z0-9\-]{20,}", "[OPENAI_KEY]"),
+    (r"xox[baprs]-[a-zA-Z0-9\-]{10,}", "[SLACK_TOKEN]"),
+    (r"AIza[0-9A-Za-z\-_]{35}", "[GOOGLE_API_KEY]"),
     (r"Bearer\s+[\w\-]{20,}", "[BEARER_TOKEN]"),
     (r'(?i)(api[_-]?key|apikey|secret[_-]?key)\s*[:=]\s*["\']?[\w\-]{20,}', "[API_KEY]"),
     (r"AKIA[0-9A-Z]{16}", "[AWS_KEY]"),
@@ -166,7 +168,7 @@ SECRET_PATTERNS = [
 # Keywords that indicate secrets - used for fast-path redaction check.
 # NOTE: Must be kept in sync with SECRET_PATTERNS above.
 _SECRET_INDICATORS = re.compile(
-    r"ghp_|glpat-|sk-|Bearer|api[_-]?key|apikey|secret[_-]?key|AKIA|PRIVATE\s+KEY|OPENSSH|TOKEN|AWS_SECRET",
+    r"ghp_|glpat-|sk-|xox[baprs]|AIza|Bearer|api[_-]?key|apikey|secret[_-]?key|AKIA|PRIVATE\s+KEY|OPENSSH|TOKEN|AWS_SECRET",
     re.IGNORECASE,
 )
 
@@ -733,7 +735,7 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
         }
 
     # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
+    cached = _state_cache.get(resolved_run_id)
     if cached:
         return cached
 
