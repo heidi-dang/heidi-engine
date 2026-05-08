@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -67,15 +68,18 @@ CODE_BLOCK_PATTERNS = [
 # TUNABLE: Add more dangerous patterns to block
 DANGEROUS_PATTERNS = [
     # Dangerous imports (including comma-separated and aliased)
-    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
-    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
-    # Dangerous built-ins
+    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc|importlib|pkgutil|inspect)\b",
+    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc|importlib|pkgutil|inspect)\b",
+    # Dangerous built-ins and internal attributes
     r"\beval\s*\(",
     r"\bexec\s*\(",
     r"\b__import__\s*\(",
     r"\bgetattr\s*\(",
     r"\bsetattr\s*\(",
     r"\bbreakpoint\s*\(",
+    r"\b__subclasses__\b",
+    r"\b__globals__\b",
+    r"\b__builtins__\b",
     # Dangerous module functions
     r"\bos\.(system|popen|spawn|remove|unlink|rmdir|mkdir|chmod|chown|kill|exec|fork|pipe)\b",
     r"\bsubprocess\.(run|call|check_call|check_output|Popen)\b",
@@ -229,7 +233,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{textwrap.indent(code, '    ')}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -255,6 +259,13 @@ except Exception as e:
     except SyntaxError as e:
         return False, "", f"Syntax error: {e}"
 
+    # SECURITY: Filter environment variables to prevent leaks
+    safe_env_keys = ["PATH", "PYTHONPATH", "LANG", "PYTHONIOENCODING"]
+    safe_env = {k: os.environ[k] for k in safe_env_keys if k in os.environ}
+    safe_env["PYTHONPATH"] = os.path.pathsep.join(
+        filter(None, [temp_dir, safe_env.get("PYTHONPATH", "")])
+    )
+
     # Try to execute with timeout
     try:
         result = subprocess.run(
@@ -263,7 +274,7 @@ except Exception as e:
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=safe_env,
         )
 
         stdout = result.stdout
@@ -367,7 +378,8 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.dirname(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
