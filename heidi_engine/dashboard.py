@@ -59,6 +59,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from heidi_engine import telemetry
 from rich import box
 
 # Rich imports for TUI
@@ -215,11 +216,9 @@ def load_state(run_id: str) -> Dict[str, Any]:
     Load current state from state.json.
 
     HOW IT WORKS:
-        - Reads state.json file
-        - Returns empty state if file doesn't exist or is invalid
-
-    TUNABLE:
-        - N/A
+        - Uses telemetry.get_state() which provides StateCache (0.5s TTL)
+        - Reduces redundant disk I/O and JSON parsing during refreshes
+        - Falls back to default state on failure
 
     ARGS:
         run_id: Run to read
@@ -227,16 +226,11 @@ def load_state(run_id: str) -> Dict[str, Any]:
     RETURNS:
         State dictionary
     """
-    state_file = get_state_path(run_id)
-
-    if not state_file.exists():
-        return get_default_state()
-
     try:
-        with open(state_file) as f:
-            return json.load(f)
+        # BOLT OPTIMIZATION: Use telemetry cache to reduce disk I/O
+        return telemetry.get_state(run_id)
     except Exception as e:
-        console.print(f"[yellow]Warning: Failed to load state: {e}[/yellow]")
+        console.print(f"[yellow]Warning: Failed to load state via telemetry: {e}[/yellow]")
         return get_default_state()
 
 
