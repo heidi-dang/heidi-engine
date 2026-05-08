@@ -70,6 +70,8 @@ from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
+from heidi_engine import telemetry
+
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
 # =============================================================================
@@ -122,6 +124,10 @@ gpu_lock = threading.Lock()
 
 # Data tail settings
 data_tail_lines = 20
+
+# BOLT OPTIMIZATION: Cache for latest data file lookup (1.0s TTL)
+_latest_file_cache: Dict[Tuple[str, Path, bool], Optional[Path]] = {}
+_latest_file_ts: Dict[Tuple[str, Path, bool], float] = {}
 data_tail_show_raw = False  # False = clean, True = raw
 last_data_position = 0
 data_cache: deque = deque(maxlen=data_tail_lines)
@@ -143,15 +149,34 @@ def get_events_path(run_id: str) -> Path:
 
 
 def get_latest_data_file(run_id: str, data_dir: Path, clean: bool = True) -> Optional[Path]:
-    """Get the latest round data file (clean or raw)."""
+    """
+    Get the latest round data file (clean or raw).
+
+    BOLT OPTIMIZATION:
+        Uses a short-lived cache (1.0s TTL) to avoid expensive glob/stat
+        operations on every refresh loop.
+    """
+    cache_key = (run_id, data_dir, clean)
+    now = time.monotonic()
+
+    if cache_key in _latest_file_cache and (now - _latest_file_ts.get(cache_key, 0)) < 1.0:
+        return _latest_file_cache[cache_key]
+
     if not data_dir.exists():
+        _latest_file_cache[cache_key] = None
+        _latest_file_ts[cache_key] = now
         return None
 
     pattern = "clean_round_" if clean else "raw_round_"
+    # Expensive glob and stat call
     files = sorted(
         data_dir.glob(f"{pattern}*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True
     )
-    return files[0] if files else None
+    res = files[0] if files else None
+
+    _latest_file_cache[cache_key] = res
+    _latest_file_ts[cache_key] = now
+    return res
 
 
 def load_new_data_lines(run_id: str) -> List[str]:
@@ -214,12 +239,9 @@ def load_state(run_id: str) -> Dict[str, Any]:
     """
     Load current state from state.json.
 
-    HOW IT WORKS:
-        - Reads state.json file
-        - Returns empty state if file doesn't exist or is invalid
-
-    TUNABLE:
-        - N/A
+    BOLT OPTIMIZATION:
+        Uses telemetry.get_state() which implements a 0.5s TTL cache
+        to avoid redundant disk I/O during high-frequency dashboard refreshes.
 
     ARGS:
         run_id: Run to read
@@ -227,14 +249,8 @@ def load_state(run_id: str) -> Dict[str, Any]:
     RETURNS:
         State dictionary
     """
-    state_file = get_state_path(run_id)
-
-    if not state_file.exists():
-        return get_default_state()
-
     try:
-        with open(state_file) as f:
-            return json.load(f)
+        return telemetry.get_state(run_id)
     except Exception as e:
         console.print(f"[yellow]Warning: Failed to load state: {e}[/yellow]")
         return get_default_state()
