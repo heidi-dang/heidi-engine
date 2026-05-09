@@ -35,7 +35,7 @@ import json
 import os
 import random
 import sys
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Any, Dict, List, Optional
 
 # =============================================================================
@@ -366,7 +366,7 @@ def generate_sample(
         "metadata": {
             "task_type": template["task_type"],
             "round": round_num,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "teacher_model": teacher_model,
         },
     }
