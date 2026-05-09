@@ -68,7 +68,7 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -151,14 +151,16 @@ SECRET_PATTERNS = [
     # Generic API keys and tokens
     (r"ghp_[a-zA-Z0-9]{36}", "[GITHUB_TOKEN]"),
     (r"glpat-[a-zA-Z0-9\-]{20,}", "[GITLAB_TOKEN]"),
-    (r"sk-[a-zA-Z0-9]{20,}", "[OPENAI_KEY]"),
+    (r"sk-[a-zA-Z0-9\-]{20,}", "[OPENAI_KEY]"),
+    (r"xox[baprs]-[a-zA-Z0-9\-]{10,}", "[SLACK_TOKEN]"),
+    (r"AIza[0-9A-Za-z\-_]{35}", "[GOOGLE_API_KEY]"),
     (r"Bearer\s+[\w\-]{20,}", "[BEARER_TOKEN]"),
     (r'(?i)(api[_-]?key|apikey|secret[_-]?key)\s*[:=]\s*["\']?[\w\-]{20,}', "[API_KEY]"),
     (r"AKIA[0-9A-Z]{16}", "[AWS_KEY]"),
     (r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----", "[PRIVATE_KEY]"),
     (r"-----BEGIN\s+OPENSSH\s+PRIVATE\s+KEY-----", "[SSH_KEY]"),
     # Environment variable patterns
-    (r"\$?(OPENAI_API_KEY|GITHUB_TOKEN|GITLAB_TOKEN|AWS_SECRET)[=]\S+", "[ENV_SECRET]"),
+    (r"\$?(OPENAI_API_KEY|GITHUB_TOKEN|GITLAB_TOKEN|AWS_SECRET|SLACK_TOKEN)[=]\S+", "[ENV_SECRET]"),
     # Generic token patterns
     (r'token[_-]?(id|key)?\s*[:=]\s*["\']?[\w\-]{20,}', "[TOKEN]"),
 ]
@@ -166,7 +168,7 @@ SECRET_PATTERNS = [
 # Keywords that indicate secrets - used for fast-path redaction check.
 # NOTE: Must be kept in sync with SECRET_PATTERNS above.
 _SECRET_INDICATORS = re.compile(
-    r"ghp_|glpat-|sk-|Bearer|api[_-]?key|apikey|secret[_-]?key|AKIA|PRIVATE\s+KEY|OPENSSH|TOKEN|AWS_SECRET",
+    r"ghp_|glpat-|sk-|xox[baprs]-|AIza|Bearer|api[_-]?key|apikey|secret[_-]?key|AKIA|PRIVATE\s+KEY|OPENSSH|TOKEN|AWS_SECRET",
     re.IGNORECASE,
 )
 
@@ -666,8 +668,8 @@ def init_telemetry(
             "counters": get_default_counters(),
             "usage": get_default_usage(),
             "config": {},  # Don't store config in state for security
-            "started_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
+            "started_at": datetime.now(UTC).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         }
 
         # Save initial state atomically
@@ -732,10 +734,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "usage": get_default_usage(),
         }
 
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
@@ -830,7 +828,7 @@ def save_state(state: Dict[str, Any], run_id: Optional[str] = None) -> None:
     temp_file = state_file.with_suffix(".tmp")
 
     # Update timestamp
-    state["updated_at"] = datetime.utcnow().isoformat()
+    state["updated_at"] = datetime.now(UTC).isoformat()
 
     # Write to temp file
     with open(temp_file, "w") as f:
@@ -1110,7 +1108,7 @@ def emit_event(
     # Build event with schema version
     event = {
         "event_version": EVENT_VERSION,
-        "ts": datetime.utcnow().isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "run_id": run_id,
         "round": round_num if round_num is not None else state.get("current_round", 0),
         "stage": stage or state.get("current_stage", "unknown"),
