@@ -275,8 +275,9 @@ def fuzzy_hash(sample: Dict[str, Any], n: int = 5) -> str:
         - n=5 is a good balance for code data
     """
     text = (sample.get("instruction", "") + sample.get("output", "")).lower()
+    # BOLT OPTIMIZATION: "".join(text.split()) is faster than re.sub(r"\s+", "", text)
     # Remove whitespace for more robust matching
-    text = re.sub(r"\s+", "", text)
+    text = "".join(text.split())
 
     if len(text) < n:
         return text
