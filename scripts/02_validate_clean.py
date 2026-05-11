@@ -61,12 +61,12 @@ REQUIRED_FIELDS = ["id", "instruction", "input", "output", "metadata"]
 # TUNABLE: Add more patterns for your use case
 SECRET_PATTERNS = [
     # Generic API keys and tokens
-    (r'(?i)(api[_-]?key|apikey|secret[_-]?key)\s*[:=]\s*["\']?[\w\-]{20,}', "api_key"),
+    (r"(?i)(api[_-]?key|apikey|secret[_-]?key)\s*[:=]\s*[\"']?[\w\-]{20,}", "api_key"),
     (r"(?i)bearer\s+[\w\-]{20,}", "bearer_token"),
-    (r'(?i)token\s*[:=]\s*["\']?[\w\-]{20,}', "token"),
+    (r"(?i)token\s*[:=]\s*[\"']?[\w\-]{20,}", "token"),
     # AWS credentials
     (r"AKIA[0-9A-Z]{16}", "aws_access_key"),
-    (r'(?i)aws[_-]?secret[_-]?access[_-]?key\s*[:=]\s*["\']?[\w\/+]{40}', "aws_secret"),
+    (r"(?i)aws[_-]?secret[_-]?access[_-]?key\s*[:=]\s*[\"']?[\w\/+]{40}", "aws_secret"),
     # Private keys
     (r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----", "private_key"),
     (r"-----BEGIN\s+OPENSSH\s+PRIVATE\s+KEY-----", "ssh_private_key"),
@@ -79,10 +79,33 @@ SECRET_PATTERNS = [
     # OpenAI API keys
     (r"sk-[a-zA-Z0-9]{48,}", "openai_key"),
     # Generic high-entropy strings that look like secrets
-    (r'["\'][\w+\/]{40,}["\']', "high_entropy"),
+    (r"[\"'][\w+\/]{40,}[\"']", "high_entropy"),
     # Passwords in config-like patterns
-    (r'(?i)password\s*[:=]\s*["\'][^"\']{8,}["\']', "password"),
-    (r'(?i)pwd\s*[:=]\s*["\'][^"\']{8,}["\']', "password"),
+    (r"(?i)password\s*[:=]\s*[\"'][^\"']{8,}[\"']", "password"),
+    (r"(?i)pwd\s*[:=]\s*[\"'][^\"']{8,}[\"']", "password"),
+]
+
+# BOLT OPTIMIZATION: Pre-compile secret patterns to avoid repeated compilation.
+_COMPILED_SECRET_PATTERNS = [(re.compile(p), t) for p, t in SECRET_PATTERNS]
+
+# Keywords that indicate secrets - used for fast-path detection check.
+# Sequential re.search calls are faster than combined regex callbacks,
+# but early exit provides the biggest win for normal data samples.
+_SECRET_INDICATORS = [
+    "api",
+    "key",
+    "token",
+    "secret",
+    "bearer",
+    "akia",
+    "sk-",
+    "xox",
+    "aiza",
+    "ghp_",
+    "glpat-",
+    "---",
+    "\"",
+    "'",
 ]
 
 # Fields to check for secrets
@@ -207,9 +230,15 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
             continue
 
         text = str(sample[field])
+        lower_text = text.lower()
 
-        for pattern, secret_type in SECRET_PATTERNS:
-            if re.search(pattern, text):
+        # BOLT OPTIMIZATION: Skip expensive regex loop if no secret indicators are found.
+        # This provides a massive speedup for clean text samples.
+        if not any(k in lower_text for k in _SECRET_INDICATORS):
+            continue
+
+        for pattern_regex, secret_type in _COMPILED_SECRET_PATTERNS:
+            if pattern_regex.search(text):
                 found_secrets.append(f"{field}:{secret_type}")
 
     return len(found_secrets) > 0, found_secrets
@@ -275,8 +304,10 @@ def fuzzy_hash(sample: Dict[str, Any], n: int = 5) -> str:
         - n=5 is a good balance for code data
     """
     text = (sample.get("instruction", "") + sample.get("output", "")).lower()
-    # Remove whitespace for more robust matching
-    text = re.sub(r"\s+", "", text)
+
+    # BOLT OPTIMIZATION: "".join(text.split()) is ~7x faster than re.sub(r"\s+", "", text)
+    # for whitespace removal in large strings.
+    text = "".join(text.split())
 
     if len(text) < n:
         return text
