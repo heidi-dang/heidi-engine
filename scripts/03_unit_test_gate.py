@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -56,9 +57,9 @@ EXECUTION_TIMEOUT = 5
 # TUNABLE: Adjust regex for different code formats
 CODE_BLOCK_PATTERNS = [
     # Markdown code blocks: ```python ... ```
-    r"```python\n(.*?)```",
+    r"```python\s*(.*?)\s*```",
     # Markdown code blocks without language: ``` ... ```
-    r"```\n(.*?)```",
+    r"```\s*(.*?)\s*```",
     # Inline code markers
     r"`([^`\n]+)`",
 ]
@@ -84,6 +85,10 @@ DANGEROUS_PATTERNS = [
     r"\bshelve\.open\b",
     # File operations (specifically writing/appending)
     r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
+    # Sandbox escapes
+    r"__subclasses__",
+    r"__globals__",
+    r"__builtins__",
 ]
 
 
@@ -213,6 +218,9 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     # Write code to temp file
     test_file = os.path.join(temp_dir, "test_code.py")
 
+    # Indent the code to fit into the try block
+    indented_code = textwrap.indent(code, "    ")
+
     # Wrap code to capture output safely
     wrapped_code = f"""
 import sys
@@ -229,7 +237,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -255,6 +263,13 @@ except Exception as e:
     except SyntaxError as e:
         return False, "", f"Syntax error: {e}"
 
+    # Filter environment to prevent secret leakage
+    allowed_env_vars = ["PATH", "PYTHONPATH", "LANG", "PYTHONIOENCODING"]
+    filtered_env = {k: v for k, v in os.environ.items() if k in allowed_env_vars}
+    filtered_env["PYTHONPATH"] = os.path.pathsep.join(
+        [temp_dir, filtered_env.get("PYTHONPATH", "")]
+    ).strip(os.path.pathsep)
+
     # Try to execute with timeout
     try:
         result = subprocess.run(
@@ -263,7 +278,7 @@ except Exception as e:
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=filtered_env,
         )
 
         stdout = result.stdout
@@ -367,7 +382,9 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    dirname = os.path.dirname(path)
+    if dirname:
+        os.makedirs(dirname, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
