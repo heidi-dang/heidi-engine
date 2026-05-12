@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -82,6 +83,10 @@ DANGEROUS_PATTERNS = [
     r"\bshutil\.(rmtree|move|copy|copy2|copyfile|copymode|copystat|chown)\b",
     r"\bpickle\.(load|loads)\b",
     r"\bshelve\.open\b",
+    # Internal attributes for sandbox escape
+    r"__subclasses__",
+    r"__globals__",
+    r"__builtins__",
     # File operations (specifically writing/appending)
     r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
 ]
@@ -229,7 +234,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{textwrap.indent(code, '    ')}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -257,13 +262,19 @@ except Exception as e:
 
     # Try to execute with timeout
     try:
+        # BOLT SECURITY: Filter environment to prevent leakage of sensitive keys (e.g. OPENAI_API_KEY)
+        # to the generated code being tested.
+        allowed_env_keys = {"PATH", "PYTHONPATH", "LANG", "PYTHONIOENCODING"}
+        safe_env = {k: v for k, v in os.environ.items() if k in allowed_env_keys}
+        safe_env["PYTHONPATH"] = temp_dir  # Ensure isolation and local imports
+
         result = subprocess.run(
             [sys.executable, test_file],
             capture_output=True,
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=safe_env,
         )
 
         stdout = result.stdout
