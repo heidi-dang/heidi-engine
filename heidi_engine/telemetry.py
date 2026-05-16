@@ -56,8 +56,8 @@ CONFIG VALIDATION:
 """
 
 import atexit
-import copy
 import base64
+import copy
 import json
 import os
 import re
@@ -70,7 +70,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
@@ -473,27 +473,39 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Falls back to DEFAULT_PRICING
         - Allows user to customize pricing per model
 
+    BOLT OPTIMIZATION:
+        Thread-safe caching with 5.0s TTL to eliminate redundant disk I/O
+        and JSON parsing during high-frequency cost estimations.
+
     TUNABLE:
         - Create pricing.json to override default prices
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
-    pricing = DEFAULT_PRICING.copy()
+    global _pricing_cache, _pricing_check_ts
+    with _pricing_lock:
+        now = time.monotonic()
+        if _pricing_cache and (now - _pricing_check_ts) < 5.0:
+            return _pricing_cache.copy()
 
-    # Check for pricing config file
-    pricing_file = (
-        Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
-    )
+        pricing = DEFAULT_PRICING.copy()
 
-    if pricing_file.exists():
-        try:
-            with open(pricing_file) as f:
-                custom = json.load(f)
-                pricing.update(custom)
-        except Exception as e:
-            print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+        # Check for pricing config file
+        pricing_file = (
+            Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
+        )
 
-    return pricing
+        if pricing_file.exists():
+            try:
+                with open(pricing_file) as f:
+                    custom = json.load(f)
+                    pricing.update(custom)
+            except Exception as e:
+                print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+
+        _pricing_cache = pricing.copy()
+        _pricing_check_ts = now
+        return pricing
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -731,11 +743,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
@@ -1371,6 +1378,10 @@ def stage_context(stage: str, round_num: int, message: str, **kwargs):
 _gpu_cache: Dict[str, Any] = {}
 _gpu_check_ts = 0.0
 _gpu_lock = threading.Lock()
+
+_pricing_cache: Dict[str, Dict[str, float]] = {}
+_pricing_check_ts = 0.0
+_pricing_lock = threading.Lock()
 
 _event_ts_cache: Dict[str, str] = {}
 _event_ts_check_ts: Dict[str, float] = {}  # run_id -> ts
