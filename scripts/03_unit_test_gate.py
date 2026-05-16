@@ -163,7 +163,8 @@ def extract_python_code(text: str) -> List[str]:
 
         # Skip if it's clearly not Python (no indentation, keywords, etc.)
         if not any(
-            kw in code for kw in ["def ", "class ", "import ", "return ", "if ", "for ", "while "]
+            re.search(rf"\b{kw}\b", code)
+            for kw in ["def", "class", "import", "return", "if", "for", "while"]
         ):
             continue
 
@@ -213,6 +214,8 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     # Write code to temp file
     test_file = os.path.join(temp_dir, "test_code.py")
 
+    import textwrap
+
     # Wrap code to capture output safely
     wrapped_code = f"""
 import sys
@@ -229,7 +232,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{textwrap.indent(code, '    ')}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -257,13 +260,19 @@ except Exception as e:
 
     # Try to execute with timeout
     try:
+        # SECURITY: Filter environment variables to prevent secret leakage.
+        # Only allow minimal set of safe variables.
+        safe_env_keys = {"PATH", "PYTHONPATH", "LANG", "PYTHONIOENCODING"}
+        safe_env = {k: v for k, v in os.environ.items() if k in safe_env_keys}
+        safe_env["PYTHONPATH"] = temp_dir
+
         result = subprocess.run(
             [sys.executable, test_file],
             capture_output=True,
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env=safe_env,
         )
 
         stdout = result.stdout
@@ -330,7 +339,12 @@ def test_sample(
     for i, code in enumerate(code_blocks):
         passed, stdout, stderr = test_python_code(code, temp_dir, execution_timeout)
         results.append(
-            {"block_index": i, "passed": passed, "error": stderr if not passed else None}
+            {
+                "block_index": i,
+                "passed": passed,
+                "stdout": stdout if passed else None,
+                "error": stderr if not passed else None,
+            }
         )
 
     # Sample passes if at least one code block passes
@@ -367,7 +381,8 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.dirname(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
