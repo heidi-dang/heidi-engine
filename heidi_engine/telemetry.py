@@ -732,9 +732,9 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "usage": get_default_usage(),
         }
 
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
+    # BOLT OPTIMIZATION: Check cache again with resolved run ID
+    cached = _state_cache.get(resolved_run_id)
+    if cached is not None:
         return cached
 
     try:
