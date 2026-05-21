@@ -89,6 +89,17 @@ SECRET_PATTERNS = [
 # TUNABLE: Add/remove fields based on your data structure
 SECRET_CHECK_FIELDS = ["instruction", "input", "output", "response", "completion"]
 
+# BOLT OPTIMIZATION: Indicators for fast-path secret detection check
+# Combined patterns from SECRET_PATTERNS to allow quick skipping of clean samples.
+# Added high-entropy pattern indicator to prevent functional regression.
+_SECRET_INDICATORS = re.compile(
+    r"api[_-]?key|apikey|secret[_-]?key|bearer|token|AKIA|aws[_-]?secret|PRIVATE\s+KEY|OPENSSH|mongodb|postgres|mysql|redis|ghp_|glpat-|sk-|password|pwd|[\"'][\w+\/]{40,}[\"']",
+    re.IGNORECASE,
+)
+
+# BOLT OPTIMIZATION: Pre-compile secret patterns to avoid repeated compilation
+_SECRET_PATTERNS_COMPILED = [(re.compile(p), t) for p, t in SECRET_PATTERNS]
+
 
 def parse_args() -> argparse.Namespace:
     """
@@ -200,6 +211,12 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
         - This is a heuristic - may have false positives/negatives
         - For production, consider using dedicated secret scanning tools
     """
+    # BOLT OPTIMIZATION: Fast-path check using combined indicators
+    # We join all fields once to check against a single regex.
+    combined_text = " ".join(str(sample.get(field, "")) for field in SECRET_CHECK_FIELDS)
+    if not _SECRET_INDICATORS.search(combined_text):
+        return False, []
+
     found_secrets = []
 
     for field in SECRET_CHECK_FIELDS:
@@ -208,8 +225,8 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
 
         text = str(sample[field])
 
-        for pattern, secret_type in SECRET_PATTERNS:
-            if re.search(pattern, text):
+        for pattern, secret_type in _SECRET_PATTERNS_COMPILED:
+            if pattern.search(text):
                 found_secrets.append(f"{field}:{secret_type}")
 
     return len(found_secrets) > 0, found_secrets
@@ -275,8 +292,8 @@ def fuzzy_hash(sample: Dict[str, Any], n: int = 5) -> str:
         - n=5 is a good balance for code data
     """
     text = (sample.get("instruction", "") + sample.get("output", "")).lower()
-    # Remove whitespace for more robust matching
-    text = re.sub(r"\s+", "", text)
+    # BOLT OPTIMIZATION: Use "".join(text.split()) instead of re.sub for ~5x faster whitespace removal
+    text = "".join(text.split())
 
     if len(text) < n:
         return text
@@ -406,7 +423,9 @@ def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """
     Save samples to JSONL file.
     """
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    dir_name = os.path.dirname(path)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
