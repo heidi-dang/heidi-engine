@@ -77,7 +77,11 @@ SECRET_PATTERNS = [
     (r"ghp_[a-zA-Z0-9]{36}", "github_token"),
     (r"glpat-[a-zA-Z0-9\-]{20,}", "gitlab_token"),
     # OpenAI API keys
-    (r"sk-[a-zA-Z0-9]{48,}", "openai_key"),
+    (r"sk-[a-zA-Z0-9\-]{20,}", "openai_key"),
+    # Slack tokens
+    (r"xox[baprs]-[a-zA-Z0-9\-]{10,}", "slack_token"),
+    # Google API keys
+    (r"AIza[0-9A-Za-z\-_]{35}", "google_api_key"),
     # Generic high-entropy strings that look like secrets
     (r'["\'][\w+\/]{40,}["\']', "high_entropy"),
     # Passwords in config-like patterns
