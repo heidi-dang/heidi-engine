@@ -170,6 +170,9 @@ _SECRET_INDICATORS = re.compile(
     re.IGNORECASE,
 )
 
+# BOLT OPTIMIZATION: Pre-compiled regex patterns for faster redaction.
+_SECRET_PATTERNS_COMPILED = [(re.compile(p, re.IGNORECASE), r) for p, r in SECRET_PATTERNS]
+
 # ANSI escape sequence pattern for stripping
 ANSI_ESCAPE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
@@ -207,8 +210,8 @@ def redact_secrets(text: str) -> str:
         return text
 
     # Redact secrets
-    for pattern, replacement in SECRET_PATTERNS:
-        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    for pattern, replacement in _SECRET_PATTERNS_COMPILED:
+        text = pattern.sub(replacement, text)
 
     return text
 
@@ -473,27 +476,38 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Falls back to DEFAULT_PRICING
         - Allows user to customize pricing per model
 
+    BOLT OPTIMIZATION:
+        Thread-safe caching with 5.0s TTL to avoid redundant disk I/O.
+
     TUNABLE:
         - Create pricing.json to override default prices
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
-    pricing = DEFAULT_PRICING.copy()
+    global _pricing_cache, _pricing_check_ts
+    with _pricing_lock:
+        now = time.monotonic()
+        if _pricing_cache and (now - _pricing_check_ts) < 5.0:
+            return _pricing_cache.copy()
 
-    # Check for pricing config file
-    pricing_file = (
-        Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
-    )
+        pricing = DEFAULT_PRICING.copy()
 
-    if pricing_file.exists():
-        try:
-            with open(pricing_file) as f:
-                custom = json.load(f)
-                pricing.update(custom)
-        except Exception as e:
-            print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+        # Check for pricing config file
+        pricing_file = (
+            Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
+        )
 
-    return pricing
+        if pricing_file.exists():
+            try:
+                with open(pricing_file) as f:
+                    custom = json.load(f)
+                    pricing.update(custom)
+            except Exception as e:
+                print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+
+        _pricing_cache = pricing.copy()
+        _pricing_check_ts = now
+        return pricing
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -731,11 +745,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
@@ -1368,6 +1377,10 @@ def stage_context(stage: str, round_num: int, message: str, **kwargs):
 # =============================================================================
 
 # BOLT OPTIMIZATION: Module-level caching for expensive metadata
+_pricing_cache: Dict[str, Dict[str, float]] = {}
+_pricing_check_ts = 0.0
+_pricing_lock = threading.Lock()
+
 _gpu_cache: Dict[str, Any] = {}
 _gpu_check_ts = 0.0
 _gpu_lock = threading.Lock()
