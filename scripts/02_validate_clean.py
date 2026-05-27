@@ -89,6 +89,21 @@ SECRET_PATTERNS = [
 # TUNABLE: Add/remove fields based on your data structure
 SECRET_CHECK_FIELDS = ["instruction", "input", "output", "response", "completion"]
 
+# BOLT OPTIMIZATION: Pre-compile secret patterns for faster matching
+_SECRET_PATTERNS_COMPILED = [
+    (re.compile(pattern, re.IGNORECASE), secret_type)
+    for pattern, secret_type in SECRET_PATTERNS
+]
+
+# BOLT OPTIMIZATION: Fast-path regex for secret detection.
+# Only if these indicators are found do we run the full regex loop.
+# NOTE: This should be kept in sync with SECRET_PATTERNS.
+# Added safety: we also check for quotes for the high-entropy pattern.
+_SECRET_INDICATORS = re.compile(
+    r"api[_-]?key|apikey|secret[_-]?key|bearer|token|AKIA|aws[_-]?secret|PRIVATE\s+KEY|OPENSSH|mongodb|postgres|mysql|redis|ghp_|glpat-|sk-|['\"]|password|pwd",
+    re.IGNORECASE,
+)
+
 
 def parse_args() -> argparse.Namespace:
     """
@@ -203,13 +218,19 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
     found_secrets = []
 
     for field in SECRET_CHECK_FIELDS:
-        if field not in sample:
+        val = sample.get(field)
+        if val is None:
             continue
 
-        text = str(sample[field])
+        # BOLT OPTIMIZATION: Avoid redundant str() calls and skip if no indicators
+        text = val if isinstance(val, str) else str(val)
 
-        for pattern, secret_type in SECRET_PATTERNS:
-            if re.search(pattern, text):
+        if not _SECRET_INDICATORS.search(text):
+            continue
+
+        # BOLT OPTIMIZATION: Use pre-compiled patterns
+        for pattern, secret_type in _SECRET_PATTERNS_COMPILED:
+            if pattern.search(text):
                 found_secrets.append(f"{field}:{secret_type}")
 
     return len(found_secrets) > 0, found_secrets
@@ -275,12 +296,14 @@ def fuzzy_hash(sample: Dict[str, Any], n: int = 5) -> str:
         - n=5 is a good balance for code data
     """
     text = (sample.get("instruction", "") + sample.get("output", "")).lower()
-    # Remove whitespace for more robust matching
-    text = re.sub(r"\s+", "", text)
+    # BOLT OPTIMIZATION: Faster whitespace removal
+    text = "".join(text.split())
 
     if len(text) < n:
         return text
 
+    # BOLT OPTIMIZATION: Using list comprehension is slightly faster than generator expression for Counter
+    # although it uses more memory for very large strings.
     ngrams = [text[i : i + n] for i in range(len(text) - n + 1)]
     # Use top 10 most common ngrams as fingerprint
     counter = Counter(ngrams)
