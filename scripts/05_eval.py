@@ -154,8 +154,9 @@ def setup_model_with_adapter(adapter_path: str, base_model: str, trust_remote_co
     print(f"[INFO] Loading base model: {base_model}")
 
     # Load tokenizer
+    # For causal (decoder-only) models, left-padding is required for batch generation
     tokenizer = AutoTokenizer.from_pretrained(
-        base_model, trust_remote_code=trust_remote_code, padding_side="right"
+        base_model, trust_remote_code=trust_remote_code, padding_side="left"
     )
 
     if tokenizer.pad_token is None:
@@ -185,27 +186,29 @@ def setup_model_with_adapter(adapter_path: str, base_model: str, trust_remote_co
     return model, tokenizer
 
 
-def generate_response(
-    model, tokenizer, prompt: str, max_new_tokens: int, temperature: float, top_p: float
-) -> str:
+def generate_batch(
+    model, tokenizer, prompts: List[str], max_new_tokens: int, temperature: float, top_p: float
+) -> List[str]:
     """
-    Generate response for a prompt.
+    Generate responses for a batch of prompts.
 
-    TUNABLE:
-        - Adjust generation parameters
-        - Change prompt format
+    HOW IT WORKS:
+        - Formats prompts for instruction-following
+        - Tokenizes as a batch with padding
+        - Generates responses using the model
+        - Decodes and extracts outputs
     """
-    # Format prompt (same as training)
-    formatted_prompt = f"""Instruction: {prompt}
+    # Format prompts (same as training)
+    formatted_prompts = [f"Instruction: {p}\n\nOutput:" for p in prompts]
 
-Output:"""
-
-    # Tokenize
-    inputs = tokenizer(formatted_prompt, return_tensors="pt", truncation=True)
+    # Tokenize batch
+    inputs = tokenizer(formatted_prompts, return_tensors="pt", padding=True, truncation=True)
     inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
     # Generate
-    with model.disable_adapter():  # Disable adapter if needed, or keep enabled
+    # NOTE: model.disable_adapter() is used to match original behavior,
+    # though in practice evaluation should often use the adapter.
+    with model.disable_adapter():
         outputs = model.generate(
             **inputs,
             max_new_tokens=max_new_tokens,
@@ -217,13 +220,25 @@ Output:"""
         )
 
     # Decode
-    response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    responses = tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
     # Extract output (everything after "Output:")
-    if "Output:" in response:
-        response = response.split("Output:", 1)[1].strip()
+    final_responses = []
+    for response in responses:
+        if "Output:" in response:
+            response = response.split("Output:", 1)[1].strip()
+        final_responses.append(response)
 
-    return response
+    return final_responses
+
+
+def generate_response(
+    model, tokenizer, prompt: str, max_new_tokens: int, temperature: float, top_p: float
+) -> str:
+    """
+    Generate response for a single prompt.
+    """
+    return generate_batch(model, tokenizer, [prompt], max_new_tokens, temperature, top_p)[0]
 
 
 def evaluate_json_parse(output: str) -> Tuple[bool, Optional[Dict], str]:
@@ -311,6 +326,31 @@ def evaluate_format_compliance(output: str, task_type: str = "") -> Dict[str, An
     return result
 
 
+def process_output(sample: Dict[str, Any], output: str) -> Dict[str, Any]:
+    """
+    Process model output and evaluate metrics.
+    """
+    # Evaluate JSON parse
+    json_valid, parsed_json, json_method = evaluate_json_parse(output)
+
+    # Evaluate format
+    format_eval = evaluate_format_compliance(
+        output, sample.get("metadata", {}).get("task_type", "")
+    )
+
+    return {
+        "sample_id": sample.get("id", "unknown"),
+        "success": True,
+        "output": output[:500],  # Truncate for storage
+        "output_length": len(output),
+        "json_valid": json_valid,
+        "json_method": json_method,
+        "format_compliant": format_eval.get("format_compliant", False),
+        "format_details": format_eval,
+        "has_repetition": format_eval.get("has_repetition", False),
+    }
+
+
 def evaluate_sample(
     sample: Dict[str, Any], model, tokenizer, gen_config: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -336,28 +376,9 @@ def evaluate_sample(
             temperature=gen_config["temperature"],
             top_p=gen_config["top_p"],
         )
+        return process_output(sample, output)
     except Exception as e:
         return {"sample_id": sample.get("id", "unknown"), "success": False, "error": str(e)}
-
-    # Evaluate JSON parse
-    json_valid, parsed_json, json_method = evaluate_json_parse(output)
-
-    # Evaluate format
-    format_eval = evaluate_format_compliance(
-        output, sample.get("metadata", {}).get("task_type", "")
-    )
-
-    return {
-        "sample_id": sample.get("id", "unknown"),
-        "success": True,
-        "output": output[:500],  # Truncate for storage
-        "output_length": len(output),
-        "json_valid": json_valid,
-        "json_method": json_method,
-        "format_compliant": format_eval.get("format_compliant", False),
-        "format_details": format_eval,
-        "has_repetition": format_eval.get("has_repetition", False),
-    }
 
 
 def compute_metrics(results: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -423,15 +444,50 @@ def main():
     }
 
     # Evaluate samples
-    print("[INFO] Starting evaluation...")
+    print(f"[INFO] Starting evaluation (batch_size={args.batch_size})...")
     results = []
 
-    for i, sample in enumerate(eval_data):
-        result = evaluate_sample(sample, model, tokenizer, gen_config)
-        results.append(result)
+    for i in range(0, len(eval_data), args.batch_size):
+        batch_samples = eval_data[i : i + args.batch_size]
 
-        if (i + 1) % 10 == 0:
-            print(f"  Evaluated {i + 1}/{len(eval_data)} samples", file=sys.stderr)
+        # Prepare batch prompts
+        prompts = []
+        for sample in batch_samples:
+            instruction = sample.get("instruction", "")
+            input_text = sample.get("input", "")
+            if input_text:
+                prompts.append(f"{instruction}\n\n{input_text}")
+            else:
+                prompts.append(instruction)
+
+        # Generate batch responses
+        try:
+            batch_outputs = generate_batch(
+                model,
+                tokenizer,
+                prompts,
+                max_new_tokens=gen_config["max_new_tokens"],
+                temperature=gen_config["temperature"],
+                top_p=gen_config["top_p"],
+            )
+
+            # Process outputs for each sample in batch
+            for j, output in enumerate(batch_outputs):
+                result = process_output(batch_samples[j], output)
+                results.append(result)
+
+        except Exception as e:
+            print(f"[ERROR] Batch evaluation failed at index {i}: {e}", file=sys.stderr)
+            # Record failure for all samples in this batch
+            for sample in batch_samples:
+                results.append(
+                    {"sample_id": sample.get("id", "unknown"), "success": False, "error": str(e)}
+                )
+
+        if (i + len(batch_samples)) % (args.batch_size * 5) == 0 or (i + len(batch_samples)) == len(
+            eval_data
+        ):
+            print(f"  Evaluated {i + len(batch_samples)}/{len(eval_data)} samples", file=sys.stderr)
 
     # Compute metrics
     print("[INFO] Computing metrics...")
