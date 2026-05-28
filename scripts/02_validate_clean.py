@@ -89,6 +89,16 @@ SECRET_PATTERNS = [
 # TUNABLE: Add/remove fields based on your data structure
 SECRET_CHECK_FIELDS = ["instruction", "input", "output", "response", "completion"]
 
+# BOLT OPTIMIZATION: Pre-compile regex patterns for faster matching
+_SECRET_PATTERNS_COMPILED = [(re.compile(p), t) for p, t in SECRET_PATTERNS]
+
+# BOLT OPTIMIZATION: Fast-path indicator for secrets.
+# If these keywords or quotes aren't present, we can skip expensive regex scans for most clean data.
+_SECRET_INDICATORS = re.compile(
+    r"key|secret|token|bearer|AKIA|PRIVATE|OPENSSH|ghp_|glpat-|sk-|mongodb|postgres|mysql|redis|password|pwd|['\"]",
+    re.IGNORECASE,
+)
+
 
 def parse_args() -> argparse.Namespace:
     """
@@ -203,13 +213,19 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
     found_secrets = []
 
     for field in SECRET_CHECK_FIELDS:
-        if field not in sample:
+        val = sample.get(field)
+        if val is None:
             continue
 
-        text = str(sample[field])
+        # BOLT OPTIMIZATION: Avoid str() call if value is already a string
+        text = val if isinstance(val, str) else str(val)
 
-        for pattern, secret_type in SECRET_PATTERNS:
-            if re.search(pattern, text):
+        # BOLT OPTIMIZATION: Fast-path guard to skip expensive regex loop for clean fields
+        if not _SECRET_INDICATORS.search(text):
+            continue
+
+        for pattern_compiled, secret_type in _SECRET_PATTERNS_COMPILED:
+            if pattern_compiled.search(text):
                 found_secrets.append(f"{field}:{secret_type}")
 
     return len(found_secrets) > 0, found_secrets
@@ -275,8 +291,8 @@ def fuzzy_hash(sample: Dict[str, Any], n: int = 5) -> str:
         - n=5 is a good balance for code data
     """
     text = (sample.get("instruction", "") + sample.get("output", "")).lower()
-    # Remove whitespace for more robust matching
-    text = re.sub(r"\s+", "", text)
+    # BOLT OPTIMIZATION: Use str.split() and join() for faster whitespace removal than re.sub
+    text = "".join(text.split())
 
     if len(text) < n:
         return text
