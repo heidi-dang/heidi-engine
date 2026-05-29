@@ -41,6 +41,25 @@ def test_state_cache():
         print("TTL Expiration test passed")
 
 
+def test_get_run_dir_sanitization():
+    """Test that get_run_dir sanitizes run_id to prevent path traversal."""
+    base_dir = telemetry.AUTOTRAIN_DIR
+
+    # Test absolute path
+    abs_run_id = "/tmp/evil_run"
+    run_dir = telemetry.get_run_dir(abs_run_id)
+    # Should be appended to runs/ and only use the last part
+    assert str(run_dir).endswith("runs/evil_run")
+    assert "/tmp/evil_run" not in str(run_dir) or str(run_dir).endswith("runs/evil_run")
+
+    # Test traversal
+    traversal_id = "../../evil_run"
+    run_dir = telemetry.get_run_dir(traversal_id)
+    assert ".." not in str(run_dir.relative_to(base_dir))
+    assert run_dir.name == "evil_run"
+    print("Path traversal sanitization test passed")
+
+
 def test_gpu_cache():
     # Cold call
     start = time.time()
