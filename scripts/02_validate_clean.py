@@ -89,6 +89,8 @@ SECRET_PATTERNS = [
 # TUNABLE: Add/remove fields based on your data structure
 SECRET_CHECK_FIELDS = ["instruction", "input", "output", "response", "completion"]
 
+# BOLT OPTIMIZATION: Pre-compile regex objects at module level to avoid redundant compilation.
+_SECRET_PATTERNS_COMPILED = [(re.compile(p), t) for p, t in SECRET_PATTERNS]
 
 def parse_args() -> argparse.Namespace:
     """
@@ -190,6 +192,7 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
 
     HOW IT WORKS:
         - Checks all specified fields against secret patterns
+        - BOLT OPTIMIZATION: Uses pre-compiled regex to avoid redundant compilation
         - FAIL CLOSED: Returns True (has secrets) if ANY pattern matches
 
     TUNABLE:
@@ -203,13 +206,14 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
     found_secrets = []
 
     for field in SECRET_CHECK_FIELDS:
-        if field not in sample:
+        val = sample.get(field)
+        if val is None:
             continue
 
-        text = str(sample[field])
+        text = val if isinstance(val, str) else str(val)
 
-        for pattern, secret_type in SECRET_PATTERNS:
-            if re.search(pattern, text):
+        for pattern, secret_type in _SECRET_PATTERNS_COMPILED:
+            if pattern.search(text):
                 found_secrets.append(f"{field}:{secret_type}")
 
     return len(found_secrets) > 0, found_secrets
@@ -275,8 +279,8 @@ def fuzzy_hash(sample: Dict[str, Any], n: int = 5) -> str:
         - n=5 is a good balance for code data
     """
     text = (sample.get("instruction", "") + sample.get("output", "")).lower()
-    # Remove whitespace for more robust matching
-    text = re.sub(r"\s+", "", text)
+    # BOLT OPTIMIZATION: Faster whitespace removal using split/join instead of regex.
+    text = "".join(text.split())
 
     if len(text) < n:
         return text
