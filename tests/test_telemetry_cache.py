@@ -56,7 +56,27 @@ def test_gpu_cache():
     assert t2 < t1 or t1 < 1.0  # t1 might be fast if nvidia-smi fails fast
 
 
+def test_get_run_dir_sanitization():
+    from heidi_engine.telemetry import get_run_dir, AUTOTRAIN_DIR
+    from pathlib import Path
+
+    # Absolute path traversal
+    dangerous_id = "/tmp/sentinel_test_absolute"
+    run_dir = get_run_dir(dangerous_id)
+    assert str(run_dir) != dangerous_id
+    assert str(run_dir).endswith("runs/sentinel_test_absolute")
+    assert Path(AUTOTRAIN_DIR) in run_dir.parents
+
+    # Relative path traversal
+    traversal_id = "../../tmp/sentinel_test_relative"
+    run_dir = get_run_dir(traversal_id)
+    assert ".." not in run_dir.name
+    assert str(run_dir).endswith("runs/sentinel_test_relative")
+    assert Path(AUTOTRAIN_DIR) in run_dir.parents
+
+
 if __name__ == "__main__":
     test_state_cache()
     test_gpu_cache()
+    test_get_run_dir_sanitization()
     print("All verification tests passed!")
