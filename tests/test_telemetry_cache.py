@@ -1,7 +1,29 @@
 import tempfile
 import time
-
+from pathlib import Path
 from heidi_engine import telemetry
+
+
+def test_get_run_dir_sanitization():
+    """Test that get_run_dir sanitizes run_id to prevent path traversal."""
+    original_autotrain_dir = telemetry.AUTOTRAIN_DIR
+    try:
+        telemetry.AUTOTRAIN_DIR = "/tmp/heidi_engine"
+
+        # Absolute path traversal
+        run_dir = telemetry.get_run_dir("/etc/passwd")
+        assert run_dir.name == "passwd"
+        assert "etc" not in run_dir.parts
+        # Check that Path(AUTOTRAIN_DIR) is a parent of run_dir
+        assert Path(telemetry.AUTOTRAIN_DIR) in run_dir.parents
+
+        # Relative path traversal
+        run_dir = telemetry.get_run_dir("../../../etc/passwd")
+        assert run_dir.name == "passwd"
+        assert ".." not in run_dir.parts
+        assert Path(telemetry.AUTOTRAIN_DIR) in run_dir.parents
+    finally:
+        telemetry.AUTOTRAIN_DIR = original_autotrain_dir
 
 
 def test_state_cache():
