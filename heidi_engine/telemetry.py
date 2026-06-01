@@ -405,12 +405,28 @@ def get_run_dir(run_id: Optional[str] = None) -> Path:
         Creates runs/<run_id>/ directory structure.
         All run-specific files go here.
 
+    SECURITY:
+        - Sanitizes run_id to prevent path traversal
+        - Ensures run directory is within the intended base path
+
     TUNABLE:
         - Modify directory structure by changing path construction
     """
     if run_id is None:
         run_id = get_run_id()
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+
+    # SECURITY: Sanitize run_id to prevent path traversal.
+    # By taking only the .name, we ensure that even if an absolute path
+    # or traversal string is provided, it only uses the final component.
+    safe_run_id = Path(run_id).name
+
+    # Handle edge cases where .name might be empty or problematic
+    if not safe_run_id or safe_run_id in (".", ".."):
+        # If we have an invalid run_id, we fall back to the default run_id
+        # to avoid returning the base 'runs/' directory.
+        safe_run_id = get_run_id()
+
+    return Path(AUTOTRAIN_DIR) / "runs" / safe_run_id
 
 
 def get_events_path(run_id: Optional[str] = None) -> Path:
@@ -732,10 +748,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "usage": get_default_usage(),
         }
 
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
