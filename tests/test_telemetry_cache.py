@@ -56,6 +56,32 @@ def test_gpu_cache():
     assert t2 < t1 or t1 < 1.0  # t1 might be fast if nvidia-smi fails fast
 
 
+def test_get_run_dir_sanitization():
+    original_dir = telemetry.AUTOTRAIN_DIR
+    try:
+        telemetry.AUTOTRAIN_DIR = "/tmp/heidi_test"
+
+        # Test absolute path
+        run_dir = telemetry.get_run_dir("/etc/passwd")
+        assert run_dir.name == "passwd"
+        assert "/etc/passwd" not in str(run_dir)
+        assert "runs/passwd" in str(run_dir)
+
+        # Test traversal
+        run_dir = telemetry.get_run_dir("../../../etc/shadow")
+        assert run_dir.name == "shadow"
+        assert "shadow" in str(run_dir)
+        assert ".." not in str(run_dir)
+
+        # Test empty/unsafe
+        run_dir = telemetry.get_run_dir("..")
+        assert run_dir.name != ".."
+        assert len(run_dir.name) > 0
+
+    finally:
+        telemetry.AUTOTRAIN_DIR = original_dir
+
+
 if __name__ == "__main__":
     test_state_cache()
     test_gpu_cache()
