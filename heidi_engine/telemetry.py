@@ -410,7 +410,19 @@ def get_run_dir(run_id: Optional[str] = None) -> Path:
     """
     if run_id is None:
         run_id = get_run_id()
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+
+    # SECURITY: Sanitize run_id to prevent path traversal.
+    # Using Path(run_id).name ensures we only use the last component,
+    # preventing absolute paths from overriding the base directory.
+    safe_run_id = Path(run_id).name
+
+    # Fallback to get_run_id() for edge cases (., .., empty)
+    if not safe_run_id or safe_run_id in (".", ".."):
+        # If we got here from a None run_id, get_run_id() might have returned
+        # something that sanitized to empty. In that case, we generate a fresh one.
+        safe_run_id = "default_" + str(uuid.uuid4())[:8]
+
+    return Path(AUTOTRAIN_DIR) / "runs" / safe_run_id
 
 
 def get_events_path(run_id: Optional[str] = None) -> Path:
@@ -731,11 +743,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
