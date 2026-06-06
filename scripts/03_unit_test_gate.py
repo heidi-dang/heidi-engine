@@ -40,6 +40,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -63,6 +65,9 @@ CODE_BLOCK_PATTERNS = [
     r"`([^`\n]+)`",
 ]
 
+# BOLT OPTIMIZATION: Pre-compile Python keyword regex for faster heuristic check
+_PYTHON_KW_RE = re.compile(r"def |class |import |return |if |for |while ")
+
 # Patterns that indicate code should NOT be executed
 # TUNABLE: Add more dangerous patterns to block
 DANGEROUS_PATTERNS = [
@@ -85,6 +90,10 @@ DANGEROUS_PATTERNS = [
     # File operations (specifically writing/appending)
     r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
 ]
+
+# BOLT OPTIMIZATION: Combined regex for fast-path dangerous code detection
+_DANGEROUS_RE = re.compile("|".join(DANGEROUS_PATTERNS), re.IGNORECASE)
+_DANGEROUS_PATTERNS_COMPILED = [re.compile(p, re.IGNORECASE) for p in DANGEROUS_PATTERNS]
 
 
 def parse_args() -> argparse.Namespace:
@@ -161,10 +170,9 @@ def extract_python_code(text: str) -> List[str]:
         if len(code.strip()) < 20:
             continue
 
+        # BOLT OPTIMIZATION: Replace any() loop with single pre-compiled regex
         # Skip if it's clearly not Python (no indentation, keywords, etc.)
-        if not any(
-            kw in code for kw in ["def ", "class ", "import ", "return ", "if ", "for ", "while "]
-        ):
+        if not _PYTHON_KW_RE.search(code):
             continue
 
         python_code.append(code)
@@ -185,9 +193,13 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     """
     found = []
 
-    for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, code, re.IGNORECASE):
-            found.append(pattern)
+    # BOLT OPTIMIZATION: Fast-path check with combined regex
+    if not _DANGEROUS_RE.search(code):
+        return False, []
+
+    for pattern in _DANGEROUS_PATTERNS_COMPILED:
+        if pattern.search(code):
+            found.append(pattern.pattern)
 
     return len(found) > 0, found
 
@@ -213,7 +225,14 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     # Write code to temp file
     test_file = os.path.join(temp_dir, "test_code.py")
 
+    # BOLT SECURITY: Scrub sensitive environment variables
+    safe_env = os.environ.copy()
+    for key in ["OPENAI_API_KEY", "GITHUB_TOKEN", "GITLAB_TOKEN", "AWS_SECRET", "TELEMETRY_PASS"]:
+        safe_env.pop(key, None)
+
     # Wrap code to capture output safely
+    # BOLT FIX: Use textwrap.indent to fix syntax errors in wrapped code
+    indented_code = textwrap.indent(code, "    ")
     wrapped_code = f"""
 import sys
 import io
@@ -229,7 +248,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -263,7 +282,7 @@ except Exception as e:
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env={**safe_env, "PYTHONPATH": temp_dir},
         )
 
         stdout = result.stdout
@@ -390,34 +409,21 @@ def main():
     base_temp_dir = tempfile.mkdtemp(prefix="unit_test_gate_")
     print(f"[INFO] Using temp directory: {base_temp_dir}")
 
-    # Test each sample
-    tested_samples = []
-    passed_count = 0
-    failed_count = 0
-
-    for i, sample in enumerate(samples):
-        # Create isolated temp directory for this sample
+    # BOLT OPTIMIZATION: Parallel execution using ThreadPoolExecutor
+    def process_one(idx_sample):
+        i, sample = idx_sample
         sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
         os.makedirs(sample_temp_dir, exist_ok=True)
+        return test_sample(sample, sample_temp_dir, args.execution_timeout)
 
-        # Test the sample
-        tested = test_sample(sample, sample_temp_dir, args.execution_timeout)
-        tested_samples.append(tested)
+    # Determine number of workers (cap at 8 to avoid resource exhaustion)
+    num_workers = min(os.cpu_count() or 4, 8)
+    print(f"[INFO] Running tests in parallel (max workers: {num_workers})")
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        tested_samples = list(executor.map(process_one, enumerate(samples)))
 
-        # Count results
-        test_result = tested.get("test_result", {})
-        if test_result.get("passed", False):
-            passed_count += 1
-        else:
-            failed_count += 1
-
-        # Progress
-        if (i + 1) % 10 == 0:
-            print(
-                f"  Tested {i + 1}/{len(samples)} samples "
-                f"(passed: {passed_count}, failed: {failed_count})",
-                file=sys.stderr,
-            )
+    passed_count = sum(1 for s in tested_samples if s.get("test_result", {}).get("passed", False))
+    failed_count = len(tested_samples) - passed_count
 
     # Cleanup temp directory
     if not args.keep_temp:
