@@ -85,6 +85,15 @@ SECRET_PATTERNS = [
     (r'(?i)pwd\s*[:=]\s*["\'][^"\']{8,}["\']', "password"),
 ]
 
+# BOLT OPTIMIZATION: Pre-compile regex patterns for performance
+_SECRET_PATTERNS_COMPILED = [(re.compile(p), t) for p, t in SECRET_PATTERNS]
+
+# BOLT OPTIMIZATION: Combined fast-path regex for secret indicators
+_SECRET_INDICATORS = re.compile(
+    r"ghp_|glpat-|sk-|Bearer|api[_-]?key|apikey|secret[_-]?key|AKIA|PRIVATE\s+KEY|RSA|OPENSSH|TOKEN|password|pwd|mongodb|postgres|mysql|redis|[\w+/]{40,}",
+    re.IGNORECASE,
+)
+
 # Fields to check for secrets
 # TUNABLE: Add/remove fields based on your data structure
 SECRET_CHECK_FIELDS = ["instruction", "input", "output", "response", "completion"]
@@ -192,6 +201,10 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
         - Checks all specified fields against secret patterns
         - FAIL CLOSED: Returns True (has secrets) if ANY pattern matches
 
+    BOLT OPTIMIZATION:
+        - Uses a combined fast-path regex check before iterating
+        - Uses pre-compiled regex objects for each pattern
+
     TUNABLE:
         - Add more SECRET_PATTERNS for your use case
         - Adjust SECRET_CHECK_FIELDS to check more/less fields
@@ -203,13 +216,18 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
     found_secrets = []
 
     for field in SECRET_CHECK_FIELDS:
-        if field not in sample:
+        text = sample.get(field)
+        if text is None:
             continue
 
-        text = str(sample[field])
+        text = str(text)
 
-        for pattern, secret_type in SECRET_PATTERNS:
-            if re.search(pattern, text):
+        # BOLT OPTIMIZATION: Fast-path early exit if no indicators found
+        if not _SECRET_INDICATORS.search(text):
+            continue
+
+        for pattern, secret_type in _SECRET_PATTERNS_COMPILED:
+            if pattern.search(text):
                 found_secrets.append(f"{field}:{secret_type}")
 
     return len(found_secrets) > 0, found_secrets
@@ -270,13 +288,16 @@ def fuzzy_hash(sample: Dict[str, Any], n: int = 5) -> str:
         - Uses character n-grams for fuzzy matching
         - Useful for catching samples that are nearly identical
 
+    BOLT OPTIMIZATION:
+        - Replaces expensive re.sub with faster "".join(text.split())
+
     TUNABLE:
         - Adjust n for sensitivity (lower = more sensitive)
         - n=5 is a good balance for code data
     """
     text = (sample.get("instruction", "") + sample.get("output", "")).lower()
-    # Remove whitespace for more robust matching
-    text = re.sub(r"\s+", "", text)
+    # BOLT OPTIMIZATION: Faster whitespace removal
+    text = "".join(text.split())
 
     if len(text) < n:
         return text
