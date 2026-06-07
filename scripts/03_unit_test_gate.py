@@ -40,6 +40,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -85,6 +87,18 @@ DANGEROUS_PATTERNS = [
     # File operations (specifically writing/appending)
     r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
 ]
+
+# BOLT OPTIMIZATION: Pre-compile regex patterns at module level to avoid repeated compilation overhead.
+_CODE_BLOCK_PATTERNS_COMPILED = [re.compile(p, re.DOTALL) for p in CODE_BLOCK_PATTERNS]
+
+# BOLT OPTIMIZATION: Combined regex for fast-path dangerous code scanning.
+_DANGEROUS_RE = re.compile("|".join(DANGEROUS_PATTERNS), re.IGNORECASE)
+_DANGEROUS_PATTERNS_COMPILED = [re.compile(p, re.IGNORECASE) for p in DANGEROUS_PATTERNS]
+
+# BOLT OPTIMIZATION: Pre-compiled keyword regex for faster Python code detection.
+_PYTHON_KW_RE = re.compile(
+    r"\b(def|class|import|from|return|if|for|while|try|except|with|async|await|yield)\b"
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -149,8 +163,8 @@ def extract_python_code(text: str) -> List[str]:
     """
     code_blocks = []
 
-    for pattern in CODE_BLOCK_PATTERNS:
-        matches = re.findall(pattern, text, re.DOTALL)
+    for pattern_re in _CODE_BLOCK_PATTERNS_COMPILED:
+        matches = pattern_re.findall(text)
         code_blocks.extend(matches)
 
     # Filter: keep only code that looks like Python
@@ -161,10 +175,8 @@ def extract_python_code(text: str) -> List[str]:
         if len(code.strip()) < 20:
             continue
 
-        # Skip if it's clearly not Python (no indentation, keywords, etc.)
-        if not any(
-            kw in code for kw in ["def ", "class ", "import ", "return ", "if ", "for ", "while "]
-        ):
+        # BOLT OPTIMIZATION: Use pre-compiled keyword regex for faster detection.
+        if not _PYTHON_KW_RE.search(code):
             continue
 
         python_code.append(code)
@@ -183,11 +195,14 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     TUNABLE:
         - Adjust DANGEROUS_PATTERNS for your security needs
     """
-    found = []
+    # BOLT OPTIMIZATION: Use combined regex as fast-path to skip individual checks for safe code.
+    if not _DANGEROUS_RE.search(code):
+        return False, []
 
-    for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, code, re.IGNORECASE):
-            found.append(pattern)
+    found = []
+    for pattern_re in _DANGEROUS_PATTERNS_COMPILED:
+        if pattern_re.search(code):
+            found.append(pattern_re.pattern)
 
     return len(found) > 0, found
 
@@ -229,7 +244,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{textwrap.indent(code, '    ')}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -367,7 +382,8 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.dirname(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
@@ -390,34 +406,34 @@ def main():
     base_temp_dir = tempfile.mkdtemp(prefix="unit_test_gate_")
     print(f"[INFO] Using temp directory: {base_temp_dir}")
 
-    # Test each sample
+    # BOLT OPTIMIZATION: Use ThreadPoolExecutor to run tests in parallel.
+    # Code execution is IO-bound (subprocess) and significantly benefits from parallelization.
+    # Capped at 8 workers to balance speed and resource consumption.
+    max_workers = min(os.cpu_count() or 4, 8)
+    print(f"[INFO] Running tests in parallel with {max_workers} workers")
+
+    def process_wrapper(item):
+        i, sample = item
+        # Create isolated temp directory for this sample
+        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
+        os.makedirs(sample_temp_dir, exist_ok=True)
+        return test_sample(sample, sample_temp_dir, args.execution_timeout)
+
     tested_samples = []
     passed_count = 0
     failed_count = 0
 
-    for i, sample in enumerate(samples):
-        # Create isolated temp directory for this sample
-        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
-        os.makedirs(sample_temp_dir, exist_ok=True)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = list(executor.map(process_wrapper, enumerate(samples)))
 
-        # Test the sample
-        tested = test_sample(sample, sample_temp_dir, args.execution_timeout)
+    for tested in results:
         tested_samples.append(tested)
-
         # Count results
         test_result = tested.get("test_result", {})
         if test_result.get("passed", False):
             passed_count += 1
         else:
             failed_count += 1
-
-        # Progress
-        if (i + 1) % 10 == 0:
-            print(
-                f"  Tested {i + 1}/{len(samples)} samples "
-                f"(passed: {passed_count}, failed: {failed_count})",
-                file=sys.stderr,
-            )
 
     # Cleanup temp directory
     if not args.keep_temp:
