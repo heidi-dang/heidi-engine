@@ -133,7 +133,20 @@ data_cache: deque = deque(maxlen=data_tail_lines)
 
 
 def get_run_dir(run_id: str) -> Path:
-    """Get the run directory path."""
+    """
+    Get the run directory path.
+
+    SECURITY:
+        - Sanitizes run_id to prevent path traversal.
+    """
+    # SECURITY: Sanitize run_id to prevent path traversal
+    run_id = Path(run_id).name
+
+    # Fallback for invalid run_id
+    if not run_id or run_id in (".", ".."):
+        # Return base runs directory rather than allowing escape
+        return Path(AUTOTRAIN_DIR) / "runs"
+
     return Path(AUTOTRAIN_DIR) / "runs" / run_id
 
 
