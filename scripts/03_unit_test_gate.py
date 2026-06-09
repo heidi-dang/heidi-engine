@@ -40,6 +40,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -63,6 +65,12 @@ CODE_BLOCK_PATTERNS = [
     r"`([^`\n]+)`",
 ]
 
+# BOLT OPTIMIZATION: Pre-compile regex for extraction
+_CODE_BLOCK_REs = [re.compile(p, re.DOTALL) for p in CODE_BLOCK_PATTERNS]
+
+# BOLT OPTIMIZATION: Pre-compile regex for Python keyword check
+_PYTHON_KW_RE = re.compile(r"def |class |import |return |if |for |while ")
+
 # Patterns that indicate code should NOT be executed
 # TUNABLE: Add more dangerous patterns to block
 DANGEROUS_PATTERNS = [
@@ -85,6 +93,9 @@ DANGEROUS_PATTERNS = [
     # File operations (specifically writing/appending)
     r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
 ]
+
+# BOLT OPTIMIZATION: Pre-compile regex for safety check
+_DANGEROUS_REs = [re.compile(p, re.IGNORECASE) for p in DANGEROUS_PATTERNS]
 
 
 def parse_args() -> argparse.Namespace:
@@ -149,8 +160,8 @@ def extract_python_code(text: str) -> List[str]:
     """
     code_blocks = []
 
-    for pattern in CODE_BLOCK_PATTERNS:
-        matches = re.findall(pattern, text, re.DOTALL)
+    for cre in _CODE_BLOCK_REs:
+        matches = cre.findall(text)
         code_blocks.extend(matches)
 
     # Filter: keep only code that looks like Python
@@ -162,9 +173,7 @@ def extract_python_code(text: str) -> List[str]:
             continue
 
         # Skip if it's clearly not Python (no indentation, keywords, etc.)
-        if not any(
-            kw in code for kw in ["def ", "class ", "import ", "return ", "if ", "for ", "while "]
-        ):
+        if not _PYTHON_KW_RE.search(code):
             continue
 
         python_code.append(code)
@@ -185,9 +194,9 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     """
     found = []
 
-    for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, code, re.IGNORECASE):
-            found.append(pattern)
+    for i, dre in enumerate(_DANGEROUS_REs):
+        if dre.search(code):
+            found.append(DANGEROUS_PATTERNS[i])
 
     return len(found) > 0, found
 
@@ -229,7 +238,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{textwrap.indent(code, '    ')}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -390,18 +399,27 @@ def main():
     base_temp_dir = tempfile.mkdtemp(prefix="unit_test_gate_")
     print(f"[INFO] Using temp directory: {base_temp_dir}")
 
-    # Test each sample
+    # BOLT OPTIMIZATION: Parallelize unit testing
+    # Max workers capped at 8 to avoid overwhelming system resources
+    num_workers = min(os.cpu_count() or 4, 8)
+    print(f"[INFO] Starting {num_workers} worker threads...")
+
+    # Wrapper for parallel execution
+    def process_indexed_sample(index_sample_tuple):
+        i, sample = index_sample_tuple
+        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
+        os.makedirs(sample_temp_dir, exist_ok=True)
+        return test_sample(sample, sample_temp_dir, args.execution_timeout)
+
     tested_samples = []
     passed_count = 0
     failed_count = 0
 
-    for i, sample in enumerate(samples):
-        # Create isolated temp directory for this sample
-        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
-        os.makedirs(sample_temp_dir, exist_ok=True)
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        # Use imap-like behavior to track progress
+        results = list(executor.map(process_indexed_sample, enumerate(samples)))
 
-        # Test the sample
-        tested = test_sample(sample, sample_temp_dir, args.execution_timeout)
+    for i, tested in enumerate(results):
         tested_samples.append(tested)
 
         # Count results
@@ -411,8 +429,8 @@ def main():
         else:
             failed_count += 1
 
-        # Progress
-        if (i + 1) % 10 == 0:
+        # Progress reporting
+        if (i + 1) % 10 == 0 or (i + 1) == len(samples):
             print(
                 f"  Tested {i + 1}/{len(samples)} samples "
                 f"(passed: {passed_count}, failed: {failed_count})",
