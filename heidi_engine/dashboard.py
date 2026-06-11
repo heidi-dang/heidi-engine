@@ -133,8 +133,21 @@ data_cache: deque = deque(maxlen=data_tail_lines)
 
 
 def get_run_dir(run_id: str) -> Path:
-    """Get the run directory path."""
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+    """
+    Get the run directory path.
+
+    SECURITY:
+        - Sanitizes run_id to prevent path traversal
+        - Uses Path(run_id).name to ensure it's a relative filename
+    """
+    # SECURITY: Sanitize run_id to prevent path traversal.
+    safe_run_id = Path(run_id).name
+
+    # Handle cases where .name is empty or special markers
+    if not safe_run_id or safe_run_id in (".", ".."):
+        safe_run_id = "default_run"
+
+    return Path(AUTOTRAIN_DIR) / "runs" / safe_run_id
 
 
 def get_events_path(run_id: str) -> Path:
