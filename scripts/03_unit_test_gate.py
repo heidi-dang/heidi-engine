@@ -40,6 +40,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -229,7 +231,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{textwrap.indent(code, '    ')}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -367,7 +369,8 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.dirname(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
@@ -390,34 +393,47 @@ def main():
     base_temp_dir = tempfile.mkdtemp(prefix="unit_test_gate_")
     print(f"[INFO] Using temp directory: {base_temp_dir}")
 
-    # Test each sample
-    tested_samples = []
+    # BOLT OPTIMIZATION: Parallelize sample testing to significantly speed up the unit test gate.
+    # We use ThreadPoolExecutor as test_python_code is IO-bound (subprocess calls).
+    # Number of workers is capped to avoid overwhelming the system.
+    max_workers = min(os.cpu_count() or 4, 8)
+    print(f"[INFO] Running with {max_workers} parallel workers")
+
+    tested_samples = [None] * len(samples)
     passed_count = 0
     failed_count = 0
 
-    for i, sample in enumerate(samples):
+    def process_sample_task(idx: int, sample: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
         # Create isolated temp directory for this sample
-        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
+        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{idx}")
         os.makedirs(sample_temp_dir, exist_ok=True)
 
         # Test the sample
-        tested = test_sample(sample, sample_temp_dir, args.execution_timeout)
-        tested_samples.append(tested)
+        return idx, test_sample(sample, sample_temp_dir, args.execution_timeout)
 
-        # Count results
-        test_result = tested.get("test_result", {})
-        if test_result.get("passed", False):
-            passed_count += 1
-        else:
-            failed_count += 1
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(process_sample_task, i, sample) for i, sample in enumerate(samples)
+        ]
 
-        # Progress
-        if (i + 1) % 10 == 0:
-            print(
-                f"  Tested {i + 1}/{len(samples)} samples "
-                f"(passed: {passed_count}, failed: {failed_count})",
-                file=sys.stderr,
-            )
+        for i, future in enumerate(futures):
+            idx, tested = future.result()
+            tested_samples[idx] = tested
+
+            # Count results
+            test_result = tested.get("test_result", {})
+            if test_result.get("passed", False):
+                passed_count += 1
+            else:
+                failed_count += 1
+
+            # Progress
+            if (i + 1) % 10 == 0 or (i + 1) == len(samples):
+                print(
+                    f"  Tested {i + 1}/{len(samples)} samples "
+                    f"(passed: {passed_count}, failed: {failed_count})",
+                    file=sys.stderr,
+                )
 
     # Cleanup temp directory
     if not args.keep_temp:
