@@ -133,8 +133,20 @@ data_cache: deque = deque(maxlen=data_tail_lines)
 
 
 def get_run_dir(run_id: str) -> Path:
-    """Get the run directory path."""
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+    """
+    Get the run directory path.
+
+    SECURITY: Sanitizes run_id to prevent path traversal.
+    """
+    # SECURITY: Sanitize run_id to prevent directory traversal
+    clean_id = Path(run_id).name
+    if not clean_id or clean_id in (".", ".."):
+        # Fallback to some safe value if sanitization fails
+        # In dashboard.py we don't have a global get_run_id() easily available like in telemetry.py
+        # but we can at least ensure it's not a traversal.
+        clean_id = "unknown"
+
+    return Path(AUTOTRAIN_DIR).expanduser() / "runs" / clean_id
 
 
 def get_events_path(run_id: str) -> Path:
