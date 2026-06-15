@@ -33,6 +33,7 @@ NOTE:
 """
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -40,6 +41,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -130,6 +132,12 @@ Examples:
         type=int,
         default=int(os.environ.get("SEED", 42)),
         help="Random seed (default: 42)",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=min(os.cpu_count() or 4, 8),
+        help="Number of parallel workers (default: min(cpu_count, 8))",
     )
 
     return parser.parse_args()
@@ -229,7 +237,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{textwrap.indent(code, '    ')}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -367,7 +375,9 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    dir_path = os.path.dirname(path)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
@@ -390,34 +400,57 @@ def main():
     base_temp_dir = tempfile.mkdtemp(prefix="unit_test_gate_")
     print(f"[INFO] Using temp directory: {base_temp_dir}")
 
-    # Test each sample
+    # BOLT OPTIMIZATION: Use ThreadPoolExecutor to run unit tests in parallel.
+    # This significantly reduces pipeline time as code execution is I/O and CPU bound.
     tested_samples = []
     passed_count = 0
     failed_count = 0
 
-    for i, sample in enumerate(samples):
-        # Create isolated temp directory for this sample
-        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
-        os.makedirs(sample_temp_dir, exist_ok=True)
+    print(f"[INFO] Running tests with {args.workers} workers...")
 
-        # Test the sample
-        tested = test_sample(sample, sample_temp_dir, args.execution_timeout)
-        tested_samples.append(tested)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
+        future_to_sample = {}
+        for i, sample in enumerate(samples):
+            # Create isolated temp directory for this sample
+            sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
+            os.makedirs(sample_temp_dir, exist_ok=True)
 
-        # Count results
-        test_result = tested.get("test_result", {})
-        if test_result.get("passed", False):
-            passed_count += 1
-        else:
-            failed_count += 1
+            future = executor.submit(test_sample, sample, sample_temp_dir, args.execution_timeout)
+            future_to_sample[future] = i
 
-        # Progress
-        if (i + 1) % 10 == 0:
-            print(
-                f"  Tested {i + 1}/{len(samples)} samples "
-                f"(passed: {passed_count}, failed: {failed_count})",
-                file=sys.stderr,
-            )
+        # Process results as they complete, but maintain original order in tested_samples
+        # Actually, it is easier to just collect them and then sort, or pre-allocate
+        results_in_order = [None] * len(samples)
+
+        for future in concurrent.futures.as_completed(future_to_sample):
+            idx = future_to_sample[future]
+            try:
+                tested = future.result()
+                results_in_order[idx] = tested
+
+                # Count results
+                test_result = tested.get("test_result", {})
+                if test_result.get("passed", False):
+                    passed_count += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                print(f"[ERROR] Sample {idx} failed with exception: {e}", file=sys.stderr)
+                # Fallback for unexpected failures
+                samples[idx]["test_result"] = {"passed": False, "reason": f"exception: {str(e)}"}
+                results_in_order[idx] = samples[idx]
+                failed_count += 1
+
+            # Progress update
+            completed = sum(1 for r in results_in_order if r is not None)
+            if completed % 10 == 0 or completed == len(samples):
+                print(
+                    f"  Tested {completed}/{len(samples)} samples "
+                    f"(passed: {passed_count}, failed: {failed_count})",
+                    file=sys.stderr,
+                )
+
+    tested_samples = results_in_order
 
     # Cleanup temp directory
     if not args.keep_temp:
