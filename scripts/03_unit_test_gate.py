@@ -33,6 +33,7 @@ NOTE:
 """
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -40,6 +41,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -214,6 +216,9 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     test_file = os.path.join(temp_dir, "test_code.py")
 
     # Wrap code to capture output safely
+    # Indent the user code for insertion into the try block
+    indented_code = textwrap.indent(code, "    ")
+
     wrapped_code = f"""
 import sys
 import io
@@ -229,7 +234,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -367,7 +372,8 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.dirname(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
@@ -390,34 +396,53 @@ def main():
     base_temp_dir = tempfile.mkdtemp(prefix="unit_test_gate_")
     print(f"[INFO] Using temp directory: {base_temp_dir}")
 
-    # Test each sample
+    # BOLT OPTIMIZATION: Use ThreadPoolExecutor for parallel test execution.
+    # Since tests are mostly I/O bound (waiting for subprocess), threads are effective.
+    # We cap at 8 workers to avoid overwhelming the system.
+    num_workers = min(os.cpu_count() or 4, 8)
+    print(f"[INFO] Running with {num_workers} parallel workers")
+
+    def process_single_sample(idx_sample):
+        idx, sample = idx_sample
+        # Create isolated temp directory for this sample
+        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{idx}")
+        os.makedirs(sample_temp_dir, exist_ok=True)
+        return test_sample(sample, sample_temp_dir, args.execution_timeout)
+
     tested_samples = []
     passed_count = 0
     failed_count = 0
 
-    for i, sample in enumerate(samples):
-        # Create isolated temp directory for this sample
-        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
-        os.makedirs(sample_temp_dir, exist_ok=True)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+        # Submit all tasks
+        future_to_idx = {
+            executor.submit(process_single_sample, (i, s)): i for i, s in enumerate(samples)
+        }
 
-        # Test the sample
-        tested = test_sample(sample, sample_temp_dir, args.execution_timeout)
-        tested_samples.append(tested)
+        # Collect results in original order
+        # To maintain progress reporting, we store futures in a list
+        futures_list = [None] * len(samples)
+        for future, idx in future_to_idx.items():
+            futures_list[idx] = future
 
-        # Count results
-        test_result = tested.get("test_result", {})
-        if test_result.get("passed", False):
-            passed_count += 1
-        else:
-            failed_count += 1
+        for i, future in enumerate(futures_list):
+            tested = future.result()
+            tested_samples.append(tested)
 
-        # Progress
-        if (i + 1) % 10 == 0:
-            print(
-                f"  Tested {i + 1}/{len(samples)} samples "
-                f"(passed: {passed_count}, failed: {failed_count})",
-                file=sys.stderr,
-            )
+            # Count results
+            test_result = tested.get("test_result", {})
+            if test_result.get("passed", False):
+                passed_count += 1
+            else:
+                failed_count += 1
+
+            # Progress
+            if (i + 1) % 10 == 0:
+                print(
+                    f"  Tested {i + 1}/{len(samples)} samples "
+                    f"(passed: {passed_count}, failed: {failed_count})",
+                    file=sys.stderr,
+                )
 
     # Cleanup temp directory
     if not args.keep_temp:
