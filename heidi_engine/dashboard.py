@@ -50,6 +50,7 @@ REQUIREMENTS:
 import argparse
 import json
 import os
+import uuid
 import signal
 import sys
 import threading
@@ -133,8 +134,21 @@ data_cache: deque = deque(maxlen=data_tail_lines)
 
 
 def get_run_dir(run_id: str) -> Path:
-    """Get the run directory path."""
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+    """
+    Get the run directory path.
+
+    SECURITY:
+        - Sanitizes run_id to prevent path traversal.
+    """
+    # SECURITY: Sanitize run_id to prevent path traversal
+    clean_run_id = Path(run_id).name
+    if not clean_run_id or clean_run_id in (".", ".."):
+        # This should ideally not happen if called correctly, but we must be safe.
+        # Dashboard usually monitors existing runs, so a random fallback is a bit
+        # strange here, but it's better than traversal.
+        clean_run_id = f"safe_run_{uuid.uuid4().hex[:8]}"
+
+    return Path(AUTOTRAIN_DIR) / "runs" / clean_run_id
 
 
 def get_events_path(run_id: str) -> Path:
