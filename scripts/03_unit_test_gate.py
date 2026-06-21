@@ -86,6 +86,12 @@ DANGEROUS_PATTERNS = [
     r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
 ]
 
+# BOLT OPTIMIZATION: Pre-compile dangerous patterns for performance
+_DANGEROUS_PATTERNS_COMPILED = [re.compile(p, re.IGNORECASE) for p in DANGEROUS_PATTERNS]
+
+# BOLT OPTIMIZATION: Pre-compile Python keyword pattern for faster filtering
+_PYTHON_KW_RE = re.compile(r"\b(def|class|import|return|if|for|while)\b")
+
 
 def parse_args() -> argparse.Namespace:
     """
@@ -161,10 +167,9 @@ def extract_python_code(text: str) -> List[str]:
         if len(code.strip()) < 20:
             continue
 
-        # Skip if it's clearly not Python (no indentation, keywords, etc.)
-        if not any(
-            kw in code for kw in ["def ", "class ", "import ", "return ", "if ", "for ", "while "]
-        ):
+        # BOLT OPTIMIZATION: Use pre-compiled regex for keyword check
+        # This is faster than any() with multiple string comparisons
+        if not _PYTHON_KW_RE.search(code):
             continue
 
         python_code.append(code)
@@ -185,9 +190,10 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     """
     found = []
 
-    for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, code, re.IGNORECASE):
-            found.append(pattern)
+    # BOLT OPTIMIZATION: Use pre-compiled regex objects
+    for pattern_re in _DANGEROUS_PATTERNS_COMPILED:
+        if pattern_re.search(code):
+            found.append(pattern_re.pattern)
 
     return len(found) > 0, found
 
@@ -367,7 +373,9 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    out_dir = os.path.dirname(path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
