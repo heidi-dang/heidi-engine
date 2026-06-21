@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -214,6 +215,8 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     test_file = os.path.join(temp_dir, "test_code.py")
 
     # Wrap code to capture output safely
+    # We use textwrap.indent to ensure the user code is properly indented within the try block
+    indented_code = textwrap.indent(code, "    ")
     wrapped_code = f"""
 import sys
 import io
@@ -229,7 +232,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -257,13 +260,20 @@ except Exception as e:
 
     # Try to execute with timeout
     try:
+        # SECURITY: Scrub sensitive environment variables before executing untrusted code.
+        # This prevents leaking API keys like OPENAI_API_KEY to generated samples.
+        safe_env = os.environ.copy()
+        for key in ["OPENAI_API_KEY", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "TELEMETRY_PASS"]:
+            if key in safe_env:
+                del safe_env[key]
+
         result = subprocess.run(
             [sys.executable, test_file],
             capture_output=True,
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env={**safe_env, "PYTHONPATH": temp_dir},
         )
 
         stdout = result.stdout
