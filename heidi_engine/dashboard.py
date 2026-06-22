@@ -70,6 +70,14 @@ from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
+from heidi_engine.telemetry import (
+    sanitize_run_id,
+    get_run_dir,
+    get_events_path,
+    get_state_path,
+    get_config_path
+)
+
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
 # =============================================================================
@@ -89,7 +97,8 @@ MAX_EVENTS = int(os.environ.get("DASHBOARD_MAX_EVENTS", "20"))
 
 # Base directory for heidi_engine outputs
 # TUNABLE: Change if heidi_engine is in different location
-AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi-engine"))
+# NOTE: Default intentionally changed to heidi_engine (underscore) for consistency with telemetry
+AUTOTRAIN_DIR = os.environ.get("AUTOTRAIN_DIR", os.path.expanduser("~/.local/heidi_engine"))
 
 # Console width (auto-detected if not set)
 CONSOLE_WIDTH = int(os.environ.get("CONSOLE_WIDTH", "0"))
@@ -132,14 +141,6 @@ data_cache: deque = deque(maxlen=data_tail_lines)
 # =============================================================================
 
 
-def get_run_dir(run_id: str) -> Path:
-    """Get the run directory path."""
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
-
-
-def get_events_path(run_id: str) -> Path:
-    """Get the event log file path."""
-    return get_run_dir(run_id) / "events.jsonl"
 
 
 def get_latest_data_file(run_id: str, data_dir: Path, clean: bool = True) -> Optional[Path]:
@@ -195,14 +196,6 @@ def load_new_data_lines(run_id: str) -> List[str]:
     return []
 
 
-def get_state_path(run_id: str) -> Path:
-    """Get the state file path."""
-    return get_run_dir(run_id) / "state.json"
-
-
-def get_config_path(run_id: str) -> Path:
-    """Get the config file path."""
-    return get_run_dir(run_id) / "config.json"
 
 
 # =============================================================================
