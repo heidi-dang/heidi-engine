@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -214,6 +215,8 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     test_file = os.path.join(temp_dir, "test_code.py")
 
     # Wrap code to capture output safely
+    import textwrap
+
     wrapped_code = f"""
 import sys
 import io
@@ -229,7 +232,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{textwrap.indent(code, '    ')}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -367,7 +370,9 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    output_dir = os.path.dirname(path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
@@ -390,18 +395,29 @@ def main():
     base_temp_dir = tempfile.mkdtemp(prefix="unit_test_gate_")
     print(f"[INFO] Using temp directory: {base_temp_dir}")
 
-    # Test each sample
+    # BOLT OPTIMIZATION: Run tests in parallel using ThreadPoolExecutor.
+    # Since each test involves spawning a subprocess (I/O bound), parallelization
+    # yields significant speedups (~3-5x depending on cores).
     tested_samples = []
     passed_count = 0
     failed_count = 0
 
-    for i, sample in enumerate(samples):
-        # Create isolated temp directory for this sample
-        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
+    def _test_wrapper(idx_sample_tuple):
+        idx, sample = idx_sample_tuple
+        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{idx}")
         os.makedirs(sample_temp_dir, exist_ok=True)
+        return test_sample(sample, sample_temp_dir, args.execution_timeout)
 
-        # Test the sample
-        tested = test_sample(sample, sample_temp_dir, args.execution_timeout)
+    # Use ThreadPoolExecutor for parallel processing
+    # Limit workers to 8 to avoid overwhelming the system
+    max_workers = min(os.cpu_count() or 4, 8)
+    print(f"[INFO] Running tests in parallel with {max_workers} workers")
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Map samples to tasks
+        results = list(executor.map(_test_wrapper, enumerate(samples)))
+
+    for i, tested in enumerate(results):
         tested_samples.append(tested)
 
         # Count results
