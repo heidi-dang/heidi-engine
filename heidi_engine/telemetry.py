@@ -397,6 +397,27 @@ def get_default_usage() -> Dict[str, Any]:
 # =============================================================================
 
 
+def sanitize_run_id(run_id: str) -> str:
+    """
+    Sanitize run_id to prevent path traversal.
+
+    SECURITY:
+        - Uses pathlib.Path.name to extract only the last component
+        - Rejects '.' and '..'
+        - Defaults to 'default_run' for invalid inputs
+    """
+    if not run_id or not isinstance(run_id, str):
+        return "default_run"
+
+    # Path.name returns the last component, effectively stripping path traversal
+    sanitized = Path(run_id).name
+
+    if sanitized in (".", "..", ""):
+        return "default_run"
+
+    return sanitized
+
+
 def get_run_dir(run_id: Optional[str] = None) -> Path:
     """
     Get the run directory path.
@@ -410,7 +431,10 @@ def get_run_dir(run_id: Optional[str] = None) -> Path:
     """
     if run_id is None:
         run_id = get_run_id()
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+
+    # SECURITY: Sanitize run_id to prevent path traversal
+    safe_run_id = sanitize_run_id(run_id)
+    return Path(AUTOTRAIN_DIR) / "runs" / safe_run_id
 
 
 def get_events_path(run_id: Optional[str] = None) -> Path:
@@ -715,7 +739,9 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     RETURNS:
         State dictionary
     """
-    resolved_run_id = run_id or get_run_id()
+    # SECURITY: Sanitize run_id early to prevent path traversal and ensure cache consistency
+    raw_run_id = run_id or get_run_id()
+    resolved_run_id = sanitize_run_id(raw_run_id)
 
     # BOLT OPTIMIZATION: Check cache first
     cached = _state_cache.get(resolved_run_id)
@@ -731,11 +757,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
