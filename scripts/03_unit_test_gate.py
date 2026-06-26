@@ -33,6 +33,7 @@ NOTE:
 """
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -40,6 +41,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -53,18 +55,15 @@ TEST_TIMEOUT = 30
 EXECUTION_TIMEOUT = 5
 
 # Code block patterns to extract Python code
-# TUNABLE: Adjust regex for different code formats
-CODE_BLOCK_PATTERNS = [
-    # Markdown code blocks: ```python ... ```
-    r"```python\n(.*?)```",
-    # Markdown code blocks without language: ``` ... ```
-    r"```\n(.*?)```",
-    # Inline code markers
-    r"`([^`\n]+)`",
+# BOLT OPTIMIZATION: Pre-compiled regex for better performance
+CODE_BLOCK_RE = [
+    re.compile(r"```python\n(.*?)```", re.DOTALL),
+    re.compile(r"```\n(.*?)```", re.DOTALL),
+    re.compile(r"`([^`\n]+)`"),
 ]
 
 # Patterns that indicate code should NOT be executed
-# TUNABLE: Add more dangerous patterns to block
+# BOLT OPTIMIZATION: Pre-compiled regex for better performance
 DANGEROUS_PATTERNS = [
     # Dangerous imports (including comma-separated and aliased)
     r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
@@ -85,6 +84,10 @@ DANGEROUS_PATTERNS = [
     # File operations (specifically writing/appending)
     r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
 ]
+DANGEROUS_RE = [re.compile(p, re.IGNORECASE) for p in DANGEROUS_PATTERNS]
+
+# BOLT OPTIMIZATION: Pre-compiled regex for heuristic check
+_PY_KEYWORDS_RE = re.compile(r"def |class |import |return |if |for |while ")
 
 
 def parse_args() -> argparse.Namespace:
@@ -131,6 +134,12 @@ Examples:
         default=int(os.environ.get("SEED", 42)),
         help="Random seed (default: 42)",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=os.cpu_count() or 4,
+        help="Number of parallel workers (default: CPU count)",
+    )
 
     return parser.parse_args()
 
@@ -149,8 +158,9 @@ def extract_python_code(text: str) -> List[str]:
     """
     code_blocks = []
 
-    for pattern in CODE_BLOCK_PATTERNS:
-        matches = re.findall(pattern, text, re.DOTALL)
+    # BOLT OPTIMIZATION: Using pre-compiled regex
+    for pattern in CODE_BLOCK_RE:
+        matches = pattern.findall(text)
         code_blocks.extend(matches)
 
     # Filter: keep only code that looks like Python
@@ -162,9 +172,8 @@ def extract_python_code(text: str) -> List[str]:
             continue
 
         # Skip if it's clearly not Python (no indentation, keywords, etc.)
-        if not any(
-            kw in code for kw in ["def ", "class ", "import ", "return ", "if ", "for ", "while "]
-        ):
+        # BOLT OPTIMIZATION: Using pre-compiled regex heuristic
+        if not _PY_KEYWORDS_RE.search(code):
             continue
 
         python_code.append(code)
@@ -185,9 +194,10 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     """
     found = []
 
-    for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, code, re.IGNORECASE):
-            found.append(pattern)
+    # BOLT OPTIMIZATION: Using pre-compiled regex
+    for pattern in DANGEROUS_RE:
+        if pattern.search(code):
+            found.append(pattern.pattern)
 
     return len(found) > 0, found
 
@@ -214,6 +224,7 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     test_file = os.path.join(temp_dir, "test_code.py")
 
     # Wrap code to capture output safely
+    # BOLT OPTIMIZATION: Fix indentation with textwrap.indent
     wrapped_code = f"""
 import sys
 import io
@@ -229,7 +240,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{textwrap.indent(code, '    ')}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -257,13 +268,18 @@ except Exception as e:
 
     # Try to execute with timeout
     try:
+        # BOLT OPTIMIZATION: Scrub sensitive env vars
+        safe_env = os.environ.copy()
+        for key in ["OPENAI_API_KEY", "GITHUB_TOKEN", "TELEMETRY_PASS"]:
+            safe_env.pop(key, None)
+
         result = subprocess.run(
             [sys.executable, test_file],
             capture_output=True,
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env={**safe_env, "PYTHONPATH": temp_dir},
         )
 
         stdout = result.stdout
@@ -367,7 +383,10 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    # BOLT OPTIMIZATION: Avoid makedirs('') which fails in some environments
+    dir_path = os.path.dirname(path)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
@@ -390,34 +409,54 @@ def main():
     base_temp_dir = tempfile.mkdtemp(prefix="unit_test_gate_")
     print(f"[INFO] Using temp directory: {base_temp_dir}")
 
-    # Test each sample
-    tested_samples = []
+    # Test each sample in parallel
+    # BOLT OPTIMIZATION: Parallelize tests using ThreadPoolExecutor
+    tested_samples_map = {}
     passed_count = 0
     failed_count = 0
 
-    for i, sample in enumerate(samples):
-        # Create isolated temp directory for this sample
-        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
-        os.makedirs(sample_temp_dir, exist_ok=True)
+    print(f"[INFO] Running tests in parallel with {args.workers} workers...")
 
-        # Test the sample
-        tested = test_sample(sample, sample_temp_dir, args.execution_timeout)
-        tested_samples.append(tested)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
+        future_to_idx = {}
+        for i, sample in enumerate(samples):
+            # Create isolated temp directory for this sample
+            sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
+            os.makedirs(sample_temp_dir, exist_ok=True)
 
-        # Count results
-        test_result = tested.get("test_result", {})
-        if test_result.get("passed", False):
-            passed_count += 1
-        else:
-            failed_count += 1
+            future = executor.submit(test_sample, sample, sample_temp_dir, args.execution_timeout)
+            future_to_idx[future] = i
 
-        # Progress
-        if (i + 1) % 10 == 0:
-            print(
-                f"  Tested {i + 1}/{len(samples)} samples "
-                f"(passed: {passed_count}, failed: {failed_count})",
-                file=sys.stderr,
-            )
+        for future in concurrent.futures.as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                tested = future.result()
+                tested_samples_map[idx] = tested
+
+                # Count results
+                test_result = tested.get("test_result", {})
+                if test_result.get("passed", False):
+                    passed_count += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                print(f"[ERROR] Sample {idx} failed with exception: {e}", file=sys.stderr)
+                # Fallback for failed test execution
+                samples[idx]["test_result"] = {"passed": False, "reason": f"test_execution_error: {e}"}
+                tested_samples_map[idx] = samples[idx]
+                failed_count += 1
+
+            # Progress indicator
+            completed = len(tested_samples_map)
+            if completed % 10 == 0 or completed == len(samples):
+                print(
+                    f"  Tested {completed}/{len(samples)} samples "
+                    f"(passed: {passed_count}, failed: {failed_count})",
+                    file=sys.stderr,
+                )
+
+    # Ensure output order matches input order
+    tested_samples = [tested_samples_map[i] for i in range(len(samples))]
 
     # Cleanup temp directory
     if not args.keep_temp:
