@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -206,6 +207,7 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
         - Runs in temp directory
         - Has timeout protection
         - Does NOT execute system commands
+        - Scrubs sensitive environment variables
 
     TUNABLE:
         - execution_timeout: Max time code can run
@@ -214,6 +216,8 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     test_file = os.path.join(temp_dir, "test_code.py")
 
     # Wrap code to capture output safely
+    # We use textwrap.indent to ensure the user code is properly indented within the try block
+    indented_code = textwrap.indent(code, "    ")
     wrapped_code = f"""
 import sys
 import io
@@ -229,7 +233,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -255,6 +259,23 @@ except Exception as e:
     except SyntaxError as e:
         return False, "", f"Syntax error: {e}"
 
+    # SECURITY: Scrub sensitive environment variables before execution
+    # This prevents generated code from leaking secrets via os.environ
+    safe_env = os.environ.copy()
+    sensitive_keys = [
+        "OPENAI_API_KEY",
+        "GITHUB_TOKEN",
+        "GITLAB_TOKEN",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "DATABASE_URL",
+        "TELEMETRY_PASS",
+        "SECRET_KEY",
+    ]
+    for key in sensitive_keys:
+        if key in safe_env:
+            del safe_env[key]
+
     # Try to execute with timeout
     try:
         result = subprocess.run(
@@ -263,7 +284,7 @@ except Exception as e:
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env={**safe_env, "PYTHONPATH": temp_dir},
         )
 
         stdout = result.stdout
@@ -367,7 +388,10 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    # Ensure directory exists if path contains one
+    dirname = os.path.dirname(path)
+    if dirname:
+        os.makedirs(dirname, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
