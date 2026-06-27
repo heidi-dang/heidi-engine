@@ -132,9 +132,20 @@ data_cache: deque = deque(maxlen=data_tail_lines)
 # =============================================================================
 
 
+def sanitize_run_id(run_id: str) -> str:
+    """Sanitize run_id to prevent path traversal."""
+    if not run_id:
+        return "invalid_run_id"
+    clean_id = Path(run_id).name
+    if not clean_id or clean_id == "..":
+        return "invalid_run_id"
+    return clean_id
+
+
 def get_run_dir(run_id: str) -> Path:
     """Get the run directory path."""
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+    sanitized_id = sanitize_run_id(run_id)
+    return Path(AUTOTRAIN_DIR) / "runs" / sanitized_id
 
 
 def get_events_path(run_id: str) -> Path:
