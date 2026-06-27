@@ -33,6 +33,7 @@ NOTE:
 """
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -40,6 +41,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -62,6 +64,7 @@ CODE_BLOCK_PATTERNS = [
     # Inline code markers
     r"`([^`\n]+)`",
 ]
+CODE_BLOCK_RE = re.compile("|".join(CODE_BLOCK_PATTERNS), re.DOTALL)
 
 # Patterns that indicate code should NOT be executed
 # TUNABLE: Add more dangerous patterns to block
@@ -85,6 +88,10 @@ DANGEROUS_PATTERNS = [
     # File operations (specifically writing/appending)
     r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
 ]
+DANGEROUS_RE = re.compile("|".join(DANGEROUS_PATTERNS), re.IGNORECASE)
+
+# BOLT OPTIMIZATION: Pre-compiled heuristic for Python keywords
+_PY_KEYWORDS_RE = re.compile(r"\b(def|class|import|return|if|for|while)\b")
 
 
 def parse_args() -> argparse.Namespace:
@@ -140,18 +147,20 @@ def extract_python_code(text: str) -> List[str]:
     Extract Python code blocks from text.
 
     HOW IT WORKS:
-        - Searches for markdown code blocks
+        - Searches for markdown code blocks using pre-compiled regex
         - Returns list of extracted code snippets
 
     TUNABLE:
         - Add more patterns for different code formats
         - Filter out non-Python code blocks
     """
+    # BOLT OPTIMIZATION: Use finditer for single-pass extraction
     code_blocks = []
-
-    for pattern in CODE_BLOCK_PATTERNS:
-        matches = re.findall(pattern, text, re.DOTALL)
-        code_blocks.extend(matches)
+    for match in CODE_BLOCK_RE.finditer(text):
+        # Pick the first non-empty group from the alternation
+        code = next((g for g in match.groups() if g), None)
+        if code:
+            code_blocks.append(code)
 
     # Filter: keep only code that looks like Python
     # This is a heuristic - not perfect
@@ -161,10 +170,8 @@ def extract_python_code(text: str) -> List[str]:
         if len(code.strip()) < 20:
             continue
 
-        # Skip if it's clearly not Python (no indentation, keywords, etc.)
-        if not any(
-            kw in code for kw in ["def ", "class ", "import ", "return ", "if ", "for ", "while "]
-        ):
+        # BOLT OPTIMIZATION: Use pre-compiled keyword heuristic instead of any() loop
+        if not _PY_KEYWORDS_RE.search(code):
             continue
 
         python_code.append(code)
@@ -183,8 +190,12 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     TUNABLE:
         - Adjust DANGEROUS_PATTERNS for your security needs
     """
-    found = []
+    # BOLT OPTIMIZATION: Fast-path check using combined pre-compiled regex
+    if not DANGEROUS_RE.search(code):
+        return False, []
 
+    # If something was found, identify which patterns matched for the report
+    found = []
     for pattern in DANGEROUS_PATTERNS:
         if re.search(pattern, code, re.IGNORECASE):
             found.append(pattern)
@@ -214,6 +225,8 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     test_file = os.path.join(temp_dir, "test_code.py")
 
     # Wrap code to capture output safely
+    # BOLT OPTIMIZATION: Use textwrap.indent to ensure injected code is correctly indented within the try block.
+    # Also use double-braces for literal curly braces in the f-string template.
     wrapped_code = f"""
 import sys
 import io
@@ -229,7 +242,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{textwrap.indent(code, '    ')}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -367,7 +380,11 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    # BOLT OPTIMIZATION: Cache directory name and check for empty string
+    # os.makedirs('') raises FileNotFoundError in some environments.
+    out_dir = os.path.dirname(path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
@@ -384,40 +401,55 @@ def main():
 
     # Load samples
     samples = load_jsonl(args.input)
-    print(f"[INFO] Loaded {len(samples)} samples")
+    num_samples = len(samples)
+    print(f"[INFO] Loaded {num_samples} samples")
 
     # Create base temp directory
     base_temp_dir = tempfile.mkdtemp(prefix="unit_test_gate_")
     print(f"[INFO] Using temp directory: {base_temp_dir}")
 
-    # Test each sample
-    tested_samples = []
+    # BOLT OPTIMIZATION: Parallelize sample testing using ThreadPoolExecutor
+    # Workers count defaults to CPU count (4 in this environment)
+    workers = os.cpu_count() or 4
+    print(f"[INFO] Starting parallel execution with {workers} workers")
+
+    tested_results = [None] * num_samples
     passed_count = 0
     failed_count = 0
 
-    for i, sample in enumerate(samples):
+    def _process_indexed_sample(idx, sample):
         # Create isolated temp directory for this sample
-        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
+        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{idx}")
         os.makedirs(sample_temp_dir, exist_ok=True)
 
         # Test the sample
         tested = test_sample(sample, sample_temp_dir, args.execution_timeout)
-        tested_samples.append(tested)
+        return idx, tested
 
-        # Count results
-        test_result = tested.get("test_result", {})
-        if test_result.get("passed", False):
-            passed_count += 1
-        else:
-            failed_count += 1
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        future_to_idx = {
+            executor.submit(_process_indexed_sample, i, sample): i
+            for i, sample in enumerate(samples)
+        }
 
-        # Progress
-        if (i + 1) % 10 == 0:
-            print(
-                f"  Tested {i + 1}/{len(samples)} samples "
-                f"(passed: {passed_count}, failed: {failed_count})",
-                file=sys.stderr,
-            )
+        for i, future in enumerate(concurrent.futures.as_completed(future_to_idx)):
+            idx, tested = future.result()
+            tested_results[idx] = tested
+
+            # Count results
+            test_result = tested.get("test_result", {})
+            if test_result.get("passed", False):
+                passed_count += 1
+            else:
+                failed_count += 1
+
+            # Progress
+            if (i + 1) % 10 == 0 or (i + 1) == num_samples:
+                print(
+                    f"  Tested {i + 1}/{num_samples} samples "
+                    f"(passed: {passed_count}, failed: {failed_count})",
+                    file=sys.stderr,
+                )
 
     # Cleanup temp directory
     if not args.keep_temp:
@@ -427,8 +459,8 @@ def main():
         except Exception as e:
             print(f"[WARN] Failed to cleanup temp dir: {e}")
 
-    # Save results
-    save_jsonl(tested_samples, args.output)
+    # Save results (tested_results is already in original order)
+    save_jsonl(tested_results, args.output)
 
     # Summary
     print("[OK] Unit test gate complete!")
