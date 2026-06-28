@@ -40,6 +40,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -54,37 +56,29 @@ EXECUTION_TIMEOUT = 5
 
 # Code block patterns to extract Python code
 # TUNABLE: Adjust regex for different code formats
-CODE_BLOCK_PATTERNS = [
-    # Markdown code blocks: ```python ... ```
-    r"```python\n(.*?)```",
-    # Markdown code blocks without language: ``` ... ```
-    r"```\n(.*?)```",
-    # Inline code markers
-    r"`([^`\n]+)`",
-]
+CODE_BLOCK_RE = re.compile(
+    r"```python\n(.*?)```|```\n(.*?)```|`([^`\n]+)`"
+    , re.DOTALL
+)
+
+# Heuristic for Python keywords to avoid unnecessary checks
+_PY_KEYWORDS_RE = re.compile(
+    r"\b(def|class|import|return|if|for|while)\b"
+)
 
 # Patterns that indicate code should NOT be executed
 # TUNABLE: Add more dangerous patterns to block
-DANGEROUS_PATTERNS = [
-    # Dangerous imports (including comma-separated and aliased)
-    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
-    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
-    # Dangerous built-ins
-    r"\beval\s*\(",
-    r"\bexec\s*\(",
-    r"\b__import__\s*\(",
-    r"\bgetattr\s*\(",
-    r"\bsetattr\s*\(",
-    r"\bbreakpoint\s*\(",
-    # Dangerous module functions
-    r"\bos\.(system|popen|spawn|remove|unlink|rmdir|mkdir|chmod|chown|kill|exec|fork|pipe)\b",
-    r"\bsubprocess\.(run|call|check_call|check_output|Popen)\b",
-    r"\bshutil\.(rmtree|move|copy|copy2|copyfile|copymode|copystat|chown)\b",
-    r"\bpickle\.(load|loads)\b",
-    r"\bshelve\.open\b",
-    # File operations (specifically writing/appending)
+DANGEROUS_RE = re.compile(
+    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b|"
+    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b|"
+    r"\beval\s*\(|\bexec\s*\(|\b__import__\s*\(|\bgetattr\s*\(|\bsetattr\s*\(|\bbreakpoint\s*\(|"
+    r"\bos\.(system|popen|spawn|remove|unlink|rmdir|mkdir|chmod|chown|kill|exec|fork|pipe)\b|"
+    r"\bsubprocess\.(run|call|check_call|check_output|Popen)\b|"
+    r"\bshutil\.(rmtree|move|copy|copy2|copyfile|copymode|copystat|chown)\b|"
+    r"\bpickle\.(load|loads)\b|\bshelve\.open\b|"
     r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
-]
+    re.IGNORECASE
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -131,6 +125,13 @@ Examples:
         default=int(os.environ.get("SEED", 42)),
         help="Random seed (default: 42)",
     )
+    parser.add_argument(
+        "--workers",
+        "-w",
+        type=int,
+        default=os.cpu_count() or 1,
+        help=f"Number of parallel workers (default: {os.cpu_count() or 1})",
+    )
 
     return parser.parse_args()
 
@@ -149,9 +150,11 @@ def extract_python_code(text: str) -> List[str]:
     """
     code_blocks = []
 
-    for pattern in CODE_BLOCK_PATTERNS:
-        matches = re.findall(pattern, text, re.DOTALL)
-        code_blocks.extend(matches)
+    for match in CODE_BLOCK_RE.finditer(text):
+        # Extract whichever group matched
+        code = next((g for g in match.groups() if g is not None), None)
+        if code:
+            code_blocks.append(code)
 
     # Filter: keep only code that looks like Python
     # This is a heuristic - not perfect
@@ -162,9 +165,7 @@ def extract_python_code(text: str) -> List[str]:
             continue
 
         # Skip if it's clearly not Python (no indentation, keywords, etc.)
-        if not any(
-            kw in code for kw in ["def ", "class ", "import ", "return ", "if ", "for ", "while "]
-        ):
+        if not _PY_KEYWORDS_RE.search(code):
             continue
 
         python_code.append(code)
@@ -185,9 +186,8 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     """
     found = []
 
-    for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, code, re.IGNORECASE):
-            found.append(pattern)
+    for match in DANGEROUS_RE.finditer(code):
+        found.append(match.group(0))
 
     return len(found) > 0, found
 
@@ -214,6 +214,7 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     test_file = os.path.join(temp_dir, "test_code.py")
 
     # Wrap code to capture output safely
+    indented_code = textwrap.indent(code, "    ")
     wrapped_code = f"""
 import sys
 import io
@@ -229,7 +230,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -367,7 +368,9 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    dir_name = os.path.dirname(path)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
@@ -390,34 +393,49 @@ def main():
     base_temp_dir = tempfile.mkdtemp(prefix="unit_test_gate_")
     print(f"[INFO] Using temp directory: {base_temp_dir}")
 
-    # Test each sample
-    tested_samples = []
+    # Parallel testing
+    num_workers = getattr(args, "workers", os.cpu_count() or 1)
+    print(f"[INFO] Starting parallel testing with {num_workers} workers...")
+
+    results_map = {}
     passed_count = 0
     failed_count = 0
 
-    for i, sample in enumerate(samples):
-        # Create isolated temp directory for this sample
-        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
-        os.makedirs(sample_temp_dir, exist_ok=True)
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        future_to_idx = {}
+        for i, sample in enumerate(samples):
+            # Create isolated temp directory for this sample
+            sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
+            os.makedirs(sample_temp_dir, exist_ok=True)
+            future = executor.submit(test_sample, sample, sample_temp_dir, args.execution_timeout)
+            future_to_idx[future] = i
 
-        # Test the sample
-        tested = test_sample(sample, sample_temp_dir, args.execution_timeout)
-        tested_samples.append(tested)
+        for i, future in enumerate(as_completed(future_to_idx)):
+            idx = future_to_idx[future]
+            try:
+                tested = future.result()
+                results_map[idx] = tested
 
-        # Count results
-        test_result = tested.get("test_result", {})
-        if test_result.get("passed", False):
-            passed_count += 1
-        else:
-            failed_count += 1
+                # Count results
+                test_result = tested.get("test_result", {})
+                if test_result.get("passed", False):
+                    passed_count += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                print(f"[ERROR] Failed to test sample {idx}: {e}", file=sys.stderr)
+                failed_count += 1
 
-        # Progress
-        if (i + 1) % 10 == 0:
-            print(
-                f"  Tested {i + 1}/{len(samples)} samples "
-                f"(passed: {passed_count}, failed: {failed_count})",
-                file=sys.stderr,
-            )
+            # Progress
+            if (i + 1) % 10 == 0:
+                print(
+                    f"  Tested {i + 1}/{len(samples)} samples "
+                    f"(passed: {passed_count}, failed: {failed_count})",
+                    file=sys.stderr,
+                )
+
+    # Sort results back to original order
+    tested_samples = [results_map[i] for i in range(len(samples)) if i in results_map]
 
     # Cleanup temp directory
     if not args.keep_temp:
