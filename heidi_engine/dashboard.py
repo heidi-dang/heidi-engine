@@ -70,6 +70,8 @@ from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
+from heidi_engine.telemetry import sanitize_run_id
+
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
 # =============================================================================
@@ -134,7 +136,8 @@ data_cache: deque = deque(maxlen=data_tail_lines)
 
 def get_run_dir(run_id: str) -> Path:
     """Get the run directory path."""
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+    sanitized_id = sanitize_run_id(run_id)
+    return Path(AUTOTRAIN_DIR) / "runs" / sanitized_id
 
 
 def get_events_path(run_id: str) -> Path:
