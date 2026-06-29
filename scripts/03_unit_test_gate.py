@@ -214,6 +214,8 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     test_file = os.path.join(temp_dir, "test_code.py")
 
     # Wrap code to capture output safely
+    import textwrap
+    indented_code = textwrap.indent(code, '    ')
     wrapped_code = f"""
 import sys
 import io
@@ -229,7 +231,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -367,7 +369,10 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    # BOLT OPTIMIZATION: Avoid makedirs if no directory component
+    dirname = os.path.dirname(path)
+    if dirname:
+        os.makedirs(dirname, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
@@ -390,34 +395,56 @@ def main():
     base_temp_dir = tempfile.mkdtemp(prefix="unit_test_gate_")
     print(f"[INFO] Using temp directory: {base_temp_dir}")
 
-    # Test each sample
-    tested_samples = []
+    # BOLT OPTIMIZATION: Parallel execution of unit tests
+    # Uses ThreadPoolExecutor to run tests in parallel while maintaining order
+    import concurrent.futures
+    tested_samples = [None] * len(samples)
     passed_count = 0
     failed_count = 0
 
-    for i, sample in enumerate(samples):
-        # Create isolated temp directory for this sample
-        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
-        os.makedirs(sample_temp_dir, exist_ok=True)
+    # Pre-create temp directories
+    sample_dirs = []
+    for i in range(len(samples)):
+        d = os.path.join(base_temp_dir, f"sample_{i}")
+        os.makedirs(d, exist_ok=True)
+        sample_dirs.append(d)
 
-        # Test the sample
-        tested = test_sample(sample, sample_temp_dir, args.execution_timeout)
-        tested_samples.append(tested)
+    workers = os.cpu_count() or 4
+    print(f"[INFO] Running tests in parallel with {workers} workers...")
 
-        # Count results
-        test_result = tested.get("test_result", {})
-        if test_result.get("passed", False):
-            passed_count += 1
-        else:
-            failed_count += 1
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        # Submit all tasks
+        future_to_idx = {
+            executor.submit(test_sample, samples[i], sample_dirs[i], args.execution_timeout): i
+            for i in range(len(samples))
+        }
 
-        # Progress
-        if (i + 1) % 10 == 0:
-            print(
-                f"  Tested {i + 1}/{len(samples)} samples "
-                f"(passed: {passed_count}, failed: {failed_count})",
-                file=sys.stderr,
-            )
+        # Process as they complete
+        completed = 0
+        for future in concurrent.futures.as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                tested = future.result()
+                tested_samples[idx] = tested
+
+                # Count results
+                test_result = tested.get("test_result", {})
+                if test_result.get("passed", False):
+                    passed_count += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                print(f"[ERROR] Sample {idx} failed with unexpected error: {e}", file=sys.stderr)
+                tested_samples[idx] = samples[idx]
+                failed_count += 1
+
+            completed += 1
+            if completed % 10 == 0 or completed == len(samples):
+                print(
+                    f"  Tested {completed}/{len(samples)} samples "
+                    f"(passed: {passed_count}, failed: {failed_count})",
+                    file=sys.stderr,
+                )
 
     # Cleanup temp directory
     if not args.keep_temp:
