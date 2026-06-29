@@ -33,6 +33,7 @@ NOTE:
 """
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -40,6 +41,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -63,6 +65,9 @@ CODE_BLOCK_PATTERNS = [
     r"`([^`\n]+)`",
 ]
 
+# BOLT OPTIMIZATION: Pre-compile regex for faster extraction
+CODE_BLOCK_RE = re.compile("|".join(CODE_BLOCK_PATTERNS), re.DOTALL)
+
 # Patterns that indicate code should NOT be executed
 # TUNABLE: Add more dangerous patterns to block
 DANGEROUS_PATTERNS = [
@@ -85,6 +90,12 @@ DANGEROUS_PATTERNS = [
     # File operations (specifically writing/appending)
     r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
 ]
+
+# BOLT OPTIMIZATION: Pre-compile regex for faster scanning
+DANGEROUS_RE = re.compile("|".join(DANGEROUS_PATTERNS), re.IGNORECASE)
+
+# BOLT OPTIMIZATION: Pre-compile regex for faster heuristic filtering
+_PY_KEYWORDS_RE = re.compile(r"def |class |import |return |if |for |while ")
 
 
 def parse_args() -> argparse.Namespace:
@@ -147,11 +158,19 @@ def extract_python_code(text: str) -> List[str]:
         - Add more patterns for different code formats
         - Filter out non-Python code blocks
     """
+    # BOLT OPTIMIZATION: Use pre-compiled regex with finditer for efficiency
     code_blocks = []
-
-    for pattern in CODE_BLOCK_PATTERNS:
-        matches = re.findall(pattern, text, re.DOTALL)
-        code_blocks.extend(matches)
+    for match in CODE_BLOCK_RE.finditer(text):
+        # In combined regex, group(0) is the full match, which is what we want
+        # for these patterns as they are already capturing groups.
+        code = match.group(0)
+        # For markdown blocks, we might want to strip the markers if we used capturing groups
+        # However, the current CODE_BLOCK_PATTERNS use capturing groups (.*?) and ([^`\\n]+)
+        # When combined with |, group(0) is the WHOLE match (including backticks).
+        # We should find which group matched to get just the content.
+        content = next((g for g in match.groups() if g is not None), None)
+        if content:
+            code_blocks.append(content)
 
     # Filter: keep only code that looks like Python
     # This is a heuristic - not perfect
@@ -162,9 +181,8 @@ def extract_python_code(text: str) -> List[str]:
             continue
 
         # Skip if it's clearly not Python (no indentation, keywords, etc.)
-        if not any(
-            kw in code for kw in ["def ", "class ", "import ", "return ", "if ", "for ", "while "]
-        ):
+        # BOLT OPTIMIZATION: Use pre-compiled keyword regex instead of loop with any()
+        if not _PY_KEYWORDS_RE.search(code):
             continue
 
         python_code.append(code)
@@ -183,11 +201,10 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     TUNABLE:
         - Adjust DANGEROUS_PATTERNS for your security needs
     """
+    # BOLT OPTIMIZATION: Use pre-compiled combined regex
     found = []
-
-    for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, code, re.IGNORECASE):
-            found.append(pattern)
+    for match in DANGEROUS_RE.finditer(code):
+        found.append(match.group(0))
 
     return len(found) > 0, found
 
@@ -214,6 +231,8 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     test_file = os.path.join(temp_dir, "test_code.py")
 
     # Wrap code to capture output safely
+    # We use textwrap.indent to ensure the user code is properly indented within the try block
+    indented_code = textwrap.indent(code, "    ")
     wrapped_code = f"""
 import sys
 import io
@@ -229,7 +248,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -367,7 +386,11 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    # BOLT OPTIMIZATION: Only call makedirs if there is a directory component.
+    # Also avoids redundant system calls by storing the directory name.
+    out_dir = os.path.dirname(path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
@@ -391,33 +414,43 @@ def main():
     print(f"[INFO] Using temp directory: {base_temp_dir}")
 
     # Test each sample
-    tested_samples = []
+    # BOLT OPTIMIZATION: Parallelize using ThreadPoolExecutor for multi-core speedup
+    max_workers = os.cpu_count() or 4
+    print(f"[INFO] Running with {max_workers} parallel workers")
+
+    tested_samples = [None] * len(samples)
     passed_count = 0
     failed_count = 0
 
-    for i, sample in enumerate(samples):
-        # Create isolated temp directory for this sample
-        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
-        os.makedirs(sample_temp_dir, exist_ok=True)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_idx = {}
+        for i, sample in enumerate(samples):
+            # Create isolated temp directory for this sample
+            sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
+            os.makedirs(sample_temp_dir, exist_ok=True)
 
-        # Test the sample
-        tested = test_sample(sample, sample_temp_dir, args.execution_timeout)
-        tested_samples.append(tested)
+            future = executor.submit(test_sample, sample, sample_temp_dir, args.execution_timeout)
+            future_to_idx[future] = i
 
-        # Count results
-        test_result = tested.get("test_result", {})
-        if test_result.get("passed", False):
-            passed_count += 1
-        else:
-            failed_count += 1
+        for i, future in enumerate(concurrent.futures.as_completed(future_to_idx)):
+            idx = future_to_idx[future]
+            tested = future.result()
+            tested_samples[idx] = tested
 
-        # Progress
-        if (i + 1) % 10 == 0:
-            print(
-                f"  Tested {i + 1}/{len(samples)} samples "
-                f"(passed: {passed_count}, failed: {failed_count})",
-                file=sys.stderr,
-            )
+            # Count results
+            test_result = tested.get("test_result", {})
+            if test_result.get("passed", False):
+                passed_count += 1
+            else:
+                failed_count += 1
+
+            # Progress
+            if (i + 1) % 10 == 0:
+                print(
+                    f"  Tested {i + 1}/{len(samples)} samples "
+                    f"(passed: {passed_count}, failed: {failed_count})",
+                    file=sys.stderr,
+                )
 
     # Cleanup temp directory
     if not args.keep_temp:
