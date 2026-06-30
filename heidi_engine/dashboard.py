@@ -132,8 +132,31 @@ data_cache: deque = deque(maxlen=data_tail_lines)
 # =============================================================================
 
 
+def sanitize_run_id(run_id: str) -> str:
+    """
+    Sanitize run ID to prevent path traversal.
+
+    SECURITY:
+        - Uses Path(run_id).name to isolate the filename
+        - Rejects ".." or empty strings to prevent directory traversal
+    """
+    if not run_id:
+        return "invalid_run_id"
+
+    # Isolate last path component
+    clean_id = Path(run_id).name
+
+    # Reject dangerous or empty components
+    if clean_id in ("..", ""):
+        return "invalid_run_id"
+
+    return clean_id
+
+
 def get_run_dir(run_id: str) -> Path:
     """Get the run directory path."""
+    # SECURITY: Sanitize run_id to prevent path traversal
+    run_id = sanitize_run_id(run_id)
     return Path(AUTOTRAIN_DIR) / "runs" / run_id
 
 
