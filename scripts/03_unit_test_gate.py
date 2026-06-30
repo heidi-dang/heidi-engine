@@ -33,6 +33,7 @@ NOTE:
 """
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -40,6 +41,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -53,19 +55,22 @@ TEST_TIMEOUT = 30
 EXECUTION_TIMEOUT = 5
 
 # Code block patterns to extract Python code
-# TUNABLE: Adjust regex for different code formats
+# BOLT OPTIMIZATION: Pre-compile regex patterns at module level
 CODE_BLOCK_PATTERNS = [
     # Markdown code blocks: ```python ... ```
-    r"```python\n(.*?)```",
+    re.compile(r"```python\n(.*?)```", re.DOTALL),
     # Markdown code blocks without language: ``` ... ```
-    r"```\n(.*?)```",
+    re.compile(r"```\n(.*?)```", re.DOTALL),
     # Inline code markers
-    r"`([^`\n]+)`",
+    re.compile(r"`([^`\n]+)`"),
 ]
+
+# BOLT OPTIMIZATION: Pre-compile keyword check regex
+PY_KEYWORDS_RE = re.compile(r"\b(def|class|import|return|if|for|while)\b")
 
 # Patterns that indicate code should NOT be executed
 # TUNABLE: Add more dangerous patterns to block
-DANGEROUS_PATTERNS = [
+DANGEROUS_PATTERNS_STR = [
     # Dangerous imports (including comma-separated and aliased)
     r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
     r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
@@ -85,6 +90,9 @@ DANGEROUS_PATTERNS = [
     # File operations (specifically writing/appending)
     r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
 ]
+
+# BOLT OPTIMIZATION: Pre-compile dangerous patterns
+DANGEROUS_PATTERNS = [re.compile(p, re.IGNORECASE) for p in DANGEROUS_PATTERNS_STR]
 
 
 def parse_args() -> argparse.Namespace:
@@ -150,7 +158,7 @@ def extract_python_code(text: str) -> List[str]:
     code_blocks = []
 
     for pattern in CODE_BLOCK_PATTERNS:
-        matches = re.findall(pattern, text, re.DOTALL)
+        matches = pattern.findall(text)
         code_blocks.extend(matches)
 
     # Filter: keep only code that looks like Python
@@ -161,10 +169,8 @@ def extract_python_code(text: str) -> List[str]:
         if len(code.strip()) < 20:
             continue
 
-        # Skip if it's clearly not Python (no indentation, keywords, etc.)
-        if not any(
-            kw in code for kw in ["def ", "class ", "import ", "return ", "if ", "for ", "while "]
-        ):
+        # BOLT OPTIMIZATION: Use pre-compiled regex for keyword check
+        if not PY_KEYWORDS_RE.search(code):
             continue
 
         python_code.append(code)
@@ -185,9 +191,9 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     """
     found = []
 
-    for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, code, re.IGNORECASE):
-            found.append(pattern)
+    for i, pattern in enumerate(DANGEROUS_PATTERNS):
+        if pattern.search(code):
+            found.append(DANGEROUS_PATTERNS_STR[i])
 
     return len(found) > 0, found
 
@@ -213,6 +219,10 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     # Write code to temp file
     test_file = os.path.join(temp_dir, "test_code.py")
 
+    # BOLT OPTIMIZATION: Use textwrap.indent to safely inject code into the wrapper.
+    # This prevents SyntaxError when the generated code contains triple quotes.
+    indented_code = textwrap.indent(code, "    ")
+
     # Wrap code to capture output safely
     wrapped_code = f"""
 import sys
@@ -229,7 +239,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -390,34 +400,55 @@ def main():
     base_temp_dir = tempfile.mkdtemp(prefix="unit_test_gate_")
     print(f"[INFO] Using temp directory: {base_temp_dir}")
 
-    # Test each sample
-    tested_samples = []
+    # Test each sample in parallel
+    # BOLT OPTIMIZATION: Use ThreadPoolExecutor for parallel execution of samples
+    # IO-bound (subprocess) benefit from threading.
+    max_workers = os.cpu_count() or 4
+    print(f"[INFO] Using {max_workers} parallel workers")
+
+    tested_samples = [None] * len(samples)
     passed_count = 0
     failed_count = 0
 
-    for i, sample in enumerate(samples):
-        # Create isolated temp directory for this sample
-        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
-        os.makedirs(sample_temp_dir, exist_ok=True)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks
+        future_to_idx = {}
+        for i, sample in enumerate(samples):
+            # Create isolated temp directory for this sample
+            sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
+            os.makedirs(sample_temp_dir, exist_ok=True)
 
-        # Test the sample
-        tested = test_sample(sample, sample_temp_dir, args.execution_timeout)
-        tested_samples.append(tested)
+            future = executor.submit(test_sample, sample, sample_temp_dir, args.execution_timeout)
+            future_to_idx[future] = i
 
-        # Count results
-        test_result = tested.get("test_result", {})
-        if test_result.get("passed", False):
-            passed_count += 1
-        else:
-            failed_count += 1
+        # Collect results as they complete
+        for future in concurrent.futures.as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                tested = future.result()
+                tested_samples[idx] = tested
 
-        # Progress
-        if (i + 1) % 10 == 0:
-            print(
-                f"  Tested {i + 1}/{len(samples)} samples "
-                f"(passed: {passed_count}, failed: {failed_count})",
-                file=sys.stderr,
-            )
+                # Count results
+                test_result = tested.get("test_result", {})
+                if test_result.get("passed", False):
+                    passed_count += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                print(f"[ERROR] Sample {idx} failed with exception: {e}", file=sys.stderr)
+                failed_count += 1
+                # Ensure we have something in that slot
+                tested_samples[idx] = samples[idx]
+                tested_samples[idx]["test_result"] = {"passed": False, "reason": "exception", "error": str(e)}
+
+            # Progress
+            completed = passed_count + failed_count
+            if completed % 10 == 0 or completed == len(samples):
+                print(
+                    f"  Tested {completed}/{len(samples)} samples "
+                    f"(passed: {passed_count}, failed: {failed_count})",
+                    file=sys.stderr,
+                )
 
     # Cleanup temp directory
     if not args.keep_temp:
