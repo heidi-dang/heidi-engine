@@ -132,9 +132,32 @@ data_cache: deque = deque(maxlen=data_tail_lines)
 # =============================================================================
 
 
+def sanitize_run_id(run_id: str) -> str:
+    """
+    Sanitize run_id to prevent path traversal.
+
+    SECURITY:
+        - Uses Path(run_id).name to isolate filename
+        - Rejects '..' or empty strings
+    """
+    if not run_id:
+        return "invalid_run_id"
+
+    # Get only the last component of the path
+    safe_id = Path(run_id).name
+
+    # Check for dangerous or empty results
+    if safe_id in ("..", ".", ""):
+        return "invalid_run_id"
+
+    return safe_id
+
+
 def get_run_dir(run_id: str) -> Path:
     """Get the run directory path."""
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+    # SECURITY: Sanitize run_id to prevent path traversal
+    safe_run_id = sanitize_run_id(run_id)
+    return Path(AUTOTRAIN_DIR) / "runs" / safe_run_id
 
 
 def get_events_path(run_id: str) -> Path:

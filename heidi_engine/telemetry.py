@@ -397,6 +397,27 @@ def get_default_usage() -> Dict[str, Any]:
 # =============================================================================
 
 
+def sanitize_run_id(run_id: str) -> str:
+    """
+    Sanitize run_id to prevent path traversal.
+
+    SECURITY:
+        - Uses Path(run_id).name to isolate filename
+        - Rejects '..' or empty strings
+    """
+    if not run_id:
+        return "invalid_run_id"
+
+    # Get only the last component of the path
+    safe_id = Path(run_id).name
+
+    # Check for dangerous or empty results
+    if safe_id in ("..", ".", ""):
+        return "invalid_run_id"
+
+    return safe_id
+
+
 def get_run_dir(run_id: Optional[str] = None) -> Path:
     """
     Get the run directory path.
@@ -410,7 +431,10 @@ def get_run_dir(run_id: Optional[str] = None) -> Path:
     """
     if run_id is None:
         run_id = get_run_id()
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+
+    # SECURITY: Sanitize run_id to prevent path traversal
+    safe_run_id = sanitize_run_id(run_id)
+    return Path(AUTOTRAIN_DIR) / "runs" / safe_run_id
 
 
 def get_events_path(run_id: Optional[str] = None) -> Path:
@@ -439,7 +463,11 @@ def get_run_id() -> str:
     """
     global RUN_ID
     if not RUN_ID:
-        RUN_ID = os.environ.get("RUN_ID", "")
+        # SECURITY: Sanitize RUN_ID from environment
+        raw_id = os.environ.get("RUN_ID", "")
+        if raw_id:
+            RUN_ID = sanitize_run_id(raw_id)
+
     if not RUN_ID:
         RUN_ID = str(uuid.uuid4())[:8]
         RUN_ID = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{RUN_ID}"
@@ -717,7 +745,7 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     """
     resolved_run_id = run_id or get_run_id()
 
-    # BOLT OPTIMIZATION: Check cache first
+    # BOLT OPTIMIZATION: Check thread-safe state cache
     cached = _state_cache.get(resolved_run_id)
     if cached is not None:
         return cached
@@ -731,11 +759,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
