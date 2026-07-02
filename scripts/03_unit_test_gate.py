@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -367,7 +368,10 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    # BOLT OPTIMIZATION: Avoid FileNotFoundError if path is in current directory
+    out_dir = os.path.dirname(path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
@@ -390,34 +394,46 @@ def main():
     base_temp_dir = tempfile.mkdtemp(prefix="unit_test_gate_")
     print(f"[INFO] Using temp directory: {base_temp_dir}")
 
-    # Test each sample
-    tested_samples = []
+    # BOLT OPTIMIZATION: Parallelize unit test execution
+    # This significantly reduces pipeline duration for large datasets.
+    workers = os.cpu_count() or 4
+    print(f"[INFO] Running with {workers} parallel workers")
+
+    # Map results by index to preserve original order
+    indexed_results = {}
     passed_count = 0
     failed_count = 0
 
-    for i, sample in enumerate(samples):
-        # Create isolated temp directory for this sample
-        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
+    def process_indexed_sample(idx, s):
+        # Create isolated temp directory for this thread/sample
+        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{idx}")
         os.makedirs(sample_temp_dir, exist_ok=True)
+        return idx, test_sample(s, sample_temp_dir, args.execution_timeout)
 
-        # Test the sample
-        tested = test_sample(sample, sample_temp_dir, args.execution_timeout)
-        tested_samples.append(tested)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(process_indexed_sample, i, sample): i for i, sample in enumerate(samples)}
 
-        # Count results
-        test_result = tested.get("test_result", {})
-        if test_result.get("passed", False):
-            passed_count += 1
-        else:
-            failed_count += 1
+        for i, future in enumerate(as_completed(futures)):
+            idx, tested = future.result()
+            indexed_results[idx] = tested
 
-        # Progress
-        if (i + 1) % 10 == 0:
-            print(
-                f"  Tested {i + 1}/{len(samples)} samples "
-                f"(passed: {passed_count}, failed: {failed_count})",
-                file=sys.stderr,
-            )
+            # Count results
+            test_result = tested.get("test_result", {})
+            if test_result.get("passed", False):
+                passed_count += 1
+            else:
+                failed_count += 1
+
+            # Progress (every 10 samples processed)
+            if (i + 1) % 10 == 0 or (i + 1) == len(samples):
+                print(
+                    f"  Tested {i + 1}/{len(samples)} samples "
+                    f"(passed: {passed_count}, failed: {failed_count})",
+                    file=sys.stderr,
+                )
+
+    # Reconstruct in original order
+    tested_samples = [indexed_results[i] for i in range(len(samples))]
 
     # Cleanup temp directory
     if not args.keep_temp:
