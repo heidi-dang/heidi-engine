@@ -40,6 +40,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -229,7 +231,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{textwrap.indent(code, '    ')}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -390,34 +392,56 @@ def main():
     base_temp_dir = tempfile.mkdtemp(prefix="unit_test_gate_")
     print(f"[INFO] Using temp directory: {base_temp_dir}")
 
-    # Test each sample
-    tested_samples = []
+    # BOLT OPTIMIZATION: Use ThreadPoolExecutor for parallel processing
+    # We use ThreadPoolExecutor because these tasks are I/O and subprocess-bound
+    num_workers = os.cpu_count() or 4
+    print(f"[INFO] Using {num_workers} parallel workers")
+
+    tested_samples_map = {}
     passed_count = 0
     failed_count = 0
 
-    for i, sample in enumerate(samples):
-        # Create isolated temp directory for this sample
-        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
-        os.makedirs(sample_temp_dir, exist_ok=True)
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        futures = {}
+        for i, sample in enumerate(samples):
+            # Create isolated temp directory for this sample
+            sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
+            os.makedirs(sample_temp_dir, exist_ok=True)
 
-        # Test the sample
-        tested = test_sample(sample, sample_temp_dir, args.execution_timeout)
-        tested_samples.append(tested)
+            future = executor.submit(test_sample, sample, sample_temp_dir, args.execution_timeout)
+            futures[future] = i
 
-        # Count results
-        test_result = tested.get("test_result", {})
-        if test_result.get("passed", False):
-            passed_count += 1
-        else:
-            failed_count += 1
+        for i, future in enumerate(as_completed(futures)):
+            sample_idx = futures[future]
+            try:
+                tested = future.result()
+                tested_samples_map[sample_idx] = tested
 
-        # Progress
-        if (i + 1) % 10 == 0:
-            print(
-                f"  Tested {i + 1}/{len(samples)} samples "
-                f"(passed: {passed_count}, failed: {failed_count})",
-                file=sys.stderr,
-            )
+                # Count results
+                test_result = tested.get("test_result", {})
+                if test_result.get("passed", False):
+                    passed_count += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                print(f"[ERROR] Sample {sample_idx} failed with exception: {e}", file=sys.stderr)
+                failed_count += 1
+                # Ensure the sample is in the map to avoid KeyError later
+                # We use the original sample but mark it as failed
+                failed_sample = samples[sample_idx].copy()
+                failed_sample["test_result"] = {"passed": False, "reason": f"exception: {e}"}
+                tested_samples_map[sample_idx] = failed_sample
+
+            # Progress
+            if (i + 1) % 10 == 0 or (i + 1) == len(samples):
+                print(
+                    f"  Tested {i + 1}/{len(samples)} samples "
+                    f"(passed: {passed_count}, failed: {failed_count})",
+                    file=sys.stderr,
+                )
+
+    # Restore original order
+    tested_samples = [tested_samples_map[i] for i in range(len(samples))]
 
     # Cleanup temp directory
     if not args.keep_temp:
