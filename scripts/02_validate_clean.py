@@ -77,7 +77,7 @@ SECRET_PATTERNS = [
     (r"ghp_[a-zA-Z0-9]{36}", "github_token"),
     (r"glpat-[a-zA-Z0-9\-]{20,}", "gitlab_token"),
     # OpenAI API keys
-    (r"sk-[a-zA-Z0-9]{48,}", "openai_key"),
+    (r"sk-[a-zA-Z0-9\-]{48,}", "openai_key"),
     # Generic high-entropy strings that look like secrets
     (r'["\'][\w+\/]{40,}["\']', "high_entropy"),
     # Passwords in config-like patterns
@@ -406,7 +406,9 @@ def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """
     Save samples to JSONL file.
     """
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    dir_path = os.path.dirname(path)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
