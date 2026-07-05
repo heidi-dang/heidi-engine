@@ -448,7 +448,11 @@ def main():
     }
 
     # Save report
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    # BOLT OPTIMIZATION: Check if dirname is empty to avoid FileNotFoundError
+    parent_dir = os.path.dirname(args.output)
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
+
     with open(args.output, "w") as f:
         json.dump(report, f, indent=2)
 
