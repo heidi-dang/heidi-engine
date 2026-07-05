@@ -549,7 +549,9 @@ def main():
     args = parse_args()
 
     # Setup output directory
-    os.makedirs(args.output, exist_ok=True)
+    # BOLT OPTIMIZATION: Check if dirname is empty to avoid FileNotFoundError
+    if args.output:
+        os.makedirs(args.output, exist_ok=True)
 
     # Log configuration
     logger.info("=" * 50)

@@ -424,7 +424,10 @@ def save_jsonl(samples: List[Dict[str, Any]], output_path: str) -> None:
         - Writes one JSON object per line
         - Creates parent directories if needed
     """
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    # BOLT OPTIMIZATION: Check if dirname is empty to avoid FileNotFoundError
+    parent_dir = os.path.dirname(output_path)
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
 
     with open(output_path, "w") as f:
         for sample in samples:
