@@ -448,7 +448,8 @@ def main():
     }
 
     # Save report
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    if os.path.dirname(args.output):
+        os.makedirs(os.path.dirname(args.output), exist_ok=True)
     with open(args.output, "w") as f:
         json.dump(report, f, indent=2)
 

@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -72,6 +73,8 @@ DANGEROUS_PATTERNS = [
     # Dangerous built-ins
     r"\beval\s*\(",
     r"\bexec\s*\(",
+    r"\bbuiltins\b",
+    r"\bimportlib\b",
     r"\b__import__\s*\(",
     r"\bgetattr\s*\(",
     r"\bsetattr\s*\(",
@@ -229,7 +232,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{textwrap.indent(code, '    ')}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -263,7 +266,7 @@ except Exception as e:
             text=True,
             timeout=execution_timeout,
             cwd=temp_dir,
-            env={**os.environ, "PYTHONPATH": temp_dir},
+            env={**os.environ, "PYTHONPATH": temp_dir, "HOME": temp_dir},
         )
 
         stdout = result.stdout
@@ -367,7 +370,8 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.dirname(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
