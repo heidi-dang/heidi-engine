@@ -33,6 +33,7 @@ NOTE:
 """
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -40,6 +41,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -54,37 +56,33 @@ EXECUTION_TIMEOUT = 5
 
 # Code block patterns to extract Python code
 # TUNABLE: Adjust regex for different code formats
-CODE_BLOCK_PATTERNS = [
-    # Markdown code blocks: ```python ... ```
-    r"```python\n(.*?)```",
-    # Markdown code blocks without language: ``` ... ```
-    r"```\n(.*?)```",
-    # Inline code markers
-    r"`([^`\n]+)`",
-]
+CODE_BLOCK_RE = re.compile(
+    r"```python\n(.*?)```|```\n(.*?)```|`([^`\n]+)`"
+    , re.DOTALL
+)
 
 # Patterns that indicate code should NOT be executed
 # TUNABLE: Add more dangerous patterns to block
-DANGEROUS_PATTERNS = [
-    # Dangerous imports (including comma-separated and aliased)
-    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
-    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
-    # Dangerous built-ins
-    r"\beval\s*\(",
-    r"\bexec\s*\(",
-    r"\b__import__\s*\(",
-    r"\bgetattr\s*\(",
-    r"\bsetattr\s*\(",
-    r"\bbreakpoint\s*\(",
-    # Dangerous module functions
-    r"\bos\.(system|popen|spawn|remove|unlink|rmdir|mkdir|chmod|chown|kill|exec|fork|pipe)\b",
-    r"\bsubprocess\.(run|call|check_call|check_output|Popen)\b",
-    r"\bshutil\.(rmtree|move|copy|copy2|copyfile|copymode|copystat|chown)\b",
-    r"\bpickle\.(load|loads)\b",
-    r"\bshelve\.open\b",
-    # File operations (specifically writing/appending)
-    r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
-]
+DANGEROUS_RE = re.compile(
+    r"\bimport\s+[^#\n]*\b(?:os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc|importlib)\b|"
+    r"\bfrom\s+(?:os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc|importlib)\b|"
+    r"\beval\s*\(|"
+    r"\bexec\s*\(|"
+    r"\b__import__\s*\(|"
+    r"\bgetattr\s*\(|"
+    r"\bsetattr\s*\(|"
+    r"\bbreakpoint\s*\(|"
+    r"\bos\.(?:system|popen|spawn|remove|unlink|rmdir|mkdir|chmod|chown|kill|exec|fork|pipe)\b|"
+    r"\bsubprocess\.(?:run|call|check_call|check_output|Popen)\b|"
+    r"\bshutil\.(?:rmtree|move|copy|copy2|copyfile|copymode|copystat|chown)\b|"
+    r"\bpickle\.(?:load|loads)\b|"
+    r"\bshelve\.open\b|"
+    r"\bopen\s*\([^)]*,\s*(?:mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
+    re.IGNORECASE
+)
+
+# Python keywords for heuristic filtering
+_PY_KEYWORDS_RE = re.compile(r"\b(def|class|import|return|if|for|while)\b")
 
 
 def parse_args() -> argparse.Namespace:
@@ -142,29 +140,21 @@ def extract_python_code(text: str) -> List[str]:
     HOW IT WORKS:
         - Searches for markdown code blocks
         - Returns list of extracted code snippets
-
-    TUNABLE:
-        - Add more patterns for different code formats
-        - Filter out non-Python code blocks
     """
-    code_blocks = []
-
-    for pattern in CODE_BLOCK_PATTERNS:
-        matches = re.findall(pattern, text, re.DOTALL)
-        code_blocks.extend(matches)
+    # Optimized extraction using pre-compiled regex
+    # Find all matches (each match is a tuple of capturing groups)
+    matches = CODE_BLOCK_RE.findall(text)
+    code_blocks = [next(filter(None, m)) for m in matches if any(m)]
 
     # Filter: keep only code that looks like Python
-    # This is a heuristic - not perfect
     python_code = []
     for code in code_blocks:
         # Skip if too short (probably not real code)
         if len(code.strip()) < 20:
             continue
 
-        # Skip if it's clearly not Python (no indentation, keywords, etc.)
-        if not any(
-            kw in code for kw in ["def ", "class ", "import ", "return ", "if ", "for ", "while "]
-        ):
+        # Optimized heuristic check using single pre-compiled regex
+        if not _PY_KEYWORDS_RE.search(code):
             continue
 
         python_code.append(code)
@@ -177,43 +167,21 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     Check if code contains dangerous patterns.
 
     HOW IT WORKS:
-        - Matches against list of dangerous patterns
-        - Returns (is_dangerous, list_of_matches)
-
-    TUNABLE:
-        - Adjust DANGEROUS_PATTERNS for your security needs
+        - Matches against pre-compiled dangerous regex
     """
-    found = []
-
-    for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, code, re.IGNORECASE):
-            found.append(pattern)
-
+    found = DANGEROUS_RE.findall(code)
     return len(found) > 0, found
 
 
 def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tuple[bool, str, str]:
     """
     Test Python code in isolated environment.
-
-    HOW IT WORKS:
-        1. Write code to temporary file
-        2. Try to compile (syntax check)
-        3. Try to execute with timeout
-        4. Return (passed, stdout, stderr)
-
-    SAFETY:
-        - Runs in temp directory
-        - Has timeout protection
-        - Does NOT execute system commands
-
-    TUNABLE:
-        - execution_timeout: Max time code can run
     """
     # Write code to temp file
     test_file = os.path.join(temp_dir, "test_code.py")
 
-    # Wrap code to capture output safely
+    # Wrap code to capture output safely and fix indentation
+    # textwrap.indent ensures generated code is valid inside the try block
     wrapped_code = f"""
 import sys
 import io
@@ -229,18 +197,18 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{textwrap.indent(code, '    ')}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
 
-    print("__EXECUTION_SUCCESS__")
-    print(stdout_capture.getvalue())
+    sys.stdout.write("__EXECUTION_SUCCESS__\\n")
+    sys.stdout.write(stdout_capture.getvalue())
 
 except Exception as e:
     sys.stdout = original_stdout
     sys.stderr = original_stderr
-    print(f"__EXECUTION_ERROR__: {{e}}", file=sys.stderr)
+    sys.stderr.write(f"__EXECUTION_ERROR__: {{e}}\\n")
 """
 
     try:
@@ -367,7 +335,10 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    # Fix: os.makedirs('') raises FileNotFoundError in some environments
+    parent_dir = os.path.dirname(path)
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
@@ -390,34 +361,56 @@ def main():
     base_temp_dir = tempfile.mkdtemp(prefix="unit_test_gate_")
     print(f"[INFO] Using temp directory: {base_temp_dir}")
 
-    # Test each sample
-    tested_samples = []
+    # Test samples in parallel using ThreadPoolExecutor
+    # 4 cores available (nproc), so using a reasonable worker count
+    num_workers = min(len(samples), os.cpu_count() or 4) * 2
+
+    results_map = {}
     passed_count = 0
     failed_count = 0
 
-    for i, sample in enumerate(samples):
-        # Create isolated temp directory for this sample
-        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
-        os.makedirs(sample_temp_dir, exist_ok=True)
+    print(f"[INFO] Starting parallel execution with {num_workers} workers...")
 
-        # Test the sample
-        tested = test_sample(sample, sample_temp_dir, args.execution_timeout)
-        tested_samples.append(tested)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+        future_to_idx = {}
+        for i, sample in enumerate(samples):
+            # Create isolated temp directory for this sample
+            sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
+            os.makedirs(sample_temp_dir, exist_ok=True)
 
-        # Count results
-        test_result = tested.get("test_result", {})
-        if test_result.get("passed", False):
-            passed_count += 1
-        else:
-            failed_count += 1
+            future = executor.submit(test_sample, sample, sample_temp_dir, args.execution_timeout)
+            future_to_idx[future] = i
 
-        # Progress
-        if (i + 1) % 10 == 0:
-            print(
-                f"  Tested {i + 1}/{len(samples)} samples "
-                f"(passed: {passed_count}, failed: {failed_count})",
-                file=sys.stderr,
-            )
+        for future in concurrent.futures.as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                tested = future.result()
+                results_map[idx] = tested
+
+                # Count results
+                test_result = tested.get("test_result", {})
+                if test_result.get("passed", False):
+                    passed_count += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                print(f"[ERROR] Sample {idx} failed with exception: {e}", file=sys.stderr)
+                # Ensure we have a placeholder for failed samples
+                results_map[idx] = samples[idx]
+                results_map[idx]["test_result"] = {"passed": False, "reason": "internal_error", "error": str(e)}
+                failed_count += 1
+
+            # Progress
+            completed = len(results_map)
+            if completed % 10 == 0 or completed == len(samples):
+                print(
+                    f"  Tested {completed}/{len(samples)} samples "
+                    f"(passed: {passed_count}, failed: {failed_count})",
+                    file=sys.stderr,
+                )
+
+    # Re-order results to match input
+    tested_samples = [results_map[i] for i in range(len(samples))]
 
     # Cleanup temp directory
     if not args.keep_temp:
