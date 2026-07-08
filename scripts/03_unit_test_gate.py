@@ -40,6 +40,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Tuple
 
 # =============================================================================
@@ -53,38 +55,36 @@ TEST_TIMEOUT = 30
 EXECUTION_TIMEOUT = 5
 
 # Code block patterns to extract Python code
-# TUNABLE: Adjust regex for different code formats
-CODE_BLOCK_PATTERNS = [
-    # Markdown code blocks: ```python ... ```
-    r"```python\n(.*?)```",
-    # Markdown code blocks without language: ``` ... ```
-    r"```\n(.*?)```",
-    # Inline code markers
-    r"`([^`\n]+)`",
-]
+# BOLT OPTIMIZATION: Pre-compile regex for performance
+CODE_BLOCK_RE = re.compile(
+    r"```python\n(.*?)```|```\n(.*?)```|`([^`\n]+)`"
+    , re.DOTALL
+)
 
 # Patterns that indicate code should NOT be executed
-# TUNABLE: Add more dangerous patterns to block
-DANGEROUS_PATTERNS = [
-    # Dangerous imports (including comma-separated and aliased)
-    r"\bimport\s+[^#\n]*\b(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
-    r"\bfrom\s+(os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
-    # Dangerous built-ins
-    r"\beval\s*\(",
-    r"\bexec\s*\(",
-    r"\b__import__\s*\(",
-    r"\bgetattr\s*\(",
-    r"\bsetattr\s*\(",
-    r"\bbreakpoint\s*\(",
-    # Dangerous module functions
-    r"\bos\.(system|popen|spawn|remove|unlink|rmdir|mkdir|chmod|chown|kill|exec|fork|pipe)\b",
-    r"\bsubprocess\.(run|call|check_call|check_output|Popen)\b",
-    r"\bshutil\.(rmtree|move|copy|copy2|copyfile|copymode|copystat|chown)\b",
-    r"\bpickle\.(load|loads)\b",
-    r"\bshelve\.open\b",
-    # File operations (specifically writing/appending)
-    r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
-]
+# BOLT OPTIMIZATION: Pre-compile dangerous patterns into a single regex for efficiency
+DANGEROUS_RE = re.compile(
+    r"|".join([
+        r"\bimport\s+[^#\n]*\b(?:os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
+        r"\bfrom\s+(?:os|subprocess|sys|shutil|socket|requests|urllib|pathlib|pickle|pty|code|bdb|pdb|multiprocessing|threading|tempfile|ftplib|smtplib|telnetlib|http|xmlrpc)\b",
+        r"\beval\s*\(",
+        r"\bexec\s*\(",
+        r"\b__import__\s*\(",
+        r"\bgetattr\s*\(",
+        r"\bsetattr\s*\(",
+        r"\bbreakpoint\s*\(",
+        r"\bos\.(?:system|popen|spawn|remove|unlink|rmdir|mkdir|chmod|chown|kill|exec|fork|pipe)\b",
+        r"\bsubprocess\.(?:run|call|check_call|check_output|Popen)\b",
+        r"\bshutil\.(?:rmtree|move|copy|copy2|copyfile|copymode|copystat|chown)\b",
+        r"\bpickle\.(?:load|loads)\b",
+        r"\bshelve\.open\b",
+        r"\bopen\s*\([^)]*,\s*(?:mode\s*=\s*)?['\"][^'\"r]*[wa+x]"
+    ]),
+    re.IGNORECASE
+)
+
+# BOLT OPTIMIZATION: Pre-compile keyword heuristic regex
+_PY_KEYWORDS_RE = re.compile(r"\b(?:def |class |import |return |if |for |while )\b")
 
 
 def parse_args() -> argparse.Namespace:
@@ -143,28 +143,23 @@ def extract_python_code(text: str) -> List[str]:
         - Searches for markdown code blocks
         - Returns list of extracted code snippets
 
-    TUNABLE:
-        - Add more patterns for different code formats
-        - Filter out non-Python code blocks
+    BOLT OPTIMIZATION:
+        Uses a single pre-compiled regex for block extraction and a
+        keyword heuristic for Python detection.
     """
-    code_blocks = []
-
-    for pattern in CODE_BLOCK_PATTERNS:
-        matches = re.findall(pattern, text, re.DOTALL)
-        code_blocks.extend(matches)
+    # Extract all matches (findall returns tuples for multiple groups)
+    matches = CODE_BLOCK_RE.findall(text)
+    code_blocks = ["".join(m) for m in matches]
 
     # Filter: keep only code that looks like Python
-    # This is a heuristic - not perfect
     python_code = []
     for code in code_blocks:
         # Skip if too short (probably not real code)
         if len(code.strip()) < 20:
             continue
 
-        # Skip if it's clearly not Python (no indentation, keywords, etc.)
-        if not any(
-            kw in code for kw in ["def ", "class ", "import ", "return ", "if ", "for ", "while "]
-        ):
+        # BOLT OPTIMIZATION: Use pre-compiled regex for heuristic check
+        if not _PY_KEYWORDS_RE.search(code):
             continue
 
         python_code.append(code)
@@ -180,14 +175,11 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
         - Matches against list of dangerous patterns
         - Returns (is_dangerous, list_of_matches)
 
-    TUNABLE:
-        - Adjust DANGEROUS_PATTERNS for your security needs
+    BOLT OPTIMIZATION:
+        Uses a single pre-compiled regex for all dangerous patterns.
     """
-    found = []
-
-    for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, code, re.IGNORECASE):
-            found.append(pattern)
+    # BOLT OPTIMIZATION: Use findall on the pre-compiled combined regex
+    found = DANGEROUS_RE.findall(code)
 
     return len(found) > 0, found
 
@@ -214,6 +206,10 @@ def test_python_code(code: str, temp_dir: str, execution_timeout: int = 5) -> Tu
     test_file = os.path.join(temp_dir, "test_code.py")
 
     # Wrap code to capture output safely
+    # BOLT OPTIMIZATION: Use textwrap.indent to safely inject user code
+    # This prevents SyntaxError when user code is not indented.
+    indented_code = textwrap.indent(code, "    ")
+
     wrapped_code = f"""
 import sys
 import io
@@ -229,7 +225,7 @@ try:
     sys.stderr = stderr_capture
 
     # Execute the user's code
-{code}
+{indented_code}
 
     sys.stdout = original_stdout
     sys.stderr = original_stderr
@@ -367,7 +363,11 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 def save_jsonl(samples: List[Dict[str, Any]], path: str) -> None:
     """Save samples to JSONL file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    # BOLT OPTIMIZATION: Check if dirname is not empty to avoid FileNotFoundError
+    # in some environments when path is just a filename.
+    out_dir = os.path.dirname(path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
 
     with open(path, "w") as f:
         for sample in samples:
@@ -391,33 +391,53 @@ def main():
     print(f"[INFO] Using temp directory: {base_temp_dir}")
 
     # Test each sample
-    tested_samples = []
+    # BOLT OPTIMIZATION: Use ThreadPoolExecutor to run tests in parallel.
+    # This significantly reduces total time for IO-bound and timeout-heavy tasks.
+    max_workers = min(os.cpu_count() or 4, 8)
+    print(f"[INFO] Running tests in parallel with {max_workers} workers")
+
+    tested_results = [None] * len(samples)
     passed_count = 0
     failed_count = 0
 
-    for i, sample in enumerate(samples):
-        # Create isolated temp directory for this sample
-        sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
-        os.makedirs(sample_temp_dir, exist_ok=True)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {}
+        for i, sample in enumerate(samples):
+            # Create isolated temp directory for this sample
+            sample_temp_dir = os.path.join(base_temp_dir, f"sample_{i}")
+            os.makedirs(sample_temp_dir, exist_ok=True)
 
-        # Test the sample
-        tested = test_sample(sample, sample_temp_dir, args.execution_timeout)
-        tested_samples.append(tested)
+            future = executor.submit(test_sample, sample, sample_temp_dir, args.execution_timeout)
+            futures[future] = i
 
-        # Count results
-        test_result = tested.get("test_result", {})
-        if test_result.get("passed", False):
-            passed_count += 1
-        else:
-            failed_count += 1
+        for i, future in enumerate(as_completed(futures)):
+            idx = futures[future]
+            try:
+                tested = future.result()
+                tested_results[idx] = tested
 
-        # Progress
-        if (i + 1) % 10 == 0:
-            print(
-                f"  Tested {i + 1}/{len(samples)} samples "
-                f"(passed: {passed_count}, failed: {failed_count})",
-                file=sys.stderr,
-            )
+                # Count results
+                test_result = tested.get("test_result", {})
+                if test_result.get("passed", False):
+                    passed_count += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                print(f"[ERROR] Sample {idx} failed with exception: {e}", file=sys.stderr)
+                # Ensure we have a placeholder for failed samples
+                samples[idx]["test_result"] = {"passed": False, "reason": f"exception: {str(e)}", "blocks_tested": 0}
+                tested_results[idx] = samples[idx]
+                failed_count += 1
+
+            # Progress
+            if (i + 1) % 10 == 0 or (i + 1) == len(samples):
+                print(
+                    f"  Tested {i + 1}/{len(samples)} samples "
+                    f"(passed: {passed_count}, failed: {failed_count})",
+                    file=sys.stderr,
+                )
+
+    tested_samples = [r for r in tested_results if r is not None]
 
     # Cleanup temp directory
     if not args.keep_temp:
