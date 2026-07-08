@@ -76,8 +76,8 @@ SECRET_PATTERNS = [
     # GitHub/GitLab tokens
     (r"ghp_[a-zA-Z0-9]{36}", "github_token"),
     (r"glpat-[a-zA-Z0-9\-]{20,}", "gitlab_token"),
-    # OpenAI API keys
-    (r"sk-[a-zA-Z0-9]{48,}", "openai_key"),
+    # OpenAI API keys (supports sk-proj- keys with hyphens)
+    (r"sk-[a-zA-Z0-9\-]{20,}", "openai_key"),
     # Generic high-entropy strings that look like secrets
     (r'["\'][\w+\/]{40,}["\']', "high_entropy"),
     # Passwords in config-like patterns
