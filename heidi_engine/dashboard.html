@@ -179,13 +179,13 @@
             </div>
         </div>
         <div style="display: flex; align-items: center; gap: 15px;">
-            <select id="run-selector"
+            <select id="run-selector" aria-label="Select Run"
                 style="padding: 5px; background: var(--bg-color); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px;">
                 <option value="">Auto-detect (Latest)</option>
             </select>
             <div style="text-align: right;">
-                <span id="status-badge" class="status-badge status-stopped">Unknown</span>
-                <div id="last-updated" style="font-size: 0.7rem; margin-top: 5px; color: #8b949e;"></div>
+                <span id="status-badge" class="status-badge status-stopped" aria-live="polite">Unknown</span>
+                <div id="last-updated" style="font-size: 0.7rem; margin-top: 5px; color: #8b949e;" aria-live="polite"></div>
             </div>
         </div>
     </div>
