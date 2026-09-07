@@ -139,6 +139,11 @@
             transition: width 0.5s ease;
         }
 
+        *:focus-visible {
+            outline: 2px solid var(--accent-color);
+            outline-offset: 2px;
+        }
+
         .footer {
             margin-top: 40px;
             font-size: 0.8rem;
@@ -180,6 +185,7 @@
         </div>
         <div style="display: flex; align-items: center; gap: 15px;">
             <select id="run-selector"
+                aria-label="Select Run ID"
                 style="padding: 5px; background: var(--bg-color); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px;">
                 <option value="">Auto-detect (Latest)</option>
             </select>
@@ -270,7 +276,7 @@
                 <span class="metric-label">VRAM Usage</span>
                 <span class="metric-value" id="gpu-vram">N/A</span>
             </div>
-            <div class="progress-bar">
+            <div class="progress-bar" role="progressbar" aria-label="GPU VRAM Usage" aria-valuemin="0" aria-valuemax="100">
                 <div class="progress-fill" id="gpu-bar" style="width: 0%;"></div>
             </div>
             <div class="metric-row" style="margin-top: 5px;">
@@ -374,10 +380,12 @@
                     document.getElementById('gpu-vram').textContent = `${gpu.vram_used_mb} / ${gpu.vram_total_mb} MB`;
                     const pct = (gpu.vram_used_mb / gpu.vram_total_mb) * 100;
                     document.getElementById('gpu-bar').style.width = `${pct}%`;
+                    document.getElementById('gpu-bar').parentElement.setAttribute('aria-valuenow', Math.round(pct));
                     document.getElementById('gpu-util').textContent = `${gpu.util_pct || 0}%`;
                 } else {
                     document.getElementById('gpu-vram').textContent = 'N/A';
                     document.getElementById('gpu-bar').style.width = '0%';
+                    document.getElementById('gpu-bar').parentElement.removeAttribute('aria-valuenow');
                 }
 
             } catch (error) {
