@@ -130,3 +130,4 @@ CMakeFiles/
 cmake_install.cmake
 Makefile
 CTestTestfile.cmake
+.venv3/
