@@ -56,8 +56,8 @@ CONFIG VALIDATION:
 """
 
 import atexit
-import copy
 import base64
+import copy
 import json
 import os
 import re
@@ -70,7 +70,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
@@ -151,7 +151,7 @@ SECRET_PATTERNS = [
     # Generic API keys and tokens
     (r"ghp_[a-zA-Z0-9]{36}", "[GITHUB_TOKEN]"),
     (r"glpat-[a-zA-Z0-9\-]{20,}", "[GITLAB_TOKEN]"),
-    (r"sk-[a-zA-Z0-9]{20,}", "[OPENAI_KEY]"),
+    (r"sk-[a-zA-Z0-9\-]{20,}", "[OPENAI_KEY]"),
     (r"Bearer\s+[\w\-]{20,}", "[BEARER_TOKEN]"),
     (r'(?i)(api[_-]?key|apikey|secret[_-]?key)\s*[:=]\s*["\']?[\w\-]{20,}', "[API_KEY]"),
     (r"AKIA[0-9A-Z]{16}", "[AWS_KEY]"),
@@ -731,11 +731,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
