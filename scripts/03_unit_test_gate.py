@@ -86,6 +86,13 @@ DANGEROUS_PATTERNS = [
     r"\bopen\s*\([^)]*,\s*(mode\s*=\s*)?['\"][^'\"r]*[wa+x]",
 ]
 
+# Pre-compiled regex patterns for performance
+CODE_BLOCK_RE = [re.compile(pattern, re.DOTALL) for pattern in CODE_BLOCK_PATTERNS]
+DANGEROUS_PATTERNS_COMPILED = [
+    (re.compile(pattern, re.IGNORECASE), pattern) for pattern in DANGEROUS_PATTERNS
+]
+_PY_KEYWORDS_RE = re.compile(r"\b(def|class|import|return|if|for|while)\b")
+
 
 def parse_args() -> argparse.Namespace:
     """
@@ -149,8 +156,8 @@ def extract_python_code(text: str) -> List[str]:
     """
     code_blocks = []
 
-    for pattern in CODE_BLOCK_PATTERNS:
-        matches = re.findall(pattern, text, re.DOTALL)
+    for compiled_re in CODE_BLOCK_RE:
+        matches = compiled_re.findall(text)
         code_blocks.extend(matches)
 
     # Filter: keep only code that looks like Python
@@ -162,9 +169,7 @@ def extract_python_code(text: str) -> List[str]:
             continue
 
         # Skip if it's clearly not Python (no indentation, keywords, etc.)
-        if not any(
-            kw in code for kw in ["def ", "class ", "import ", "return ", "if ", "for ", "while "]
-        ):
+        if not _PY_KEYWORDS_RE.search(code):
             continue
 
         python_code.append(code)
@@ -185,9 +190,9 @@ def check_dangerous_code(code: str) -> Tuple[bool, List[str]]:
     """
     found = []
 
-    for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, code, re.IGNORECASE):
-            found.append(pattern)
+    for compiled_pattern, raw_pattern in DANGEROUS_PATTERNS_COMPILED:
+        if compiled_pattern.search(code):
+            found.append(raw_pattern)
 
     return len(found) > 0, found
 
