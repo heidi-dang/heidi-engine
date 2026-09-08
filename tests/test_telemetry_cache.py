@@ -56,7 +56,24 @@ def test_gpu_cache():
     assert t2 < t1 or t1 < 1.0  # t1 might be fast if nvidia-smi fails fast
 
 
+def test_sanitize_run_id_path_traversal():
+    """Verify that path traversal sequences in run_id are stripped and contained."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        telemetry.AUTOTRAIN_DIR = tmp_dir
+
+        # Test sanitize_run_id directly
+        assert telemetry.sanitize_run_id("../../etc/passwd") == "passwd"
+        assert telemetry.sanitize_run_id("../run_123!@#$") == "run_123"
+        assert telemetry.sanitize_run_id("valid-run_01") == "valid-run_01"
+
+        # Verify get_run_dir stays within runs/
+        run_dir = telemetry.get_run_dir("../../tmp/malicious_run")
+        assert run_dir.parent == telemetry.Path(tmp_dir) / "runs"
+        assert run_dir.name == "malicious_run"
+
+
 if __name__ == "__main__":
     test_state_cache()
     test_gpu_cache()
+    test_sanitize_run_id_path_traversal()
     print("All verification tests passed!")
