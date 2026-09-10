@@ -85,6 +85,12 @@ SECRET_PATTERNS = [
     (r'(?i)pwd\s*[:=]\s*["\'][^"\']{8,}["\']', "password"),
 ]
 
+# BOLT OPTIMIZATION: Pre-compile secret detection patterns at module level
+# Avoids repetitive regex string parsing and compilation across thousands of sample fields
+COMPILED_SECRET_PATTERNS = [
+    (re.compile(pattern), secret_type) for pattern, secret_type in SECRET_PATTERNS
+]
+
 # Fields to check for secrets
 # TUNABLE: Add/remove fields based on your data structure
 SECRET_CHECK_FIELDS = ["instruction", "input", "output", "response", "completion"]
@@ -208,8 +214,9 @@ def detect_secrets(sample: Dict[str, Any]) -> Tuple[bool, List[str]]:
 
         text = str(sample[field])
 
-        for pattern, secret_type in SECRET_PATTERNS:
-            if re.search(pattern, text):
+        # BOLT OPTIMIZATION: Use pre-compiled regex patterns for speed
+        for pattern_re, secret_type in COMPILED_SECRET_PATTERNS:
+            if pattern_re.search(text):
                 found_secrets.append(f"{field}:{secret_type}")
 
     return len(found_secrets) > 0, found_secrets
