@@ -1,0 +1,3 @@
+## 2026-09-11 - Dashboard Accessibility Learning
+**Learning:** In heidi_engine/dashboard.html, accessibility standards require explicitly defining `:focus-visible` CSS rules for interactive elements (like links and selects) and dynamically managing ARIA attributes (e.g., `role="progressbar"`, `aria-valuenow`) via JavaScript for custom components like the GPU VRAM progress bar.
+**Action:** Always ensure custom components like progress bars have appropriate ARIA roles and dynamically updated attributes, and define `:focus-visible` outlines for all interactive elements to support keyboard navigation.
