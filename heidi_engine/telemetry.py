@@ -397,6 +397,21 @@ def get_default_usage() -> Dict[str, Any]:
 # =============================================================================
 
 
+def sanitize_run_id(run_id: str) -> str:
+    """
+    Sanitize run_id to prevent path traversal attacks.
+
+    SECURITY:
+        Strips path traversal sequences and restricts characters to
+        alphanumeric, hyphens, and underscores to keep path operations
+        strictly within AUTOTRAIN_DIR/runs.
+    """
+    if not isinstance(run_id, str):
+        run_id = str(run_id)
+    sanitized = re.sub(r"[^\w\-]", "", run_id)
+    return sanitized if sanitized else "default_run"
+
+
 def get_run_dir(run_id: Optional[str] = None) -> Path:
     """
     Get the run directory path.
@@ -405,11 +420,13 @@ def get_run_dir(run_id: Optional[str] = None) -> Path:
         Creates runs/<run_id>/ directory structure.
         All run-specific files go here.
 
-    TUNABLE:
-        - Modify directory structure by changing path construction
+    SECURITY:
+        Sanitizes run_id to prevent path traversal.
     """
     if run_id is None:
         run_id = get_run_id()
+    else:
+        run_id = sanitize_run_id(run_id)
     return Path(AUTOTRAIN_DIR) / "runs" / run_id
 
 
@@ -443,6 +460,8 @@ def get_run_id() -> str:
     if not RUN_ID:
         RUN_ID = str(uuid.uuid4())[:8]
         RUN_ID = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{RUN_ID}"
+    else:
+        RUN_ID = sanitize_run_id(RUN_ID)
     return RUN_ID
 
 
@@ -639,7 +658,7 @@ def init_telemetry(
 
     with _lock:
         if run_id:
-            RUN_ID = run_id
+            RUN_ID = sanitize_run_id(run_id)
 
         run_id = get_run_id()
         run_dir = get_run_dir(run_id)
@@ -731,11 +750,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
