@@ -354,7 +354,10 @@ def main() -> int:
     if backend == "openhei":
         _ensure_repo_root_on_sys_path()
 
-        from heidi_engine.teacher.openhei_teacher import OpenHeiTeacherError, validate_openhei_attach_url
+        from heidi_engine.teacher.openhei_teacher import (
+            OpenHeiTeacherError,
+            validate_openhei_attach_url,
+        )
 
         attach_url = (os.environ.get("OPENHEI_ATTACH") or "").strip()
         if attach_url:
@@ -483,7 +486,7 @@ def main() -> int:
                 for fut in concurrent.futures.as_completed(futs):
                     try:
                         batch_rows, dt_s, pchars, ochars = fut.result()
-                    except Exception as e:
+                    except Exception:
                         errors += 1
                         raise
                     for r in batch_rows:
