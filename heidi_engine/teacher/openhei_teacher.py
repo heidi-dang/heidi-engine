@@ -3,17 +3,18 @@ from __future__ import annotations
 import json
 import os
 import random
-import shlex
 import socket
+import shlex
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
 from urllib.request import Request, urlopen
+from urllib.parse import quote
 
 from heidi_engine.telemetry import redact_secrets
 

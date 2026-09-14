@@ -6,9 +6,9 @@ import datetime as dt
 import hashlib
 import json
 import os
-import shlex
-import shutil
 import signal
+import shutil
+import shlex
 import subprocess
 import sys
 import time
@@ -332,10 +332,7 @@ def _maybe_start_openhei_serve(
     log_fp: TextIO,
     timeout_sec: float = 20.0,
 ) -> str:
-    from heidi_engine.teacher.openhei_teacher import (
-        OpenHeiTeacherError,
-        validate_openhei_attach_url,
-    )
+    from heidi_engine.teacher.openhei_teacher import OpenHeiTeacherError, validate_openhei_attach_url
 
     attach = f"http://{host}:{port}"
     try:
@@ -505,10 +502,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
             attach = (args.openhei_attach or "").strip()
             if attach:
-                from heidi_engine.teacher.openhei_teacher import (
-                    OpenHeiTeacherError,
-                    validate_openhei_attach_url,
-                )
+                from heidi_engine.teacher.openhei_teacher import OpenHeiTeacherError, validate_openhei_attach_url
 
                 try:
                     validate_openhei_attach_url(attach)
