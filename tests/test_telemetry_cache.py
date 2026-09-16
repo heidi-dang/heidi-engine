@@ -41,6 +41,25 @@ def test_state_cache():
         print("TTL Expiration test passed")
 
 
+def test_sanitize_run_id():
+    assert telemetry.sanitize_run_id("../../../etc/passwd") == "etcpasswd"
+    assert telemetry.sanitize_run_id("run_2025_01") == "run_2025_01"
+    assert telemetry.sanitize_run_id("run/../../test") == "runtest"
+    assert telemetry.sanitize_run_id("../..") == "default_run"
+    assert telemetry.sanitize_run_id("") == "default_run"
+    assert telemetry.sanitize_run_id(None) == "default_run"
+
+
+def test_path_traversal_prevention():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        telemetry.AUTOTRAIN_DIR = tmp_dir
+
+        # Test that path traversal in run_id is confined to AUTOTRAIN_DIR/runs
+        run_dir = telemetry.get_run_dir("../../../etc/passwd")
+        assert run_dir == telemetry.Path(tmp_dir) / "runs" / "etcpasswd"
+        assert str(run_dir).startswith(str(telemetry.Path(tmp_dir) / "runs"))
+
+
 def test_gpu_cache():
     # Cold call
     start = time.time()
