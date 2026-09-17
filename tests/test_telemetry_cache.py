@@ -56,7 +56,21 @@ def test_gpu_cache():
     assert t2 < t1 or t1 < 1.0  # t1 might be fast if nvidia-smi fails fast
 
 
+def test_sanitize_run_id_path_traversal():
+    assert telemetry.sanitize_run_id("../../../etc/passwd") == "etcpasswd"
+    assert telemetry.sanitize_run_id("run_123/..") == "run_123"
+    assert telemetry.sanitize_run_id("../../") == "default_run"
+    assert telemetry.sanitize_run_id("valid-run_01") == "valid-run_01"
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        telemetry.AUTOTRAIN_DIR = tmp_dir
+        run_dir = telemetry.get_run_dir("../../../etc/passwd")
+        assert ".." not in str(run_dir)
+        assert "/" not in run_dir.name
+
+
 if __name__ == "__main__":
     test_state_cache()
     test_gpu_cache()
+    test_sanitize_run_id_path_traversal()
     print("All verification tests passed!")
