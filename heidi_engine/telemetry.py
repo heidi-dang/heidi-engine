@@ -397,20 +397,37 @@ def get_default_usage() -> Dict[str, Any]:
 # =============================================================================
 
 
+def sanitize_run_id(run_id: str) -> str:
+    """
+    Sanitize run_id to prevent directory traversal vulnerabilities.
+
+    SECURITY:
+        - Removes path traversal sequences ('..', '/', '\\')
+        - Retains only safe characters (alphanumeric, dash, underscore)
+        - Prevents escaping out of AUTOTRAIN_DIR/runs
+    """
+    if not isinstance(run_id, str):
+        run_id = str(run_id)
+    # Strip any directory components or invalid path characters
+    sanitized = re.sub(r"[^\w\-]", "_", run_id)
+    return sanitized or "default_run"
+
+
 def get_run_dir(run_id: Optional[str] = None) -> Path:
     """
-    Get the run directory path.
+    Get the run directory path safely.
 
     HOW IT WORKS:
-        Creates runs/<run_id>/ directory structure.
+        Creates runs/<sanitized_run_id>/ directory structure.
         All run-specific files go here.
 
-    TUNABLE:
-        - Modify directory structure by changing path construction
+    SECURITY:
+        Sanitizes run_id to prevent path traversal outside AUTOTRAIN_DIR/runs.
     """
     if run_id is None:
         run_id = get_run_id()
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+    safe_id = sanitize_run_id(run_id)
+    return Path(AUTOTRAIN_DIR) / "runs" / safe_id
 
 
 def get_events_path(run_id: Optional[str] = None) -> Path:
@@ -436,6 +453,10 @@ def get_run_id() -> str:
         - Uses RUN_ID env var if set
         - Otherwise generates a new UUID
         - Stores in global for subsequent calls
+        - Sanitizes value for safe path usage
+
+    SECURITY:
+        Sanitizes environment-provided RUN_ID to prevent path traversal.
     """
     global RUN_ID
     if not RUN_ID:
@@ -443,6 +464,8 @@ def get_run_id() -> str:
     if not RUN_ID:
         RUN_ID = str(uuid.uuid4())[:8]
         RUN_ID = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{RUN_ID}"
+    else:
+        RUN_ID = sanitize_run_id(RUN_ID)
     return RUN_ID
 
 
@@ -731,11 +754,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
