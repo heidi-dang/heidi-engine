@@ -99,6 +99,11 @@
             box-shadow: 0 8px 12px rgba(0, 0, 0, 0.2);
         }
 
+        a:focus-visible, select:focus-visible {
+            outline: 2px solid var(--accent-color);
+            outline-offset: 2px;
+        }
+
         .card h2 {
             margin-top: 0;
             font-size: 1.1rem;
@@ -180,6 +185,7 @@
         </div>
         <div style="display: flex; align-items: center; gap: 15px;">
             <select id="run-selector"
+                aria-label="Select Training Run"
                 style="padding: 5px; background: var(--bg-color); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px;">
                 <option value="">Auto-detect (Latest)</option>
             </select>
@@ -270,7 +276,7 @@
                 <span class="metric-label">VRAM Usage</span>
                 <span class="metric-value" id="gpu-vram">N/A</span>
             </div>
-            <div class="progress-bar">
+            <div class="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="GPU VRAM Usage">
                 <div class="progress-fill" id="gpu-bar" style="width: 0%;"></div>
             </div>
             <div class="metric-row" style="margin-top: 5px;">
@@ -374,10 +380,12 @@
                     document.getElementById('gpu-vram').textContent = `${gpu.vram_used_mb} / ${gpu.vram_total_mb} MB`;
                     const pct = (gpu.vram_used_mb / gpu.vram_total_mb) * 100;
                     document.getElementById('gpu-bar').style.width = `${pct}%`;
+                    document.getElementById('gpu-bar').parentElement.setAttribute('aria-valuenow', pct.toFixed(0));
                     document.getElementById('gpu-util').textContent = `${gpu.util_pct || 0}%`;
                 } else {
                     document.getElementById('gpu-vram').textContent = 'N/A';
                     document.getElementById('gpu-bar').style.width = '0%';
+                    document.getElementById('gpu-bar').parentElement.setAttribute('aria-valuenow', '0');
                 }
 
             } catch (error) {
