@@ -163,3 +163,25 @@ class TestHTTPSecurity:
                 main()
         finally:
             sys.argv = original_argv
+
+
+class TestPathTraversalPrevention:
+    """Test path traversal prevention in run_id handling."""
+
+    def test_sanitize_run_id_path_traversal(self):
+        """Test that sanitize_run_id removes path traversal sequences."""
+        from heidi_engine.telemetry import sanitize_run_id
+
+        assert sanitize_run_id("../../../etc/passwd") == "etcpasswd"
+        assert sanitize_run_id("..\\..\\windows\\system32") == "windowssystem32"
+        assert sanitize_run_id("run/../../secret") == "runsecret"
+
+    def test_get_run_dir_path_traversal(self):
+        """Test that get_run_dir output remains strictly within AUTOTRAIN_DIR/runs."""
+        from pathlib import Path
+
+        from heidi_engine.telemetry import AUTOTRAIN_DIR, get_run_dir
+
+        runs_base = Path(AUTOTRAIN_DIR) / "runs"
+        run_dir = get_run_dir("../../../etc/passwd")
+        assert run_dir == runs_base / "etcpasswd"
