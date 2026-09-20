@@ -163,3 +163,21 @@ class TestHTTPSecurity:
                 main()
         finally:
             sys.argv = original_argv
+
+
+class TestPathTraversalSecurity:
+    """Test path traversal prevention in telemetry."""
+
+    def test_sanitize_run_id_path_traversal(self):
+        """Test that sanitize_run_id strips path traversal sequences."""
+        from heidi_engine.telemetry import sanitize_run_id, get_run_dir
+
+        traversal_id = "../../etc/passwd"
+        sanitized = sanitize_run_id(traversal_id)
+        assert ".." not in sanitized
+        assert "/" not in sanitized
+        assert sanitized == "etcpasswd"
+
+        run_dir = get_run_dir(traversal_id)
+        assert ".." not in str(run_dir)
+        assert run_dir.name == "etcpasswd"
