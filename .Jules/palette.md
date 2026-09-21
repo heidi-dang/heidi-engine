@@ -1,0 +1,3 @@
+## 2024-05-24 - Dynamic ARIA Syncing for Custom Progress Bars
+**Learning:** This app uses custom `div`-based progress bars (e.g., `#gpu-bar`) whose visual state is driven by inline CSS width updates via JavaScript, instead of using the native `<progress>` element. Updating the CSS width alone is insufficient for screen readers; the `aria-valuenow` attribute must be manually managed in JavaScript alongside the style updates to ensure accurate progress reporting.
+**Action:** Whenever implementing or modifying custom DOM-based progress elements in this design system, ensure `aria-valuenow`, `aria-valuemin`, and `aria-valuemax` are set and dynamically synchronized with visual state changes via JS.
