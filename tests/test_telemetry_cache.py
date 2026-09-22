@@ -41,6 +41,13 @@ def test_state_cache():
         print("TTL Expiration test passed")
 
 
+def test_sanitize_run_id():
+    assert telemetry.sanitize_run_id("../../../etc/passwd") == "etcpasswd"
+    assert telemetry.sanitize_run_id("run_123-abc_XYZ") == "run_123-abc_XYZ"
+    assert telemetry.sanitize_run_id("../../malicious") == "malicious"
+    assert telemetry.sanitize_run_id("") == ""
+
+
 def test_gpu_cache():
     # Cold call
     start = time.time()
