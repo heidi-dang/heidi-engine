@@ -56,8 +56,8 @@ CONFIG VALIDATION:
 """
 
 import atexit
-import copy
 import base64
+import copy
 import json
 import os
 import re
@@ -70,7 +70,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
@@ -397,6 +397,20 @@ def get_default_usage() -> Dict[str, Any]:
 # =============================================================================
 
 
+def sanitize_run_id(run_id: str) -> str:
+    """
+    Sanitize run_id to prevent path traversal vulnerabilities.
+
+    SECURITY:
+        Strips path traversal sequences ('..', '/', '\\') and retains only alphanumeric,
+        hyphen, and underscore characters. If empty or invalid, falls back to 'default'.
+    """
+    if not run_id:
+        return "default"
+    sanitized = re.sub(r"[^a-zA-Z0-9_\-]", "", str(run_id))
+    return sanitized if sanitized else "default"
+
+
 def get_run_dir(run_id: Optional[str] = None) -> Path:
     """
     Get the run directory path.
@@ -410,7 +424,7 @@ def get_run_dir(run_id: Optional[str] = None) -> Path:
     """
     if run_id is None:
         run_id = get_run_id()
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+    return Path(AUTOTRAIN_DIR) / "runs" / sanitize_run_id(run_id)
 
 
 def get_events_path(run_id: Optional[str] = None) -> Path:
@@ -731,11 +745,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:

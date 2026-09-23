@@ -147,6 +147,25 @@ class TestEventSchema:
         assert required_fields.issubset(ALLOWED_STATUS_FIELDS)
 
 
+class TestSanitizeRunID:
+    """Test run ID sanitization for path traversal prevention."""
+
+    def test_sanitize_run_id_path_traversal(self):
+        from heidi_engine.telemetry import get_run_dir, sanitize_run_id
+
+        path = get_run_dir("../../../etc/passwd")
+        assert ".." not in str(path)
+        assert "etc" in str(path)
+        assert "passwd" in str(path)
+        assert sanitize_run_id("../../../etc/passwd") == "etcpasswd"
+
+    def test_sanitize_run_id_empty(self):
+        from heidi_engine.telemetry import sanitize_run_id
+
+        assert sanitize_run_id("") == "default"
+        assert sanitize_run_id("../..") == "default"
+
+
 class TestHTTPSecurity:
     """Test HTTP server security measures."""
 
