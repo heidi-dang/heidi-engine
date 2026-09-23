@@ -1,0 +1,3 @@
+## 2024-11-20 - Custom DOM-based progress bar and interactive elements accessibility
+**Learning:** For custom DOM-based progress bars (e.g., div-based elements instead of native `<progress>`), `aria-valuenow` must be explicitly managed by JavaScript synchronously alongside CSS width updates to ensure accurate reporting to screen readers. In addition, accessibility standards require explicitly defining `:focus-visible` CSS rules for interactive elements (like links and selects).
+**Action:** Always add ARIA attributes and `:focus-visible` rules for custom components or missing native interaction styles.
