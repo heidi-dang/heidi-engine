@@ -32,6 +32,13 @@ class TestSecretRedaction:
         assert "sk-" not in redacted
         assert "[OPENAI_KEY]" in redacted
 
+    def test_openai_proj_key(self):
+        """Test OpenAI project API key (sk-proj-) redaction with hyphens."""
+        text = "API key: sk-proj-1234567890abcdefghijklmnopqrstuvwxyz1234567890"
+        redacted = redact_secrets(text)
+        assert "sk-proj-" not in redacted
+        assert "[OPENAI_KEY]" in redacted
+
     def test_gitlab_token(self):
         """Test GitLab token (glpat-) redaction."""
         text = "GitLab: glpat-1234567890abcdefghijklmn"
