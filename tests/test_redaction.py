@@ -163,3 +163,36 @@ class TestHTTPSecurity:
                 main()
         finally:
             sys.argv = original_argv
+
+
+class TestPathTraversalProtection:
+    """Test path traversal prevention in run_id sanitization."""
+
+    def test_sanitize_run_id_path_traversal(self):
+        """Test that path traversal sequences are removed from run_id."""
+        from heidi_engine.telemetry import sanitize_run_id, get_run_dir
+
+        dangerous_id = "../../etc/passwd"
+        clean = sanitize_run_id(dangerous_id)
+        assert ".." not in clean
+        assert "/" not in clean
+        assert clean == "passwd"
+
+        run_dir = get_run_dir(dangerous_id)
+        assert ".." not in str(run_dir)
+        assert str(run_dir).endswith("runs/passwd")
+
+    def test_sanitize_run_id_dashboard(self):
+        """Test dashboard sanitize_run_id implementation."""
+        pytest.importorskip("rich")
+        from heidi_engine.dashboard import sanitize_run_id as dash_sanitize, get_run_dir as dash_get_run_dir
+
+        dangerous_id = "../../../tmp/hacked"
+        clean = dash_sanitize(dangerous_id)
+        assert ".." not in clean
+        assert "/" not in clean
+        assert clean == "hacked"
+
+        run_dir = dash_get_run_dir(dangerous_id)
+        assert ".." not in str(run_dir)
+        assert str(run_dir).endswith("runs/hacked")
