@@ -1,0 +1,3 @@
+## 2026-09-27 - Added Focus-Visible and Progressbar Accessibility to GPU Status
+**Learning:** For custom DOM-based progress bars, `role="progressbar"` must be paired with JavaScript that explicitly updates `aria-valuenow` synchronously with visual style changes to accurately report state to screen readers. Also, explicit `:focus-visible` styles are essential for non-button interactive elements like links and selects.
+**Action:** Always ensure any dynamic visual indicators of state (like widths/percentages) have corresponding JavaScript logic to update semantic ARIA attributes, and verify keyboard focus indicators for all interactive elements.
