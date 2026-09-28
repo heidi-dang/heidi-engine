@@ -56,8 +56,8 @@ CONFIG VALIDATION:
 """
 
 import atexit
-import copy
 import base64
+import copy
 import json
 import os
 import re
@@ -70,7 +70,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 # =============================================================================
 # CONFIGURATION - Adjust these for your needs
@@ -463,37 +463,50 @@ DEFAULT_PRICING = {
     "claude-3-haiku": {"input": 0.25, "output": 1.25},
 }
 
+# BOLT OPTIMIZATION: Module-level TTL cache for pricing config
+_pricing_cache: Dict[str, Dict[str, float]] = {}
+_pricing_check_ts: float = 0.0
+_pricing_lock = threading.Lock()
+
 
 def load_pricing_config() -> Dict[str, Dict[str, float]]:
     """
     Load pricing configuration from file or use defaults.
 
+    BOLT OPTIMIZATION:
+        Thread-safe caching with 5.0s TTL to avoid redundant disk I/O
+        and JSON parsing on high-frequency usage tracking calls.
+
     HOW IT WORKS:
-        - First checks for pricing.json in run directory
+        - Checks thread-safe TTL cache first
+        - Checks for pricing.json in run directory on miss
         - Falls back to DEFAULT_PRICING
         - Allows user to customize pricing per model
-
-    TUNABLE:
-        - Create pricing.json to override default prices
-        - Format: {"model_name": {"input": 0.5, "output": 1.5}}
-        - Prices are per 1M tokens
     """
-    pricing = DEFAULT_PRICING.copy()
+    global _pricing_cache, _pricing_check_ts
+    with _pricing_lock:
+        now = time.monotonic()
+        if _pricing_cache and (now - _pricing_check_ts) < 5.0:
+            return _pricing_cache.copy()
 
-    # Check for pricing config file
-    pricing_file = (
-        Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
-    )
+        pricing = DEFAULT_PRICING.copy()
 
-    if pricing_file.exists():
-        try:
-            with open(pricing_file) as f:
-                custom = json.load(f)
-                pricing.update(custom)
-        except Exception as e:
-            print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+        # Check for pricing config file
+        pricing_file = (
+            Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
+        )
 
-    return pricing
+        if pricing_file.exists():
+            try:
+                with open(pricing_file) as f:
+                    custom = json.load(f)
+                    pricing.update(custom)
+            except Exception as e:
+                print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+
+        _pricing_cache = pricing.copy()
+        _pricing_check_ts = now
+        return pricing.copy()
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -717,7 +730,9 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
     """
     resolved_run_id = run_id or get_run_id()
 
-    # BOLT OPTIMIZATION: Check cache first
+    # BOLT OPTIMIZATION: Check thread-safe state cache first to avoid disk I/O.
+    # Note: A single check at the start is sufficient; on a cache miss, state is
+    # loaded from state_file and stored in _state_cache before returning.
     cached = _state_cache.get(resolved_run_id)
     if cached is not None:
         return cached
@@ -731,11 +746,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
