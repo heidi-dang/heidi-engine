@@ -132,9 +132,24 @@ data_cache: deque = deque(maxlen=data_tail_lines)
 # =============================================================================
 
 
+def sanitize_run_id(run_id: str) -> str:
+    """
+    Sanitize run_id to prevent path traversal attacks.
+
+    SECURITY:
+        Strips directory traversal sequences (..) and non-alphanumeric/hyphen/underscore
+        characters to ensure paths stay within AUTOTRAIN_DIR/runs.
+    """
+    import re
+    if not isinstance(run_id, str):
+        run_id = str(run_id)
+    cleaned = re.sub(r"[^\w\-]", "", run_id)
+    return cleaned if cleaned else "default_run"
+
+
 def get_run_dir(run_id: str) -> Path:
     """Get the run directory path."""
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+    return Path(AUTOTRAIN_DIR) / "runs" / sanitize_run_id(run_id)
 
 
 def get_events_path(run_id: str) -> Path:
