@@ -56,6 +56,32 @@ def test_gpu_cache():
     assert t2 < t1 or t1 < 1.0  # t1 might be fast if nvidia-smi fails fast
 
 
+def test_get_run_dir_path_traversal():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        telemetry.AUTOTRAIN_DIR = tmp_dir
+
+        # Test path traversal payloads
+        payloads = [
+            "../../etc/passwd",
+            "../../../var/log/syslog",
+            "run_123/../secret",
+            "..\\..\\windows\\system32",
+            "../../",
+            "../../../",
+        ]
+
+        runs_dir = telemetry.Path(tmp_dir) / "runs"
+
+        for payload in payloads:
+            run_dir = telemetry.get_run_dir(payload)
+            # Ensure the resolved path stays within runs_dir
+            assert str(run_dir).startswith(str(runs_dir))
+            # Ensure no '..' remains in the path name component
+            assert ".." not in run_dir.name
+            assert "/" not in run_dir.name
+            assert "\\" not in run_dir.name
+
+
 if __name__ == "__main__":
     test_state_cache()
     test_gpu_cache()

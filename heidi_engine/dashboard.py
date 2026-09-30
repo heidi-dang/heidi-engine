@@ -50,6 +50,7 @@ REQUIREMENTS:
 import argparse
 import json
 import os
+import re
 import signal
 import sys
 import threading
@@ -132,9 +133,25 @@ data_cache: deque = deque(maxlen=data_tail_lines)
 # =============================================================================
 
 
+def sanitize_run_id(run_id: str) -> str:
+    """
+    Sanitize run_id to prevent path traversal attacks.
+
+    SECURITY:
+        - Removes path traversal sequences (.. , /, \\)
+        - Restricts characters to alphanumeric, hyphens, and underscores
+        - Falls back to 'default' if result is empty
+    """
+    if not isinstance(run_id, str):
+        run_id = str(run_id)
+    cleaned = re.sub(r"[^a-zA-Z0-9_\-]", "", run_id)
+    return cleaned if cleaned else "default"
+
+
 def get_run_dir(run_id: str) -> Path:
-    """Get the run directory path."""
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+    """Get the run directory path securely."""
+    sanitized_id = sanitize_run_id(run_id)
+    return Path(AUTOTRAIN_DIR) / "runs" / sanitized_id
 
 
 def get_events_path(run_id: str) -> Path:
