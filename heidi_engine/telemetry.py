@@ -397,6 +397,22 @@ def get_default_usage() -> Dict[str, Any]:
 # =============================================================================
 
 
+def sanitize_run_id(run_id: str) -> str:
+    """
+    Sanitize run_id to prevent path traversal attacks.
+
+    SECURITY:
+        - Removes path traversal sequences (.. , /, \\)
+        - Restricts characters to alphanumeric, hyphens, and underscores
+        - Falls back to 'default' if result is empty
+    """
+    if not isinstance(run_id, str):
+        run_id = str(run_id)
+    # Remove path traversal sequences and non-alphanumeric/hyphen/underscore chars
+    cleaned = re.sub(r"[^a-zA-Z0-9_\-]", "", run_id)
+    return cleaned if cleaned else "default"
+
+
 def get_run_dir(run_id: Optional[str] = None) -> Path:
     """
     Get the run directory path.
@@ -405,12 +421,16 @@ def get_run_dir(run_id: Optional[str] = None) -> Path:
         Creates runs/<run_id>/ directory structure.
         All run-specific files go here.
 
+    SECURITY:
+        - Sanitizes run_id to prevent path traversal outside runs directory
+
     TUNABLE:
         - Modify directory structure by changing path construction
     """
     if run_id is None:
         run_id = get_run_id()
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+    sanitized_id = sanitize_run_id(run_id)
+    return Path(AUTOTRAIN_DIR) / "runs" / sanitized_id
 
 
 def get_events_path(run_id: Optional[str] = None) -> Path:
@@ -731,11 +751,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
