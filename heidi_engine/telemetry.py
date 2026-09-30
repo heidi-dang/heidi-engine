@@ -463,21 +463,38 @@ DEFAULT_PRICING = {
     "claude-3-haiku": {"input": 0.25, "output": 1.25},
 }
 
+# BOLT OPTIMIZATION: In-memory TTL cache for pricing configuration
+_pricing_cache: Optional[Dict[str, Dict[str, float]]] = None
+_pricing_last_check = 0.0
+_pricing_lock = threading.Lock()
+
 
 def load_pricing_config() -> Dict[str, Dict[str, float]]:
     """
     Load pricing configuration from file or use defaults.
 
     HOW IT WORKS:
-        - First checks for pricing.json in run directory
+        - Checks thread-safe in-memory cache (5.0s TTL)
+        - Checks for pricing.json in run directory on cache miss
         - Falls back to DEFAULT_PRICING
         - Allows user to customize pricing per model
+
+    BOLT OPTIMIZATION:
+        Uses _pricing_cache to avoid redundant disk existence checks
+        and JSON reads during high-frequency usage tracking calls.
 
     TUNABLE:
         - Create pricing.json to override default prices
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
+    global _pricing_cache, _pricing_last_check
+
+    now = time.monotonic()
+    with _pricing_lock:
+        if _pricing_cache is not None and (now - _pricing_last_check) < 5.0:
+            return copy.deepcopy(_pricing_cache)
+
     pricing = DEFAULT_PRICING.copy()
 
     # Check for pricing config file
@@ -493,7 +510,11 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         except Exception as e:
             print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
 
-    return pricing
+    with _pricing_lock:
+        _pricing_cache = pricing
+        _pricing_last_check = now
+
+    return copy.deepcopy(pricing)
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -731,11 +752,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
