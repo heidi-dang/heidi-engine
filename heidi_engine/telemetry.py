@@ -397,12 +397,26 @@ def get_default_usage() -> Dict[str, Any]:
 # =============================================================================
 
 
+def sanitize_run_id(run_id: Optional[str]) -> str:
+    """
+    Sanitize run_id to prevent path traversal attacks.
+
+    Strips directory traversal components (.., /, \\) and keeps only
+    alphanumeric characters, hyphens, and underscores.
+    """
+    if not run_id:
+        return ""
+    # Strip path separators and parent directory components
+    cleaned = re.sub(r"[^a-zA-Z0-9_\-]", "", str(run_id))
+    return cleaned
+
+
 def get_run_dir(run_id: Optional[str] = None) -> Path:
     """
     Get the run directory path.
 
     HOW IT WORKS:
-        Creates runs/<run_id>/ directory structure.
+        Creates runs/<run_id>/ directory structure safely.
         All run-specific files go here.
 
     TUNABLE:
@@ -410,6 +424,10 @@ def get_run_dir(run_id: Optional[str] = None) -> Path:
     """
     if run_id is None:
         run_id = get_run_id()
+    else:
+        run_id = sanitize_run_id(run_id)
+        if not run_id:
+            run_id = get_run_id()
     return Path(AUTOTRAIN_DIR) / "runs" / run_id
 
 
@@ -433,13 +451,13 @@ def get_run_id() -> str:
     Get or generate run ID.
 
     HOW IT WORKS:
-        - Uses RUN_ID env var if set
+        - Uses RUN_ID env var if set (sanitized against path traversal)
         - Otherwise generates a new UUID
         - Stores in global for subsequent calls
     """
     global RUN_ID
     if not RUN_ID:
-        RUN_ID = os.environ.get("RUN_ID", "")
+        RUN_ID = sanitize_run_id(os.environ.get("RUN_ID", ""))
     if not RUN_ID:
         RUN_ID = str(uuid.uuid4())[:8]
         RUN_ID = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{RUN_ID}"
@@ -731,11 +749,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
