@@ -463,12 +463,20 @@ DEFAULT_PRICING = {
     "claude-3-haiku": {"input": 0.25, "output": 1.25},
 }
 
+# BOLT OPTIMIZATION: Thread-safe in-memory cache for pricing config with mtime validation
+_pricing_cache: Dict[str, Any] = {}
+_pricing_cache_ts = 0.0
+_pricing_cache_key: Optional[Tuple[str, str]] = None
+_pricing_cache_mtime: Optional[float] = None
+_pricing_lock = threading.Lock()
+
 
 def load_pricing_config() -> Dict[str, Dict[str, float]]:
     """
     Load pricing configuration from file or use defaults.
 
     HOW IT WORKS:
+        - Uses thread-safe in-memory cache with mtime validation to avoid redundant disk I/O
         - First checks for pricing.json in run directory
         - Falls back to DEFAULT_PRICING
         - Allows user to customize pricing per model
@@ -478,22 +486,42 @@ def load_pricing_config() -> Dict[str, Dict[str, float]]:
         - Format: {"model_name": {"input": 0.5, "output": 1.5}}
         - Prices are per 1M tokens
     """
-    pricing = DEFAULT_PRICING.copy()
+    global _pricing_cache, _pricing_cache_ts, _pricing_cache_key, _pricing_cache_mtime
 
-    # Check for pricing config file
     pricing_file = (
         Path(PRICING_CONFIG_PATH) if PRICING_CONFIG_PATH else get_run_dir() / "pricing.json"
     )
+    file_key = (PRICING_CONFIG_PATH, str(pricing_file))
+    try:
+        mtime = pricing_file.stat().st_mtime if pricing_file.exists() else None
+    except Exception:
+        mtime = None
 
-    if pricing_file.exists():
-        try:
-            with open(pricing_file) as f:
-                custom = json.load(f)
-                pricing.update(custom)
-        except Exception as e:
-            print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+    with _pricing_lock:
+        now = time.monotonic()
+        if (
+            _pricing_cache
+            and (now - _pricing_cache_ts) < 5.0
+            and _pricing_cache_key == file_key
+            and _pricing_cache_mtime == mtime
+        ):
+            return {k: v.copy() for k, v in _pricing_cache.items()}
 
-    return pricing
+        pricing = DEFAULT_PRICING.copy()
+
+        if pricing_file.exists():
+            try:
+                with open(pricing_file) as f:
+                    custom = json.load(f)
+                    pricing.update(custom)
+            except Exception as e:
+                print(f"[WARN] Failed to load pricing config: {e}", file=sys.stderr)
+
+        _pricing_cache = pricing
+        _pricing_cache_ts = now
+        _pricing_cache_key = file_key
+        _pricing_cache_mtime = mtime
+        return {k: v.copy() for k, v in _pricing_cache.items()}
 
 
 def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
@@ -731,11 +759,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
