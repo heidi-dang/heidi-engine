@@ -56,7 +56,31 @@ def test_gpu_cache():
     assert t2 < t1 or t1 < 1.0  # t1 might be fast if nvidia-smi fails fast
 
 
+def test_sanitize_run_id_path_traversal():
+    from heidi_engine import dashboard, telemetry
+
+    dirty_ids = [
+        "../../etc/passwd",
+        "run_123/../../secret",
+        "run\\..\\..\\windows",
+        "../../../var/log/syslog",
+        "run-id_2025!@#$%^&*",
+    ]
+
+    for dirty in dirty_ids:
+        sanitized_t = telemetry.sanitize_run_id(dirty)
+        sanitized_d = dashboard.sanitize_run_id(dirty)
+
+        assert "/" not in sanitized_t and "\\" not in sanitized_t and ".." not in sanitized_t
+        assert "/" not in sanitized_d and "\\" not in sanitized_d and ".." not in sanitized_d
+        assert sanitized_t == sanitized_d
+
+    run_dir = telemetry.get_run_dir("../../etc/passwd")
+    assert str(run_dir).endswith("/runs/etcpasswd") or "runs" in run_dir.parts
+
+
 if __name__ == "__main__":
     test_state_cache()
     test_gpu_cache()
+    test_sanitize_run_id_path_traversal()
     print("All verification tests passed!")
