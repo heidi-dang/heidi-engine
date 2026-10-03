@@ -163,3 +163,43 @@ class TestHTTPSecurity:
                 main()
         finally:
             sys.argv = original_argv
+
+    def test_http_security_headers(self):
+        """Test that security headers are sent on all HTTP server responses."""
+        import socket
+        import time
+        import urllib.request
+        from urllib.error import HTTPError
+        from heidi_engine.telemetry import start_http_server, init_telemetry
+
+        # Find an open port
+        sock = socket.socket()
+        sock.bind(('127.0.0.1', 0))
+        port = sock.getsockname()[1]
+        sock.close()
+
+        init_telemetry("test_sec_headers")
+        start_http_server(port)
+        time.sleep(0.1)
+
+        url_health = f"http://127.0.0.1:{port}/health"
+        req = urllib.request.Request(url_health)
+        with urllib.request.urlopen(req) as resp:
+            headers = dict(resp.headers)
+            assert headers.get("X-Content-Type-Options") == "nosniff"
+            assert headers.get("X-Frame-Options") == "DENY"
+            assert headers.get("Content-Security-Policy") == "default-src 'none'"
+            assert headers.get("Cache-Control") == "no-store, max-age=0"
+
+        # Check 401 unauthenticated request headers
+        url_status = f"http://127.0.0.1:{port}/status"
+        req_unauth = urllib.request.Request(url_status)
+        try:
+            urllib.request.urlopen(req_unauth)
+            pytest.fail("Expected HTTP 401 Unauthorized")
+        except HTTPError as e:
+            headers = dict(e.headers)
+            assert headers.get("X-Content-Type-Options") == "nosniff"
+            assert headers.get("X-Frame-Options") == "DENY"
+            assert headers.get("Content-Security-Policy") == "default-src 'none'"
+            assert headers.get("Cache-Control") == "no-store, max-age=0"
