@@ -1,0 +1,3 @@
+## 2024-10-04 - Custom DOM Progress Bar Accessibility
+**Learning:** For custom DOM-based progress bars (e.g., div-based elements instead of native `<progress>`), `aria-valuenow` must be explicitly managed by JavaScript synchronously alongside CSS width updates to ensure accurate reporting to screen readers.
+**Action:** Always ensure ARIA attributes are kept in sync with visual states dynamically when not using native HTML elements.
