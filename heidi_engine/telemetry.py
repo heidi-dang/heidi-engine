@@ -397,6 +397,17 @@ def get_default_usage() -> Dict[str, Any]:
 # =============================================================================
 
 
+def sanitize_run_id(run_id: Optional[str]) -> str:
+    """
+    Sanitize run_id to prevent path traversal vulnerabilities.
+    Strips path traversal sequences and non-alphanumeric/hyphen/underscore characters.
+    """
+    if not run_id:
+        return "default_run"
+    sanitized = re.sub(r"[^\w\-]", "_", str(run_id))
+    return sanitized or "default_run"
+
+
 def get_run_dir(run_id: Optional[str] = None) -> Path:
     """
     Get the run directory path.
@@ -410,7 +421,7 @@ def get_run_dir(run_id: Optional[str] = None) -> Path:
     """
     if run_id is None:
         run_id = get_run_id()
-    return Path(AUTOTRAIN_DIR) / "runs" / run_id
+    return Path(AUTOTRAIN_DIR) / "runs" / sanitize_run_id(run_id)
 
 
 def get_events_path(run_id: Optional[str] = None) -> Path:
@@ -731,11 +742,6 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
             "counters": get_default_counters(),
             "usage": get_default_usage(),
         }
-
-    # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
-    if cached:
-        return cached
 
     try:
         with open(state_file) as f:
