@@ -56,7 +56,30 @@ def test_gpu_cache():
     assert t2 < t1 or t1 < 1.0  # t1 might be fast if nvidia-smi fails fast
 
 
+def test_telemetry_http_headers():
+    import urllib.request
+    import socket
+
+    # Find a free port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('127.0.0.1', 0))
+        port = s.getsockname()[1]
+
+    telemetry.start_http_server(port)
+    time.sleep(0.1)
+
+    url = f"http://127.0.0.1:{port}/health"
+    req = urllib.request.Request(url)
+    with urllib.request.urlopen(req) as resp:
+        headers = dict(resp.getheaders())
+        assert headers.get("X-Content-Type-Options") == "nosniff"
+        assert headers.get("X-Frame-Options") == "DENY"
+        assert headers.get("Content-Security-Policy") == "default-src 'none'"
+        assert headers.get("Cache-Control") == "no-store, max-age=0"
+
+
 if __name__ == "__main__":
     test_state_cache()
     test_gpu_cache()
+    test_telemetry_http_headers()
     print("All verification tests passed!")
