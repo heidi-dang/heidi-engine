@@ -70,6 +70,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+import urllib.parse
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 # =============================================================================
@@ -733,7 +734,7 @@ def get_state(run_id: Optional[str] = None) -> Dict[str, Any]:
         }
 
     # BOLT OPTIMIZATION: Check thread-safe state cache
-    cached = _state_cache.get(target_run_id, state_file)
+    cached = _state_cache.get(resolved_run_id)
     if cached:
         return cached
 
@@ -1517,7 +1518,7 @@ def start_http_server(port: int = 7779) -> None:
         def check_auth(self) -> bool:
             """Check Basic Authentication."""
             # Exempt /health from authentication for infrastructure compatibility
-            if self.path == "/health":
+            if urllib.parse.urlparse(self.path).path == "/health":
                 return True
 
             auth_header = self.headers.get("Authorization")
@@ -1542,26 +1543,37 @@ def start_http_server(port: int = 7779) -> None:
             self.send_auth_request()
             return False
 
+        def send_security_headers(self):
+            """Send defensive security headers on all HTTP responses."""
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Content-Security-Policy", "default-src 'none'")
+            self.send_header("Cache-Control", "no-store, max-age=0")
+
         def send_auth_request(self):
             """Send 401 Unauthorized response."""
             self.send_response(401)
             self.send_header("WWW-Authenticate", 'Basic realm="Heidi Engine Telemetry"')
             self.send_header("Content-Type", "text/plain")
+            self.send_security_headers()
             self.end_headers()
             self.wfile.write(b"Authentication required")
 
         def do_GET(self):
+            req_path = urllib.parse.urlparse(self.path).path
+
             if not self.check_auth():
                 return
 
-            if self.path == "/health":
+            if req_path == "/health":
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
+                self.send_security_headers()
                 self.end_headers()
                 self.wfile.write(json.dumps({"health": "ok"}).encode())
                 return
 
-            if self.path == "/status" or self.path == "/":
+            if req_path in ("/status", "/"):
                 state = get_state()
 
                 # Add GPU summary (no secrets)
@@ -1578,12 +1590,14 @@ def start_http_server(port: int = 7779) -> None:
 
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
+                self.send_security_headers()
                 self.end_headers()
                 self.wfile.write(json.dumps(redacted).encode())
                 return
 
             # Unknown endpoint
             self.send_response(404)
+            self.send_security_headers()
             self.end_headers()
 
         def log_message(self, format, *args):
